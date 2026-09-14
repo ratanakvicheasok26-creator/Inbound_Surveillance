@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 
-from telegram_out import TelegramOut
+from telegram_out import TelegramOut, normalize_chat_id
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -53,9 +53,49 @@ class TelegramLinkService:
 
     def set_active_chat(self, chat_id: str, display_name: str = "") -> None:
         with self._lock:
-            self._active_chat_id = str(chat_id or "").strip()
+            self._active_chat_id = normalize_chat_id(chat_id)
             if display_name:
                 self._active_display_name = str(display_name or "").strip()
+
+    def _forget_locked(self, *, keep_chat_id: str = "", user_id: str = "") -> list[LinkedChat]:
+        """Drop remembered chats that are no longer the active destination.
+
+        Caller must hold ``self._lock``.
+        """
+        keep = normalize_chat_id(keep_chat_id)
+        uid = str(user_id or "").strip()
+        stale: list[LinkedChat] = []
+        for chat_key, item in list(self._known_chats.items()):
+            if keep and item.chat_id == keep:
+                continue
+            if uid and item.user_id != uid:
+                continue
+            stale.append(self._known_chats.pop(chat_key))
+        if self._last_link is not None:
+            item = self._last_link
+            drop = False
+            if keep and item.chat_id == keep:
+                drop = False
+            elif uid:
+                drop = item.user_id == uid and item.chat_id != keep
+            elif keep:
+                drop = item.chat_id != keep
+            if drop:
+                stale.append(item)
+                self._last_link = None
+        return stale
+
+    def _notify_unlinked(self, stale: list[LinkedChat]) -> None:
+        seen: set[str] = set()
+        for item in stale:
+            if not item.chat_id or item.chat_id in seen:
+                continue
+            seen.add(item.chat_id)
+            self._reply(
+                item.chat_id,
+                "This Telegram was unlinked from Inbound Surveillance. "
+                "Alerts now go only to the newly connected account.",
+            )
 
     def configure(self, token: str) -> None:
         token = (token or "").strip()
@@ -276,7 +316,7 @@ class TelegramLinkService:
             return False
         chat = message.get("chat") or {}
         from_user = message.get("from") or {}
-        chat_id = str(chat.get("id") or "").strip()
+        chat_id = normalize_chat_id(chat.get("id"))
         if not chat_id:
             return False
         parts = text.split(maxsplit=1)
@@ -344,14 +384,17 @@ class TelegramLinkService:
             code=pending.code,
         )
         with self._lock:
+            stale = self._forget_locked(keep_chat_id=chat_id, user_id=pending.user_id)
             self._last_link = link
             self._known_chats[chat_id] = link
             self._active_chat_id = chat_id
             self._active_display_name = pending.display_name
+        self._notify_unlinked(stale)
         name = pending.display_name
         self._reply(
             chat_id,
-            f"Linked to {name}. Garage alerts and daily scorecards will arrive here.",
+            f"Linked to {name}. Garage alerts and daily scorecards will arrive here. "
+            "If you connect a different Telegram later, this chat will stop receiving alerts.",
         )
         return True
 

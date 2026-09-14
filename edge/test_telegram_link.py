@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from telegram_link import TelegramLinkService
+from telegram_out import TelegramOut, normalize_chat_id
 
 
 class TelegramLinkTests(unittest.TestCase):
@@ -102,7 +103,8 @@ class TelegramLinkTests(unittest.TestCase):
             self.assertTrue(handled1)
             mock_reply.assert_called_with(
                 "123456",
-                "Linked to HourMeng. Garage alerts and daily scorecards will arrive here.",
+                "Linked to HourMeng. Garage alerts and daily scorecards will arrive here. "
+                "If you connect a different Telegram later, this chat will stop receiving alerts.",
             )
 
         # Second /start from the same chat should recognize that it is already linked
@@ -141,6 +143,76 @@ class TelegramLinkTests(unittest.TestCase):
                 "777888",
                 "This chat is already linked to AutoFix Garage. Garage alerts and daily scorecards will arrive here.",
             )
+
+
+    def test_relink_forgets_previous_chat(self) -> None:
+        first = self.svc.begin_link("user-1", "Alex")
+        with patch.object(self.svc, "_reply") as mock_reply:
+            self.svc._handle_update(
+                {
+                    "update_id": 1,
+                    "message": {
+                        "text": f"/start {first['code']}",
+                        "chat": {"id": 111},
+                        "from": {"id": 11, "username": "first_tg"},
+                    },
+                }
+            )
+        first_link = self.svc.consume_link_for_user("user-1")
+        self.assertEqual(first_link["chat_id"], "111")
+        self.svc.set_active_chat("111", "Alex")
+
+        second = self.svc.begin_link("user-1", "Alex")
+        with patch.object(self.svc, "_reply") as mock_reply:
+            self.svc._handle_update(
+                {
+                    "update_id": 2,
+                    "message": {
+                        "text": f"/start {second['code']}",
+                        "chat": {"id": 222},
+                        "from": {"id": 22, "username": "second_tg"},
+                    },
+                }
+            )
+            texts = [call.args[1] for call in mock_reply.call_args_list]
+            self.assertTrue(any("unlinked" in text.lower() for text in texts))
+            self.assertTrue(any(call.args[0] == "111" for call in mock_reply.call_args_list))
+
+        latest = self.svc.consume_link_for_user("user-1")
+        self.assertEqual(latest["chat_id"], "222")
+        self.assertNotIn("111", self.svc._known_chats)
+        self.assertIn("222", self.svc._known_chats)
+        self.assertEqual(self.svc._active_chat_id, "222")
+
+        with patch.object(self.svc, "_reply") as mock_reply:
+            handled = self.svc._handle_update(
+                {
+                    "update_id": 3,
+                    "message": {
+                        "text": "/start",
+                        "chat": {"id": 111},
+                        "from": {"id": 11},
+                    },
+                }
+            )
+            self.assertFalse(handled)
+            mock_reply.assert_called_with(
+                "111",
+                "Open Integrations in Inbound Surveillance and tap Connect Telegram, "
+                "then press Start here so we can link this chat to your account.",
+            )
+
+
+class TelegramOutNormalizeTests(unittest.TestCase):
+    def test_normalize_keeps_latest_chat_id(self) -> None:
+        self.assertEqual(normalize_chat_id("222"), "222")
+        self.assertEqual(normalize_chat_id("111,222"), "222")
+        self.assertEqual(normalize_chat_id(["111", "222"]), "222")
+        self.assertEqual(normalize_chat_id('["111","222"]'), "222")
+        bot = TelegramOut("token", ["111", "222"])
+        self.assertEqual(bot.chat_id, "222")
+        bot.set_chat("111,333")
+        self.assertEqual(bot.chat_id, "333")
 
 
 if __name__ == "__main__":

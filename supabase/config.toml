@@ -244,7 +244,7 @@ otp_expiry = 172800
 # sender_name = "Inbound Surveillance"
 
 [auth.email.template.confirmation]
-subject = "Welcome to Inbound Surveillance — confirm your account"
+subject = "{{ .Token }} is your Inbound Surveillance confirmation code"
 content_path = "./supabase/templates/confirmation.html"
 
 [auth.email.template.recovery]

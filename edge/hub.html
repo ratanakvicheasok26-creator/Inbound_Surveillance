@@ -393,6 +393,23 @@
     .checkbox-row:hover .checkbox-text {
       color: #FAFAFA;
     }
+    .auth-forgot {
+      background: none;
+      border: none;
+      color: #A5A5A5;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 0;
+      white-space: nowrap;
+    }
+    .auth-forgot:hover { color: #00FF66; }
+    .otp-input {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      letter-spacing: 0.28em;
+      font-size: 1.05rem;
+    }
+    #auth-message:empty { display: none; }
     @media (prefers-reduced-motion: reduce) {
       .animate-pulse { animation: none; }
     }
@@ -414,7 +431,7 @@
         </div>
       </div>
       <h1 id="auth-title" class="font-headline-md text-headline-md">Sign in</h1>
-      <p class="text-on-surface-variant text-sm">Create an account or sign in. Profile, crew, ROI, camera protocol, and stream URLs stay private to this login.</p>
+      <p id="auth-copy" class="text-on-surface-variant text-sm">Profile, crew, ROI, camera protocol, and stream URLs stay private to this login.</p>
       <p id="auth-message" class="text-sm"></p>
       <div id="auth-signup-fields" class="hidden grid gap-3">
         <label>
@@ -426,15 +443,23 @@
           <input id="auth-venue" placeholder="Shop or site name" autocomplete="organization" />
         </label>
       </div>
-      <label>
+      <label id="auth-email-field">
         <span>Email</span>
         <input id="auth-email" type="email" required placeholder="you@garage.com" autocomplete="email" />
       </label>
-      <label>
-        <span>Password</span>
+      <label id="auth-code-field" class="hidden">
+        <span id="auth-code-label">Reset code</span>
+        <input id="auth-code" class="otp-input" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" maxlength="6" oninput="this.value=this.value.replace(/[^\d]/g,'').slice(0,6)" />
+      </label>
+      <label id="auth-password-field">
+        <span id="auth-password-label">Password</span>
         <input id="auth-password" type="password" required placeholder="Password" autocomplete="current-password" />
       </label>
-      <div class="flex items-center justify-between py-1">
+      <label id="auth-confirm-field" class="hidden">
+        <span>Confirm password</span>
+        <input id="auth-confirm" type="password" placeholder="Repeat new password" autocomplete="new-password" />
+      </label>
+      <div id="auth-remember-row" class="flex items-center justify-between py-1">
         <label class="checkbox-row group">
           <input
             type="checkbox"
@@ -444,8 +469,10 @@
           />
           <span class="checkbox-text">Keep me signed in</span>
         </label>
+        <button id="auth-forgot" type="button" class="auth-forgot" onclick="setHubAuthMode('forgot')">Forgot password?</button>
       </div>
       <button id="auth-submit" type="submit" class="w-full bg-primary-container text-on-primary py-2.5 rounded-lg font-medium hover:bg-primary transition-colors">Sign in</button>
+      <button id="auth-resend" type="button" class="hidden w-full border border-outline-variant py-2.5 rounded-lg text-sm hover:border-primary hover:text-primary" onclick="resendHubAuthCode()">Send a new code</button>
       <button id="auth-toggle" type="button" class="w-full border border-outline-variant py-2.5 rounded-lg text-sm hover:border-primary hover:text-primary" onclick="toggleHubAuthMode()">Create account</button>
     </form>
   </div>
@@ -874,7 +901,7 @@
             <div class="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <h3 class="text-sm font-semibold text-on-surface">Connect with /start</h3>
-                <p class="text-xs text-on-surface-variant mt-1">Tap Connect Telegram. The Inbound Surveillance bot opens automatically — tap Start, and this account’s chat id is saved.</p>
+                <p class="text-xs text-on-surface-variant mt-1">Tap Connect Telegram, then Start. This account keeps only the latest Telegram — connecting a different account replaces the previous one, and alerts go only there.</p>
               </div>
               <span id="tg-link-badge" class="text-xs px-2 py-1 rounded-full border border-outline-variant text-on-surface-variant">Not linked</span>
             </div>
@@ -1119,6 +1146,7 @@
     let supabaseClient = null;
     let hubStarted = false;
     let enteringHub = false;
+    let hubPasswordRecovery = false;
     let hubAccountUser = null;
     let hubAccountProfile = null;
     let telegramLinkPollTimer = null;
@@ -1136,16 +1164,107 @@
       el.className = 'text-sm ' + (isError ? 'text-error' : 'text-primary');
     }
 
+    function setHidden(id, hidden) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', hidden);
+    }
+
+    function setHubAuthMode(mode, notice) {
+      const form = document.getElementById('auth-form');
+      if (!form) return;
+      form.dataset.mode = mode;
+      const signup = mode === 'signup';
+      const code = mode === 'code';
+      const confirm = mode === 'confirm';
+      const setPassword = mode === 'set-password';
+      const signin = mode === 'signin';
+      const needPassword = signin || signup || code || setPassword;
+      const copy = {
+        signin: 'Profile, crew, ROI, camera protocol, and stream URLs stay private to this login.',
+        signup: 'Profile, crew, ROI, camera protocol, and stream URLs stay private to this login.',
+        forgot: 'We email a 6-digit code instead of a magic link. Codes survive email scanners; one-click links often do not.',
+        code: 'Enter the 6-digit code from your email, then choose a new password.',
+        confirm: 'Enter the 6-digit code from your email to confirm this account. Type the code yourself — inbox scanners often burn one-click links.',
+        'set-password': 'Choose a new password for this operator account. Use at least 8 characters.',
+      };
+      const titles = {
+        signin: 'Sign in',
+        signup: 'Create account',
+        forgot: 'Reset password',
+        code: 'Reset password',
+        confirm: 'Confirm your email',
+        'set-password': 'Set a new password',
+      };
+      const submits = {
+        signin: 'Sign in',
+        signup: 'Create account',
+        forgot: 'Email reset code',
+        code: 'Set new password',
+        confirm: 'Confirm account',
+        'set-password': 'Save password',
+      };
+      document.getElementById('auth-title').textContent = titles[mode] || 'Sign in';
+      document.getElementById('auth-copy').textContent = copy[mode] || copy.signin;
+      document.getElementById('auth-submit').textContent = submits[mode] || 'Sign in';
+      document.getElementById('auth-password-label').textContent = signin ? 'Password' : 'New password';
+      const codeLabel = document.getElementById('auth-code-label');
+      if (codeLabel) codeLabel.textContent = confirm ? 'Confirmation code' : 'Reset code';
+      const passwordInput = document.getElementById('auth-password');
+      const emailInput = document.getElementById('auth-email');
+      const codeInput = document.getElementById('auth-code');
+      const confirmInput = document.getElementById('auth-confirm');
+      passwordInput.placeholder = signin ? 'Password' : 'At least 8 characters';
+      passwordInput.autocomplete = signin ? 'current-password' : 'new-password';
+      passwordInput.required = needPassword;
+      emailInput.required = !setPassword;
+      emailInput.readOnly = code || confirm;
+      codeInput.required = code || confirm;
+      confirmInput.required = code || setPassword;
+      setHidden('auth-signup-fields', !signup);
+      setHidden('auth-email-field', setPassword);
+      setHidden('auth-code-field', !(code || confirm));
+      setHidden('auth-password-field', !needPassword);
+      setHidden('auth-confirm-field', !(code || setPassword));
+      setHidden('auth-remember-row', !signin);
+      setHidden('auth-resend', !(code || confirm));
+      setHidden('auth-toggle', setPassword);
+      const toggle = document.getElementById('auth-toggle');
+      toggle.textContent = signup
+        ? 'Already have an account? Sign in'
+        : signin
+          ? 'Create account'
+          : 'Back to sign in';
+      passwordInput.value = '';
+      confirmInput.value = '';
+      if (!code && !confirm) codeInput.value = '';
+      showAuthMessage(notice || '', false);
+    }
+
+    async function resendHubAuthCode() {
+      const form = document.getElementById('auth-form');
+      const mode = form && form.dataset.mode;
+      if (mode !== 'confirm') {
+        setHubAuthMode('forgot');
+        return;
+      }
+      const email = document.getElementById('auth-email').value.trim();
+      if (!supabaseClient) {
+        showAuthMessage('Supabase authentication is not configured.', true);
+        return;
+      }
+      try {
+        const { error } = await supabaseClient.auth.resend({ type: 'signup', email });
+        if (error) throw error;
+        showAuthMessage('A new confirmation code is on its way.', false);
+      } catch (err) {
+        showAuthMessage(err.message || 'Could not send a new code.', true);
+      }
+    }
+
     function toggleHubAuthMode() {
       const form = document.getElementById('auth-form');
-      const signup = form.dataset.mode !== 'signup';
-      form.dataset.mode = signup ? 'signup' : 'signin';
-      document.getElementById('auth-signup-fields').classList.toggle('hidden', !signup);
-      document.getElementById('auth-title').textContent = signup ? 'Create account' : 'Sign in';
-      document.getElementById('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
-      document.getElementById('auth-toggle').textContent = signup ? 'Already have an account? Sign in' : 'Create account';
-      document.getElementById('auth-password').autocomplete = signup ? 'new-password' : 'current-password';
-      showAuthMessage('', false);
+      const mode = form.dataset.mode;
+      setHubAuthMode(mode === 'signin' ? 'signup' : 'signin');
     }
 
     async function signedAvatarUrl(path) {
@@ -1259,41 +1378,114 @@
         return false;
       }
       const form = document.getElementById('auth-form');
-      const signup = form.dataset.mode === 'signup';
+      const mode = form.dataset.mode || 'signin';
       const email = document.getElementById('auth-email').value.trim();
       const password = document.getElementById('auth-password').value;
+      const confirmPassword = document.getElementById('auth-confirm').value;
+      const code = document.getElementById('auth-code').value.replace(/\s/g, '');
       const displayName = document.getElementById('auth-name').value.trim();
       const venueName = document.getElementById('auth-venue').value.trim();
       const remember = document.getElementById('auth-remember')?.checked;
 
       showAuthMessage('', false);
       try {
-        if (remember) {
-          localStorage.setItem('hub_remembered_email', email);
-          localStorage.setItem('hub_remember_me', '1');
-        } else {
-          localStorage.removeItem('hub_remembered_email');
-          localStorage.removeItem('hub_remember_me');
+        if (mode === 'signin' || mode === 'signup') {
+          if (remember) {
+            localStorage.setItem('hub_remembered_email', email);
+            localStorage.setItem('hub_remember_me', '1');
+          } else {
+            localStorage.removeItem('hub_remembered_email');
+            localStorage.removeItem('hub_remember_me');
+          }
         }
 
-        if (signup) {
+        if (mode === 'set-password') {
+          if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+          if (password !== confirmPassword) throw new Error('Passwords do not match.');
+          const { error } = await supabaseClient.auth.updateUser({ password });
+          if (error) throw error;
+          hubPasswordRecovery = false;
+          const { data } = await supabaseClient.auth.getSession();
+          if (data && data.session) await enterHub(data.session);
+          return false;
+        }
+
+        if (mode === 'signup') {
           if (password.length < 8) throw new Error('Password must be at least 8 characters.');
           const { data, error } = await supabaseClient.auth.signUp({
             email,
             password,
             options: {
-              emailRedirectTo: window.location.origin + '/',
               data: { display_name: displayName, venue_name: venueName },
             },
           });
           if (error) throw error;
-          if (!data.session) showAuthMessage('Account created. Confirm the email link, then sign in.', false);
-        } else {
-          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (error) throw error;
-          if (data && data.session) {
-            await enterHub(data.session);
+          if (!data.session) {
+            setHubAuthMode('confirm', 'Account created. Enter the 6-digit code we just emailed.');
           }
+          return false;
+        }
+
+        if (mode === 'confirm') {
+          if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit code from the email.');
+          const { error } = await supabaseClient.auth.verifyOtp({
+            email,
+            token: code,
+            type: 'signup',
+          });
+          if (error) throw error;
+          const { data } = await supabaseClient.auth.getSession();
+          if (data && data.session) await enterHub(data.session);
+          return false;
+        }
+
+        if (mode === 'forgot') {
+          const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+            redirectTo: window.location.origin + '/',
+          });
+          if (error) throw error;
+          setHubAuthMode('code', 'If that email has an account, a 6-digit code is on its way.');
+          return false;
+        }
+
+        if (mode === 'code') {
+          if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit code from the email.');
+          if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+          if (password !== confirmPassword) throw new Error('Passwords do not match.');
+          hubPasswordRecovery = true;
+          const { error: otpError } = await supabaseClient.auth.verifyOtp({
+            email,
+            token: code,
+            type: 'recovery',
+          });
+          if (otpError) {
+            hubPasswordRecovery = false;
+            throw otpError;
+          }
+          const { error: updateError } = await supabaseClient.auth.updateUser({ password });
+          if (updateError) {
+            hubPasswordRecovery = false;
+            throw updateError;
+          }
+          hubPasswordRecovery = false;
+          const { data } = await supabaseClient.auth.getSession();
+          if (data && data.session) await enterHub(data.session);
+          return false;
+        }
+
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) {
+          if (error.code === 'email_not_confirmed' || /email not confirmed/i.test(error.message || '')) {
+            setHubAuthMode(
+              'confirm',
+              'This account is not confirmed yet. Enter the 6-digit code from your email, or send a new one.',
+            );
+            return false;
+          }
+          throw error;
+        }
+        if (data && data.session) {
+          await enterHub(data.session);
         }
       } catch (err) {
         showAuthMessage(err.message || 'Authentication failed.', true);
@@ -1370,8 +1562,14 @@
             flowType: 'pkce',
           },
         });
-        supabaseClient.auth.onAuthStateChange((_event, session) => {
-          if (session) void enterHub(session);
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+          if (event === 'PASSWORD_RECOVERY') {
+            hubPasswordRecovery = true;
+            const form = document.getElementById('auth-form');
+            if (form && form.dataset.mode !== 'code') setHubAuthMode('set-password');
+            return;
+          }
+          if (session && !hubPasswordRecovery) void enterHub(session);
         });
 
         const rememberSetting = localStorage.getItem('hub_remember_me');
@@ -5515,36 +5713,49 @@
 
     async function persistTelegramLinkToAccount(link) {
       if (!supabaseClient || !hubAccountUser || !link || !link.chat_id) return;
+      const chatId = String(link.chat_id);
       const patch = {
-        telegram_chat_id: String(link.chat_id),
+        telegram_chat_id: chatId,
         telegram_user_id: String(link.telegram_user_id || ''),
         telegram_username: String(link.telegram_username || ''),
         telegram_linked_at: new Date().toISOString(),
       };
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .update(patch)
-        .eq('id', hubAccountUser.id)
-        .select('*')
-        .single();
-      if (error) {
+      let data = null;
+      let error = null;
+      const replaced = await supabaseClient.rpc('replace_telegram_link', {
+        p_chat_id: chatId,
+        p_telegram_user_id: patch.telegram_user_id,
+        p_username: patch.telegram_username,
+      });
+      if (!replaced.error && replaced.data) {
+        data = Array.isArray(replaced.data) ? replaced.data[0] : replaced.data;
+      } else {
+        const updated = await supabaseClient
+          .from('profiles')
+          .update(patch)
+          .eq('id', hubAccountUser.id)
+          .select('*')
+          .single();
+        data = updated.data;
+        error = updated.error;
+      }
+      if (!data) {
         const feedback = document.getElementById('tg-feedback');
+        const reason = (error && error.message) || (replaced.error && replaced.error.message) || 'account save failed';
         showBanner(
           feedback,
           false,
-          'Linked locally, but account save failed: ' + error.message +
-            ' Apply migration telegram_link_on_profiles if the telegram columns are missing.'
+          'Linked locally, but account save failed: ' + reason +
+            ' Apply migration telegram_replace_active_link if the Telegram RPC is missing.'
         );
-        paintTelegramLinkStatus({ telegram_chat_id: link.chat_id, telegram_username: link.telegram_username || '' });
+        paintTelegramLinkStatus({ telegram_chat_id: chatId, telegram_username: link.telegram_username || '' });
         return;
       }
-      if (data) {
-        hubAccountProfile = data;
-        paintTelegramLinkStatus({
-          telegram_chat_id: data.telegram_chat_id,
-          telegram_username: data.telegram_username,
-        });
-      }
+      hubAccountProfile = data;
+      paintTelegramLinkStatus({
+        telegram_chat_id: data.telegram_chat_id,
+        telegram_username: data.telegram_username,
+      });
     }
 
     function stopTelegramLinkPoll() {

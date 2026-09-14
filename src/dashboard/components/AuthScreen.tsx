@@ -2,14 +2,19 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useAccount } from "../auth";
 import { supabase, supabaseConfigured } from "../../lib/supabase";
 
-type AuthMode = "signin" | "signup" | "forgot" | "code";
+type AuthMode = "signin" | "signup" | "forgot" | "code" | "confirm";
 
 function modeFromUrl(): AuthMode {
   const params = new URLSearchParams(window.location.search);
   const mode = params.get("mode");
   if (mode === "signup") return "signup";
   if (mode === "reset") return "forgot";
+  if (mode === "confirm") return "confirm";
   return "signin";
+}
+
+function isEmailUnconfirmed(error: { code?: string; message?: string }) {
+  return error.code === "email_not_confirmed" || /email not confirmed/i.test(error.message || "");
 }
 
 export function AuthScreen() {
@@ -30,22 +35,26 @@ export function AuthScreen() {
   const view: AuthMode | "set-password" = settingNewPassword ? "set-password" : mode;
 
   const title =
-    view === "set-password" || view === "forgot" || view === "code"
-      ? view === "set-password"
-        ? "Set a new password"
-        : "Reset password"
-      : view === "signup"
-        ? "Create account"
-        : "Sign in";
+    view === "set-password"
+      ? "Set a new password"
+      : view === "forgot" || view === "code"
+        ? "Reset password"
+        : view === "confirm"
+          ? "Confirm your email"
+          : view === "signup"
+            ? "Create account"
+            : "Sign in";
 
   const copy =
     view === "set-password"
       ? "Choose a new password for this operator account. Use at least 8 characters."
-      : view === "code"
-        ? "Enter the 6-digit code from your email, then choose a new password. Type the code yourself — inbox scanners often burn one-click reset links."
-        : view === "forgot"
-          ? "We email a 6-digit code instead of a magic link. Codes survive email security scanners; one-click links often do not."
-          : "Each account keeps profile, crew identities, ROI, camera protocol, and stream URLs private. Other operators cannot read them.";
+      : view === "confirm"
+        ? "Enter the 6-digit code from your email to confirm this account. Type the code yourself — inbox scanners often burn one-click links."
+        : view === "code"
+          ? "Enter the 6-digit code from your email, then choose a new password. Type the code yourself — inbox scanners often burn one-click reset links."
+          : view === "forgot"
+            ? "We email a 6-digit code instead of a magic link. Codes survive email security scanners; one-click links often do not."
+            : "Each account keeps profile, crew identities, ROI, camera protocol, and stream URLs private. Other operators cannot read them.";
 
   const redirectTo = useMemo(() => `${window.location.origin}/dashboard.html?mode=reset`, []);
 
@@ -55,7 +64,34 @@ export function AuthScreen() {
     setNotice(nextNotice);
     setPassword("");
     setConfirmPassword("");
-    if (next !== "code") setCode("");
+    if (next !== "code" && next !== "confirm") setCode("");
+    const url = new URL(window.location.href);
+    if (next === "signup") url.searchParams.set("mode", "signup");
+    else if (next === "forgot" || next === "code") url.searchParams.set("mode", "reset");
+    else if (next === "confirm") url.searchParams.set("mode", "confirm");
+    else url.searchParams.delete("mode");
+    window.history.replaceState({}, "", url);
+  }
+
+  async function resendConfirmation() {
+    setError("");
+    if (!supabaseConfigured) {
+      setError("Add VITE_SUPABASE_ANON_KEY to .env, then restart the dev server.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+      if (resendError) throw resendError;
+      setNotice("A new confirmation code is on its way.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send a new code.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onSubmit(event: FormEvent) {
@@ -82,7 +118,6 @@ export function AuthScreen() {
           email: email.trim(),
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/dashboard.html`,
             data: {
               display_name: displayName.trim(),
               venue_name: venueName.trim(),
@@ -91,8 +126,19 @@ export function AuthScreen() {
         });
         if (signError) throw signError;
         if (!data.session) {
-          setNotice("Account created. Confirm the email link, then sign in.");
+          go("confirm", "Account created. Enter the 6-digit code we just emailed.");
         }
+        return;
+      }
+      if (view === "confirm") {
+        const token = code.replace(/\s/g, "");
+        if (!/^\d{6}$/.test(token)) throw new Error("Enter the 6-digit code from the email.");
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          email: email.trim(),
+          token,
+          type: "signup",
+        });
+        if (otpError) throw otpError;
         return;
       }
       if (view === "forgot") {
@@ -136,7 +182,16 @@ export function AuthScreen() {
         email: email.trim(),
         password,
       });
-      if (signError) throw signError;
+      if (signError) {
+        if (isEmailUnconfirmed(signError)) {
+          go(
+            "confirm",
+            "This account is not confirmed yet. Enter the 6-digit code from your email, or send a new one.",
+          );
+          return;
+        }
+        throw signError;
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed.");
     } finally {
@@ -153,9 +208,11 @@ export function AuthScreen() {
           ? "Create account"
           : view === "forgot"
             ? "Email reset code"
-            : view === "code"
-              ? "Set new password"
-              : "Sign in";
+            : view === "confirm"
+              ? "Confirm account"
+              : view === "code"
+                ? "Set new password"
+                : "Sign in";
 
   return (
     <div className="auth-screen">
@@ -222,14 +279,14 @@ export function AuthScreen() {
               placeholder="you@garage.com"
               autoComplete="email"
               required
-              readOnly={view === "code"}
+              readOnly={view === "code" || view === "confirm"}
             />
           </label>
         ) : null}
 
-        {view === "code" ? (
+        {view === "code" || view === "confirm" ? (
           <label className="field">
-            <span>Reset code</span>
+            <span>{view === "confirm" ? "Confirmation code" : "Reset code"}</span>
             <input
               className="otp-input"
               value={code}
@@ -306,6 +363,11 @@ export function AuthScreen() {
         ) : null}
         {view === "code" ? (
           <button className="btn btn--ghost" type="button" onClick={() => go("forgot")}>
+            Send a new code
+          </button>
+        ) : null}
+        {view === "confirm" ? (
+          <button className="btn btn--ghost" type="button" onClick={() => void resendConfirmation()}>
             Send a new code
           </button>
         ) : null}

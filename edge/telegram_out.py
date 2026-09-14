@@ -2,16 +2,42 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import requests
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
+def normalize_chat_id(value: Any) -> str:
+    """Return a single Telegram chat id. If several were stored, keep the latest."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        parts = [normalize_chat_id(item) for item in value]
+        parts = [part for part in parts if part]
+        return parts[-1] if parts else ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return normalize_chat_id(parsed)
+    for sep in ("\n", ";", ","):
+        if sep in text:
+            parts = [part.strip() for part in text.split(sep) if part.strip()]
+            return parts[-1] if parts else ""
+    return text
+
+
 class TelegramOut:
     def __init__(self, token: str, chat_id: str) -> None:
         self.token = (token or "").strip()
-        self.chat_id = str(chat_id or "").strip()
+        self.chat_id = normalize_chat_id(chat_id)
 
     @property
     def enabled(self) -> bool:
@@ -20,8 +46,11 @@ class TelegramOut:
     def _url(self, method: str) -> str:
         return API.format(token=self.token, method=method)
 
+    def set_chat(self, chat_id: str) -> None:
+        self.chat_id = normalize_chat_id(chat_id)
+
     def send_message_to(self, chat_id: str, text: str) -> bool:
-        target = str(chat_id or "").strip()
+        target = normalize_chat_id(chat_id)
         if not self.token or not target:
             print("[telegram] skipped sendMessage (no token/chat_id)")
             return False
