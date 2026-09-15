@@ -49,6 +49,17 @@ TINYPOSE_SCALE_Y = TINYPOSE_INPUT_H / TINYPOSE_HM_H  # 4.0
 # PicoDet input dimensions (Height=320, Width=320)
 PICODET_INPUT_SIZE = 320
 
+# TinyPose heatmap peaks on a real person sit around 0.08–0.55, far below the
+# 0.35 floor YOLO-pose joints use. Divide by this so those peaks land in the
+# same 0–1 range as the kinematic gates in person.py.
+HEATMAP_CONF_SCALE = 0.16
+# Argmax always returns a peak, even on an engine block. Peaks below this are
+# heatmap noise, not joints — scaling them by 1/0.16 was reopening engine FPs.
+HEATMAP_PEAK_FLOOR = 0.08
+# Gray pad when the 3:4 pose crop hangs off the frame. Clamping the crop to the
+# image and stretching it to 192x256 flattens a desk/webcam person into noise.
+POSE_CROP_PAD_VALUE = 127
+
 
 def ensure_tinypose_models(models_dir: Path, download: bool = True) -> tuple[Path, Path]:
     """Verify presence of PicoDet and TinyPose ONNX models, downloading if missing."""
@@ -90,6 +101,95 @@ def ensure_tinypose_models(models_dir: Path, download: bool = True) -> tuple[Pat
             raise RuntimeError(f"Failed to download {TINYPOSE_FILENAME}")
 
     return pico_path, pose_path
+
+
+def person_input_box(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    margin: float = 1.15,
+) -> tuple[float, float, float, float]:
+    """Return (cx, cy, crop_w, crop_h) for a 3:4 TinyPose crop, possibly off-frame."""
+    bw = max(x2 - x1, 1.0)
+    bh = max(y2 - y1, 1.0)
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    aspect = TINYPOSE_INPUT_W / float(TINYPOSE_INPUT_H)
+    if bw > bh * aspect:
+        cw = bw * margin
+        ch = cw / aspect
+    else:
+        ch = bh * margin
+        cw = ch * aspect
+    return cx, cy, cw, ch
+
+
+def crop_person_with_pad(
+    frame: np.ndarray,
+    cx: float,
+    cy: float,
+    cw: float,
+    ch: float,
+) -> tuple[np.ndarray, float, float]:
+    """Cut a padded 3:4 person patch and resize it to TinyPose's 192x256 input.
+
+    Returns (patch, origin_x, origin_y). Keypoints map back with
+    ``frame = origin + (crop_xy / input_size) * (cw, ch)``.
+    """
+    frame_h, frame_w = frame.shape[:2]
+    canvas_w = max(int(round(cw)), 1)
+    canvas_h = max(int(round(ch)), 1)
+    origin_x = cx - cw / 2.0
+    origin_y = cy - ch / 2.0
+    canvas = np.full((canvas_h, canvas_w, 3), POSE_CROP_PAD_VALUE, dtype=np.uint8)
+
+    src_x1 = int(np.floor(origin_x))
+    src_y1 = int(np.floor(origin_y))
+    src_x2 = src_x1 + canvas_w
+    src_y2 = src_y1 + canvas_h
+    frame_x1 = max(0, src_x1)
+    frame_y1 = max(0, src_y1)
+    frame_x2 = min(frame_w, src_x2)
+    frame_y2 = min(frame_h, src_y2)
+    dst_x1 = frame_x1 - src_x1
+    dst_y1 = frame_y1 - src_y1
+    copy_w = frame_x2 - frame_x1
+    copy_h = frame_y2 - frame_y1
+    if copy_w > 0 and copy_h > 0 and dst_x1 >= 0 and dst_y1 >= 0:
+        dst_x2 = min(canvas_w, dst_x1 + copy_w)
+        dst_y2 = min(canvas_h, dst_y1 + copy_h)
+        src_x2c = frame_x1 + (dst_x2 - dst_x1)
+        src_y2c = frame_y1 + (dst_y2 - dst_y1)
+        canvas[dst_y1:dst_y2, dst_x1:dst_x2] = frame[frame_y1:src_y2c, frame_x1:src_x2c]
+
+    patch = cv2.resize(canvas, (TINYPOSE_INPUT_W, TINYPOSE_INPUT_H), interpolation=cv2.INTER_LINEAR)
+    return patch, origin_x, origin_y
+
+
+def heatmap_peak_to_conf(peak: float, floor: float = HEATMAP_PEAK_FLOOR) -> float:
+    """Map a TinyPose heatmap peak onto the 0–1 scale YOLO-pose joints use.
+
+    Joints below ``floor`` stay at 0 so argmax-on-metal does not become a
+    visible COCO skeleton after the 0.16 scale-up.
+    """
+    value = float(peak)
+    if value < floor:
+        return 0.0
+    return float(min(1.0, max(0.0, value / HEATMAP_CONF_SCALE)))
+
+
+def map_crop_keypoint(
+    crop_x: float,
+    crop_y: float,
+    origin_x: float,
+    origin_y: float,
+    cw: float,
+    ch: float,
+) -> tuple[float, float]:
+    frame_x = origin_x + (crop_x / float(TINYPOSE_INPUT_W)) * cw
+    frame_y = origin_y + (crop_y / float(TINYPOSE_INPUT_H)) * ch
+    return float(frame_x), float(frame_y)
 
 
 class PicoDetDetector:
@@ -191,7 +291,7 @@ class TinyPoseEstimator:
         self,
         frame: np.ndarray,
         boxes: list[tuple[float, float, float, float, float]],
-        kpt_conf_floor: float = 0.05,
+        kpt_conf_floor: float = HEATMAP_PEAK_FLOOR,
     ) -> list[list[tuple[float, float, float]]]:
         """Run 17-keypoint pose estimation on detected person bounding boxes.
 
@@ -207,34 +307,12 @@ class TinyPoseEstimator:
         all_keypoints: list[list[tuple[float, float, float]]] = []
 
         for x1, y1, x2, y2, _ in boxes:
-            bw = max(x2 - x1, 1.0)
-            bh = max(y2 - y1, 1.0)
-            cx = (x1 + x2) / 2.0
-            cy = (y1 + y2) / 2.0
-
-            # Expand with aspect ratio matching TinyPose 3:4 (width:height = 192:256)
-            # Add 15% margin around the person to capture head & limbs without clipping
-            aspect = TINYPOSE_INPUT_W / float(TINYPOSE_INPUT_H)  # 0.75
-            if bw > bh * aspect:
-                cw = bw * 1.15
-                ch = cw / aspect
-            else:
-                ch = bh * 1.15
-                cw = ch * aspect
-
-            crop_x1 = max(0, int(round(cx - cw / 2.0)))
-            crop_y1 = max(0, int(round(cy - ch / 2.0)))
-            crop_x2 = min(frame_w, int(round(cx + cw / 2.0)))
-            crop_y2 = min(frame_h, int(round(cy + ch / 2.0)))
-
-            crop_w = crop_x2 - crop_x1
-            crop_h = crop_y2 - crop_y1
-            if crop_w < 8 or crop_h < 8:
+            cx, cy, cw, ch = person_input_box(x1, y1, x2, y2)
+            if cw < 8 or ch < 8:
                 all_keypoints.append([(0.0, 0.0, 0.0)] * 17)
                 continue
 
-            crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-            resized_crop = cv2.resize(crop, (TINYPOSE_INPUT_W, TINYPOSE_INPUT_H), interpolation=cv2.INTER_LINEAR)
+            resized_crop, origin_x, origin_y = crop_person_with_pad(frame, cx, cy, cw, ch)
             rgb = cv2.cvtColor(resized_crop, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
             norm = (rgb - PADDLE_MEAN) / PADDLE_STD
             blob = np.ascontiguousarray(np.transpose(norm, (2, 0, 1))[np.newaxis, :, :, :], dtype=np.float32)
@@ -247,7 +325,7 @@ class TinyPoseEstimator:
                 hm_slice = heatmap[k]
                 idx = int(np.argmax(hm_slice))
                 py, px = divmod(idx, TINYPOSE_HM_W)
-                conf = float(hm_slice[py, px])
+                peak = float(hm_slice[py, px])
 
                 # DarkPose subpixel refinement
                 dx, dy = 0.0, 0.0
@@ -261,14 +339,13 @@ class TinyPoseEstimator:
 
                 crop_coord_x = refined_px * TINYPOSE_SCALE_X
                 crop_coord_y = refined_py * TINYPOSE_SCALE_Y
-
-                # Map back to full frame space
-                frame_coord_x = crop_x1 + (crop_coord_x / float(TINYPOSE_INPUT_W)) * crop_w
-                frame_coord_y = crop_y1 + (crop_coord_y / float(TINYPOSE_INPUT_H)) * crop_h
+                frame_coord_x, frame_coord_y = map_crop_keypoint(
+                    crop_coord_x, crop_coord_y, origin_x, origin_y, cw, ch
+                )
 
                 clamped_x = float(max(0.0, min(frame_w, frame_coord_x)))
                 clamped_y = float(max(0.0, min(frame_h, frame_coord_y)))
-                kpt_conf = max(0.0, min(1.0, conf)) if conf >= kpt_conf_floor else 0.0
+                kpt_conf = heatmap_peak_to_conf(peak, kpt_conf_floor)
 
                 person_kpts.append((clamped_x, clamped_y, kpt_conf))
 

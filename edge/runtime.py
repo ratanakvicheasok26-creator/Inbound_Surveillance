@@ -47,6 +47,7 @@ DEFAULT_MIN_PERSON_HEIGHT = 0.05
 DEFAULT_MIN_ASPECT = 1.1
 DEFAULT_MIN_KEYPOINTS = 3
 DEFAULT_KPT_CONF = 0.35
+DEFAULT_TINYPOSE_KPT_CONF = 0.12
 DEFAULT_OCCUPY_CLEAR_SECONDS = 5.0
 DEFAULT_UNDER_CAR_GRACE_SECONDS = 30.0
 DEFAULT_IMGSZ = 640
@@ -127,7 +128,11 @@ def resolve_min_keypoints(cfg: dict | None = None) -> int:
 def resolve_kpt_conf(cfg: dict | None = None) -> float:
     cfg = cfg or {}
     value = cfg.get("kpt_conf")
-    return float(value) if value is not None else DEFAULT_KPT_CONF
+    if value is not None:
+        return float(value)
+    if resolve_pose_engine(cfg) == "tinypose":
+        return DEFAULT_TINYPOSE_KPT_CONF
+    return DEFAULT_KPT_CONF
 
 
 def resolve_occupy_clear_seconds(cfg: dict | None = None) -> float:

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from person import (
     Detection,
     backpack_clutter_keypoints,
+    engine_bay_keypoints,
     standing_person_keypoints,
 )
 from reid import BodyReIDExtractor, appearance_embedding
@@ -67,6 +68,13 @@ class RuntimeProfileTests(unittest.TestCase):
     def test_default_kpt_conf_matches_anatomy_helpers(self):
         self.assertGreaterEqual(DEFAULT_KPT_CONF, 0.35)
         self.assertGreaterEqual(resolve_kpt_conf({}), 0.35)
+
+    def test_tinypose_default_kpt_conf_is_below_yolo_floor(self):
+        from runtime import DEFAULT_TINYPOSE_KPT_CONF
+
+        self.assertLessEqual(DEFAULT_TINYPOSE_KPT_CONF, 0.15)
+        self.assertLessEqual(resolve_kpt_conf({"pose_engine": "tinypose"}), 0.15)
+        self.assertGreaterEqual(resolve_kpt_conf({"pose_engine": "tinypose", "kpt_conf": 0.35}), 0.35)
 
     def test_cuda_falls_back_without_gpu(self):
         profile = resolve_runtime({"runtime": "cuda"})
@@ -186,6 +194,18 @@ class TrackerIdentityTests(unittest.TestCase):
             out = tracker.update([det])
         self.assertEqual(out, [])
         self.assertTrue(any(t.clutter for t in tracker.tracks))
+
+    def test_frozen_engine_skeleton_is_clutter_when_liveness_is_dead(self):
+        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=10)
+        kpts = [(x, y, 0.85 if c > 0 else 0.0) for x, y, c in engine_bay_keypoints()]
+        out = []
+        for _ in range(20):
+            det = Detection(90, 40, 190, 280, 0.75, kpts)
+            det.accepted = True
+            det.liveness = 0.4
+            out = tracker.update([det])
+        self.assertTrue(any(t.clutter for t in tracker.tracks))
+        self.assertEqual(out, [])
 
     def test_moving_high_conf_unknown_is_kept(self):
         tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=20)

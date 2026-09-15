@@ -591,20 +591,29 @@ def is_admissible_bay_occupant(
     if getattr(det, "clutter", False):
         return False
     hits = getattr(det, "hits", None)
-    if hits is not None and hits < 3:
+    if hits is not None and hits < 3 and not getattr(det, "is_staff", False):
         return False
 
     # 2. Tier 2: Torso keypoint connectivity (shoulders + hips) or creeper/hood/upper-body whitelist
     kpts = getattr(det, "keypoints", []) or []
     box = det.box() if hasattr(det, "box") else (det.x1, det.y1, det.x2, det.y2)
 
-    from person import is_creeper_or_underbody_pose, is_hood_lean_pose, is_upper_body_pose
+    from person import (
+        is_creeper_or_underbody_pose,
+        is_hood_lean_pose,
+        is_upper_body_pose,
+        is_crouch_or_sit_pose,
+        is_face_closeup,
+    )
+    from liveness import DEAD_KEYPOINT_JITTER, DEAD_MOTION_ENERGY
 
     is_whitelisted = (
         is_under_vehicle_pose(kpts, kpt_conf * 0.85)
         or is_creeper_or_underbody_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
         or is_hood_lean_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
         or is_upper_body_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
+        or is_crouch_or_sit_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
+        or is_face_closeup(kpts, kpt_conf, box=box, frame_h=frame_h)
     )
     if not is_whitelisted:
         ls = _kpt(kpts, L_SHOULDER, kpt_conf)
@@ -620,12 +629,16 @@ def is_admissible_bay_occupant(
         if not ((has_shoulder and has_hip) or (has_head and has_shoulder)):
             return False
 
-    # 3. Tier 3: Non-zero motion/jitter history (rejects completely frozen/inanimate clutter)
+    # 3. Tier 3: Dead pixel/joint energy is an engine block, not a still worker.
     liveness = getattr(det, "liveness", None)
     jitter = getattr(det, "jitter", None)
     motion = getattr(det, "motion", None)
     if liveness is not None and jitter is not None and motion is not None:
-        if liveness <= 0.0 and jitter <= 0.0 and motion <= 0.0:
+        if (
+            liveness <= DEAD_MOTION_ENERGY
+            and jitter <= DEAD_KEYPOINT_JITTER
+            and motion <= 3.0
+        ):
             return False
 
     return True

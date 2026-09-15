@@ -2278,13 +2278,13 @@
         : (flipMode === 'v' ? 'scaleY(-1)' : (flipMode === 'both' || flipMode === 'hv' ? 'scale(-1, -1)' : 'none'));
 
       const feedEl = document.getElementById('live-camera-feed');
-      if (feedEl) feedEl.style.transform = flipTransform;
+      if (feedEl) feedEl.style.transform = 'none';
       const webrtcEl = document.getElementById('live-webrtc');
       if (webrtcEl) webrtcEl.style.transform = flipTransform;
 
       if (activeCameraId) {
         const activeTileImg = document.querySelector(`.grid-cam-tile[data-cam-id="${CSS.escape(activeCameraId)}"] img`);
-        if (activeTileImg) activeTileImg.style.transform = flipTransform;
+        if (activeTileImg) activeTileImg.style.transform = 'none';
       }
     }
 
@@ -2340,7 +2340,6 @@
     function setRotate(deg) {
       const prevRotate = rotateDeg;
       rotateDeg = deg;
-      if (deg === 'auto') flipMode = 'none';
 
       if (prevRotate !== 'auto' && deg !== 'auto' && prevRotate !== deg) {
         const pDeg = parseInt(prevRotate, 10) || 0;
@@ -3452,39 +3451,73 @@
 
           let failCount = 0;
           let timer = null;
-          const poll = () => {
-            if (!img.isConnected) return;
+          let currentBlobUrl = null;
+          let isFetching = false;
+
+          const poll = async () => {
+            if (!img.isConnected) {
+              if (currentBlobUrl) {
+                URL.revokeObjectURL(currentBlobUrl);
+                currentBlobUrl = null;
+              }
+              return;
+            }
             const currentCam = cameras.find((c) => c.id === cam.id) || cam;
             if (currentCam.enabled === false) {
               img.style.display = 'none';
               fallback.style.display = 'flex';
               return;
             }
-            const srcUrl = `/api/camera/${encodeURIComponent(cam.id)}/frame.jpeg`;
-            img.src = srcUrl + (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
-          };
-
-          img.onload = () => {
-            failCount = 0;
-            const currentCam = cameras.find((c) => c.id === cam.id) || cam;
-            if (currentCam.enabled === false) {
-              img.style.display = 'none';
-              fallback.style.display = 'flex';
-              return;
+            if (isFetching) return;
+            isFetching = true;
+            try {
+              const srcUrl = `/api/camera/${encodeURIComponent(cam.id)}/frame.jpeg`;
+              const res = await fetch(srcUrl + (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), {
+                cache: 'no-store'
+              });
+              if (!img.isConnected) {
+                isFetching = false;
+                return;
+              }
+              if (res.status === 204) {
+                const isCurrentlyFocus = cam.id === activeCameraId;
+                const retryMs = isCurrentlyFocus ? 150 : 300;
+                isFetching = false;
+                timer = setTimeout(poll, retryMs);
+                return;
+              }
+              if (!res.ok) {
+                throw new Error('HTTP ' + res.status);
+              }
+              const blob = await res.blob();
+              if (!img.isConnected) {
+                isFetching = false;
+                return;
+              }
+              const newUrl = URL.createObjectURL(blob);
+              const oldUrl = currentBlobUrl;
+              currentBlobUrl = newUrl;
+              img.src = newUrl;
+              img.style.display = 'block';
+              fallback.style.display = 'none';
+              failCount = 0;
+              if (oldUrl) {
+                requestAnimationFrame(() => URL.revokeObjectURL(oldUrl));
+              }
+              const isCurrentlyFocus = cam.id === activeCameraId;
+              const pollMs = isCurrentlyFocus ? 120 : 250;
+              isFetching = false;
+              timer = setTimeout(poll, pollMs);
+            } catch (err) {
+              isFetching = false;
+              failCount += 1;
+              if (failCount > 4) {
+                img.style.display = 'none';
+                fallback.style.display = 'flex';
+              }
+              const backoff = Math.min(2000, 350 + failCount * 200);
+              timer = setTimeout(poll, backoff);
             }
-            img.style.display = 'block';
-            fallback.style.display = 'none';
-            const isCurrentlyFocus = cam.id === activeCameraId;
-            const pollMs = isCurrentlyFocus ? 120 : 250;
-            timer = setTimeout(poll, pollMs);
-          };
-
-          img.onerror = () => {
-            failCount += 1;
-            img.style.display = 'none';
-            fallback.style.display = 'flex';
-            const backoff = Math.min(2000, 350 + failCount * 200);
-            timer = setTimeout(poll, backoff);
           };
 
           const badge = document.createElement('div');
@@ -3726,8 +3759,7 @@
       } else {
         rotateDeg = 'auto';
       }
-      if (rotateDeg !== 'auto' && cam.flip) flipMode = cam.flip;
-      if (rotateDeg === 'auto') flipMode = 'none';
+      flipMode = cam.flip || 'none';
       const trigEl = document.getElementById('camera-trigger-mode-input');
       if (trigEl) trigEl.value = cam.trigger_mode || 'roi_state_change';
       const mlEl = document.getElementById('camera-ml-input');

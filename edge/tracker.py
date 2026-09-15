@@ -510,12 +510,18 @@ class PersonTracker:
         # Clutter policy:
         # Never kill verified staff or protected under-vehicle tracks.
         # Do NOT set clutter=True on confirmed tracks solely based on weak_anatomy_hits.
-        # Only wire _is_inanimate for sustained frozen backpacks/engines.
+        # Frozen box + dead pixels + dead joints is an engine, even with a fake skeleton.
         if not trk.is_staff and trk.track_id not in self.protected_ids:
             if self._is_inanimate(trk):
                 trk.clutter = True
-            elif trk.clutter and (trk.motion > self.static_px * 2 or trk.weak_anatomy_hits == 0):
-                trk.clutter = False
+            elif trk.clutter:
+                alive = trk.motion > self.static_px * 2
+                if trk.liveness is not None and trk.liveness > DEAD_MOTION_ENERGY:
+                    alive = True
+                if trk.jitter is not None and trk.jitter > DEAD_KEYPOINT_JITTER:
+                    alive = True
+                if alive:
+                    trk.clutter = False
         det.hits = trk.hits
         det.clutter = trk.clutter
         det.motion = trk.motion
@@ -544,16 +550,28 @@ class PersonTracker:
             trk.liveness = float(energy) if trk.liveness is None else 0.8 * trk.liveness + 0.2 * float(energy)
 
     def _is_inanimate(self, trk: Track) -> bool:
-        """True if the track is frozen in place, has dead motion energy, and zero jitter."""
+        """True if the track is frozen in place with dead pixel and joint energy.
+
+        A fake engine skeleton can look anatomically connected, so missing
+        weak-anatomy hits is not enough to spare it when a liveness probe saw
+        no pixel churn and the joints do not wobble. Without a probe, keep the
+        old weak-anatomy rule so a still worker is not killed.
+        """
         if trk.hits < max(self.static_hits, 10):
             return False
-        frozen = trk.motion < self.static_px
-        if trk.liveness is not None and trk.liveness > DEAD_MOTION_ENERGY:
-            frozen = False
-        if trk.jitter is not None and trk.jitter > DEAD_KEYPOINT_JITTER:
-            frozen = False
-        if trk.weak_anatomy_hits == 0:
-            frozen = False
+        frozen_box = trk.motion < self.static_px
+        if not frozen_box:
+            trk.inanimate_hits = 0
+            return False
+
+        if trk.liveness is not None and trk.jitter is not None:
+            frozen = (
+                trk.liveness <= DEAD_MOTION_ENERGY
+                and trk.jitter <= DEAD_KEYPOINT_JITTER
+            )
+        else:
+            frozen = trk.weak_anatomy_hits > 0
+
         trk.inanimate_hits = trk.inanimate_hits + 1 if frozen else 0
         return trk.inanimate_hits >= max(6, self.static_hits // 3)
 

@@ -1954,12 +1954,45 @@ class LiveStreamEngine:
             if worker and worker.latest_jpeg:
                 return worker.latest_jpeg, "image/jpeg"
             pkt = self.grabber.peek_latest_frame()
-            if pkt is not None and getattr(pkt, "jpeg", None):
-                return pkt.jpeg, "image/jpeg"
+            if pkt is not None:
+                if getattr(pkt, "jpeg", None):
+                    return pkt.jpeg, "image/jpeg"
+                if getattr(pkt, "frame", None) is not None:
+                    try:
+                        with self.lock:
+                            rot_val = self.cfg.get("rotate")
+                            flp_val = self.cfg.get("flip")
+                        rot = 0 if is_auto_rotate(rot_val) else parse_rotate(rot_val)
+                        flp = parse_flip(flp_val)
+                        fr = pkt.frame
+                        if rot or flp != "none":
+                            fr = orient_frame(fr, rot, flp)
+                        ok, buf = cv2.imencode(".jpg", fr, [cv2.IMWRITE_JPEG_QUALITY, 72])
+                        if ok:
+                            enc_jpeg = buf.tobytes()
+                            self._camera_frame_cache[cid or active_id] = (enc_jpeg, "image/jpeg", now)
+                            return enc_jpeg, "image/jpeg"
+                    except Exception:
+                        pass
             if worker:
                 wpkt = worker.grabber.peek_latest_frame()
-                if wpkt is not None and getattr(wpkt, "jpeg", None):
-                    return wpkt.jpeg, "image/jpeg"
+                if wpkt is not None:
+                    if getattr(wpkt, "jpeg", None):
+                        return wpkt.jpeg, "image/jpeg"
+                    if getattr(wpkt, "frame", None) is not None:
+                        try:
+                            rot = int(worker.cfg.get("rotate") or 0)
+                            flp = str(worker.cfg.get("flip") or "none")
+                            fr = wpkt.frame
+                            if rot or flp not in ("none", "", "0"):
+                                fr = orient_frame(fr, rot, flp)
+                            ok, buf = cv2.imencode(".jpg", fr, [cv2.IMWRITE_JPEG_QUALITY, 72])
+                            if ok:
+                                enc_jpeg = buf.tobytes()
+                                self._camera_frame_cache[cid or active_id] = (enc_jpeg, "image/jpeg", now)
+                                return enc_jpeg, "image/jpeg"
+                        except Exception:
+                            pass
             if cached:
                 return cached[0], cached[1]
             return None, "image/jpeg"
@@ -2456,14 +2489,13 @@ class LiveStreamEngine:
             old_rotate = self.cfg.get("rotate")
             old_flip = self.cfg.get("flip")
 
-            if rotate is not None and is_auto_rotate(rotate):
-                self.cfg["rotate"] = "auto"
-                self.cfg["flip"] = "none"
-            else:
-                if rotate is not None:
+            if rotate is not None:
+                if is_auto_rotate(rotate):
+                    self.cfg["rotate"] = "auto"
+                else:
                     self.cfg["rotate"] = parse_rotate(rotate)
-                if flip is not None:
-                    self.cfg["flip"] = parse_flip(flip)
+            if flip is not None:
+                self.cfg["flip"] = parse_flip(flip)
 
             new_rotate = self.cfg.get("rotate")
             new_flip = self.cfg.get("flip")
@@ -2479,7 +2511,7 @@ class LiveStreamEngine:
                         self.cfg["roi"] = pr
                 self.bay_manager.set_bays(self.cfg["bays"])
                 self.bay_telemetry = self.bay_manager.telemetry()
-            elif not is_auto_rotate(new_rotate) and not is_auto_rotate(old_rotate) and (new_rotate != old_rotate or new_flip != old_flip):
+            elif (new_rotate != old_rotate or new_flip != old_flip):
                 cur_bays = parse_bays(self.cfg.get("bays"), seed_if_empty=False)
                 if cur_bays:
                     def _safe_rot(r):
@@ -2488,9 +2520,11 @@ class LiveStreamEngine:
                         except (TypeError, ValueError):
                             return 0
 
-                    old_r = _safe_rot(old_rotate)
-                    new_r = _safe_rot(new_rotate)
-                    delta_r = ((new_r - old_r) % 360 + 360) % 360
+                    delta_r = 0
+                    if not is_auto_rotate(new_rotate) and not is_auto_rotate(old_rotate):
+                        old_r = _safe_rot(old_rotate)
+                        new_r = _safe_rot(new_rotate)
+                        delta_r = ((new_r - old_r) % 360 + 360) % 360
 
                     transformed = []
                     for b in cur_bays:
@@ -2655,12 +2689,12 @@ class LiveStreamEngine:
         source: int | str = 0
         absent = 10.0
         interval = 1.0 / 8.0
-        person_conf = resolve_person_conf()
-        min_person_height = resolve_min_person_height()
-        min_aspect = resolve_min_aspect()
-        min_keypoints = resolve_min_keypoints()
-        kpt_conf = resolve_kpt_conf()
-        imgsz = resolve_imgsz(profile=self.runtime_profile)
+        person_conf = resolve_person_conf(self.cfg)
+        min_person_height = resolve_min_person_height(self.cfg)
+        min_aspect = resolve_min_aspect(self.cfg)
+        min_keypoints = resolve_min_keypoints(self.cfg)
+        kpt_conf = resolve_kpt_conf(self.cfg)
+        imgsz = resolve_imgsz(self.cfg, profile=self.runtime_profile)
         ghost = GhostCounter(absent, 30.0)
         last_accepted: list[Detection] = []
         last_rejected: list[Detection] = []

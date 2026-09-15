@@ -21,12 +21,14 @@ from person import (
     engine_bay_keypoints,
     hood_lean_keypoints,
     is_creeper_or_underbody_pose,
+    is_face_closeup,
     is_hood_lean_pose,
     is_human_pose,
     motorcycle_frame_keypoints,
     occluded_upper_body_keypoints,
     shoe_pair_keypoints,
     standing_person_keypoints,
+    tinypose_inflated_engine_keypoints,
 )
 from corroborate import veto_vehicle_interior
 from vehicle import VehicleDetection
@@ -63,6 +65,13 @@ class KinematicPoseTests(unittest.TestCase):
     def test_closeup_face_is_accepted(self):
         kpts = closeup_face_keypoints()
         self.assertTrue(is_human_pose(40, 20, 160, 200, kpts, 480, kpt_conf=0.35))
+
+    def test_landscape_webcam_face_closeup_is_accepted(self):
+        kpts = closeup_face_keypoints()
+        # Laptop webcam: person fills the width, box is shorter than it is wide.
+        self.assertTrue(
+            is_human_pose(20, 200, 620, 470, kpts, 480, kpt_conf=0.35, box_conf=0.80)
+        )
 
     def test_shoe_pair_on_desk_is_rejected(self):
         kpts = shoe_pair_keypoints()
@@ -170,6 +179,42 @@ class KinematicPoseTests(unittest.TestCase):
                 ),
                 msg=f"engine skeleton should fail at conf={conf}",
             )
+        # TinyPose default joint floor. Inflated argmax-on-metal must still fail.
+        self.assertFalse(
+            is_human_pose(
+                *box,
+                kpts,
+                480,
+                min_height_frac=0.05,
+                min_keypoints=3,
+                kpt_conf=0.12,
+                box_conf=0.80,
+            )
+        )
+        self.assertFalse(
+            is_human_pose(
+                *box,
+                tinypose_inflated_engine_keypoints(),
+                480,
+                min_height_frac=0.05,
+                min_keypoints=3,
+                kpt_conf=0.12,
+                box_conf=0.80,
+            )
+        )
+
+    def test_garage_engine_face_blob_is_not_a_webcam_closeup(self):
+        """Three shiny metal peaks in a small garage box must not use the laptop path."""
+        src = (40.0, 20.0, 160.0, 200.0)
+        box = (220.0, 240.0, 360.0, 330.0)
+        kpts = _scale_kpts(closeup_face_keypoints(), src, box)
+        self.assertFalse(is_face_closeup(kpts, 0.35, box=box, frame_h=480))
+        self.assertFalse(
+            is_human_pose(*box, kpts, 480, kpt_conf=0.12, box_conf=0.80)
+        )
+        self.assertFalse(
+            is_human_pose(*box, kpts, 480, kpt_conf=0.35, box_conf=0.80)
+        )
 
     def test_motorcycle_frame_hallucination_is_rejected(self):
         kpts = motorcycle_frame_keypoints()

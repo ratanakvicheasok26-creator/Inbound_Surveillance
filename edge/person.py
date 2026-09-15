@@ -91,6 +91,10 @@ Keypoint = tuple[float, float, float]
 # garage CCTV frames sat at 0.61–0.84; engine/bike FPs sat at 0.36–0.47.
 SHORTCUT_MIN_CONF = 0.50
 CLUSTER_SPAN_FRAC = 0.32
+# Laptop webcam close-ups fill the frame. An engine/bike blob in a garage
+# shot is a small box with three shiny "eyes" and must not use this path.
+CLOSEUP_MIN_HEIGHT_FRAC = 0.32
+CLOSEUP_MIN_ASPECT = 0.28
 
 
 @dataclass
@@ -207,13 +211,31 @@ def count_valid_bones(
     return sum(1 for a, b in edges if _bone_ok(keypoints, a, b, diag, kpt_conf))
 
 
-def is_face_closeup(keypoints: list[Keypoint], kpt_conf: float) -> bool:
-    """Laptop webcam: head fills the frame, shoulders are often cropped out."""
+def is_face_closeup(
+    keypoints: list[Keypoint],
+    kpt_conf: float,
+    *,
+    box: tuple[float, float, float, float] | None = None,
+    frame_h: int | None = None,
+) -> bool:
+    """Laptop webcam: head fills the frame, shoulders are often cropped out.
+
+    A small box in a garage shot with three shiny metal peaks is not a close-up.
+    """
     if _count_visible(keypoints, (L_SHOULDER, R_SHOULDER), kpt_conf) >= 2:
         return False
-    return _count_visible(keypoints, FACE, kpt_conf) >= 3 and _count_visible(
-        keypoints, FACE_CORE, kpt_conf
-    ) >= 2
+    if _count_visible(keypoints, FACE, kpt_conf) < 3:
+        return False
+    if _count_visible(keypoints, FACE_CORE, kpt_conf) < 2:
+        return False
+    if box is not None and frame_h:
+        height = max(box[3] - box[1], 1e-6)
+        width = max(box[2] - box[0], 1e-6)
+        if height < CLOSEUP_MIN_HEIGHT_FRAC * max(frame_h, 1):
+            return False
+        if height / width < CLOSEUP_MIN_ASPECT:
+            return False
+    return True
 
 
 def anatomy_is_weak(keypoints: list[Keypoint], kpt_conf: float) -> bool:
@@ -256,9 +278,10 @@ def keypoints_are_clustered(
     x2: float,
     y2: float,
     kpt_conf: float,
+    frame_h: int | None = None,
 ) -> bool:
     """True when visible joints pile up in a blob instead of spanning a body."""
-    if is_face_closeup(keypoints, kpt_conf):
+    if is_face_closeup(keypoints, kpt_conf, box=(x1, y1, x2, y2), frame_h=frame_h):
         return False
     pts = _visible_xy(keypoints, kpt_conf)
     if len(pts) < 4:
@@ -390,9 +413,10 @@ def skeleton_is_plausible(
     x2: float,
     y2: float,
     kpt_conf: float,
+    frame_h: int | None = None,
 ) -> bool:
     """Reject engine/bike hallucinations: clustered joints or crossing limbs."""
-    if keypoints_are_clustered(keypoints, x1, y1, x2, y2, kpt_conf):
+    if keypoints_are_clustered(keypoints, x1, y1, x2, y2, kpt_conf, frame_h=frame_h):
         return False
     if not bones_cross(keypoints, kpt_conf):
         return True
@@ -400,7 +424,9 @@ def skeleton_is_plausible(
     if not bones_cross(swapped, kpt_conf):
         return True
     # If both cross and joints are clustered or head is below shoulders, still reject (engine/bike fixtures)
-    if head_is_above_shoulders(swapped, kpt_conf) is False or keypoints_are_clustered(swapped, x1, y1, x2, y2, kpt_conf):
+    if head_is_above_shoulders(swapped, kpt_conf) is False or keypoints_are_clustered(
+        swapped, x1, y1, x2, y2, kpt_conf, frame_h=frame_h
+    ):
         return False
     # If still cross and no connected torso shortcut, reject
     torso_visible = _count_visible(swapped, TORSO_POINTS, kpt_conf)
@@ -580,38 +606,47 @@ def is_upper_body_pose(
         return False
     if anatomy_is_weak(keypoints, kpt_conf):
         return False
-    head_visible = _count_visible(keypoints, HEAD_POINTS, kpt_conf)
-    shoulders_visible = _count_visible(keypoints, (L_SHOULDER, R_SHOULDER), kpt_conf)
-    if head_visible < 1 or shoulders_visible < 1:
-        return False
-    if head_is_above_shoulders(keypoints, kpt_conf) is False:
-        return False
 
-    diag = _bbox_diag(x1, y1, x2, y2)
-    shoulder_bone = _bone_ok(keypoints, L_SHOULDER, R_SHOULDER, diag, kpt_conf)
-    upper_bones = count_valid_bones(
-        keypoints,
-        (
-            (NOSE, L_EYE),
-            (NOSE, R_EYE),
-            (L_EYE, L_EAR),
-            (R_EYE, R_EAR),
-            (L_SHOULDER, R_SHOULDER),
-            (L_SHOULDER, L_ELBOW),
-            (R_SHOULDER, R_ELBOW),
-            (L_ELBOW, L_WRIST),
-            (R_ELBOW, R_WRIST),
-        ),
-        x1,
-        y1,
-        x2,
-        y2,
-        kpt_conf,
-    )
-    if shoulder_bone and head_visible >= 1:
+    # Adaptive shoulder confidence for edge models / TinyPose where boundary joints have lower peak conf
+    sho_conf = min(kpt_conf, 0.15)
+    head_visible = _count_visible(keypoints, HEAD_POINTS, kpt_conf)
+    shoulders_visible = _count_visible(keypoints, (L_SHOULDER, R_SHOULDER), sho_conf)
+
+    if head_visible >= 1 and shoulders_visible >= 1:
+        if head_is_above_shoulders(keypoints, sho_conf) is False:
+            return False
+        diag = _bbox_diag(x1, y1, x2, y2)
+        shoulder_bone = _bone_ok(keypoints, L_SHOULDER, R_SHOULDER, diag, sho_conf)
+        upper_bones = count_valid_bones(
+            keypoints,
+            (
+                (NOSE, L_EYE),
+                (NOSE, R_EYE),
+                (L_EYE, L_EAR),
+                (R_EYE, R_EAR),
+                (L_SHOULDER, R_SHOULDER),
+                (L_SHOULDER, L_ELBOW),
+                (R_SHOULDER, R_ELBOW),
+                (L_ELBOW, L_WRIST),
+                (R_ELBOW, R_WRIST),
+            ),
+            x1,
+            y1,
+            x2,
+            y2,
+            sho_conf,
+        )
+        if shoulder_bone and head_visible >= 1:
+            return True
+        if upper_bones >= 1 and head_visible >= 2:
+            return True
+
+    # Face close-up / desk worker where shoulders are below frame bottom
+    if head_visible >= 3 and is_face_closeup(
+        keypoints, kpt_conf, box=(x1, y1, x2, y2), frame_h=frame_h
+    ):
         return True
-    if upper_bones >= 1 and head_visible >= 2 and shoulders_visible >= 1:
-        return True
+
     return False
 
 
@@ -695,7 +730,7 @@ def is_human_pose(
 
     keypoints = resolve_bilateral_swap(keypoints, kpt_conf=kpt_conf)
 
-    if not skeleton_is_plausible(keypoints, x1, y1, x2, y2, kpt_conf):
+    if not skeleton_is_plausible(keypoints, x1, y1, x2, y2, kpt_conf, frame_h=frame_h):
         return False
 
     if is_creeper_or_underbody_pose(
@@ -741,8 +776,10 @@ def is_human_pose(
     if height < effective_min_h:
         return False
 
-    if is_face_closeup(keypoints, kpt_conf):
-        return height / width >= 0.50
+    if is_face_closeup(
+        keypoints, kpt_conf, box=(x1, y1, x2, y2), frame_h=frame_h
+    ):
+        return True
 
     visible_pts = [pt for pt in keypoints if pt[2] >= kpt_conf]
     if len(visible_pts) < min_keypoints:
@@ -1070,6 +1107,16 @@ def engine_bay_keypoints() -> list[Keypoint]:
     pts[11] = (138.0, 162.0, 0.33)
     pts[12] = (150.0, 164.0, 0.32)
     return pts
+
+
+def tinypose_inflated_engine_keypoints() -> list[Keypoint]:
+    """TinyPose argmax-on-metal after the old 1/0.16 scale-up.
+
+    Every joint looks YOLO-visible even though the crop is an engine block.
+    Head sits below the shoulders; joints stay piled on the block.
+    """
+    pts = engine_bay_keypoints()
+    return [(x, y, 0.85 if c > 0 else 0.0) for x, y, c in pts]
 
 
 def motorcycle_frame_keypoints() -> list[Keypoint]:

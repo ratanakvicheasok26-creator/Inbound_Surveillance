@@ -15,16 +15,73 @@ import cv2
 import numpy as np
 
 from bay_zoom import detections_from_result, zoom_empty_bays
-from person import Detection, person_detections
-from runtime import RuntimeProfile, resolve_pose_engine, resolve_runtime
+from person import Detection, is_human_pose, person_detections
+from runtime import RuntimeProfile, resolve_pose_engine, resolve_runtime, resolve_kpt_conf
 from tinypose import (
+    HEATMAP_CONF_SCALE,
     PaddlePoseEngine,
     PicoDetDetector,
     TinyPoseEstimator,
+    crop_person_with_pad,
     ensure_tinypose_models,
+    heatmap_peak_to_conf,
+    map_crop_keypoint,
+    person_input_box,
 )
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
+
+
+class TestTinyPoseCropAndConfidence(unittest.TestCase):
+    """Guards the TinyPose preprocess that was dropping laptop-webcam people."""
+
+    def test_heatmap_peak_reaches_yolo_visibility_floor(self):
+        # Raw heatmap 0.22 was below kpt_conf=0.35, so every joint looked missing.
+        self.assertGreaterEqual(heatmap_peak_to_conf(0.22), 0.35)
+        self.assertGreaterEqual(heatmap_peak_to_conf(0.12), 0.35)
+        self.assertEqual(heatmap_peak_to_conf(0.02), 0.0)
+        self.assertEqual(heatmap_peak_to_conf(0.05), 0.0)
+        self.assertLessEqual(heatmap_peak_to_conf(0.80), 1.0)
+        self.assertGreater(HEATMAP_CONF_SCALE, 0.0)
+
+    def test_padded_crop_does_not_stretch_bottom_person_across_the_patch(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[230:479, 10:620] = 200
+        cx, cy, cw, ch = person_input_box(10.0, 230.0, 620.0, 479.0)
+        patch, origin_x, origin_y = crop_person_with_pad(frame, cx, cy, cw, ch)
+        self.assertEqual(patch.shape, (256, 192, 3))
+        # Top of the 3:4 crop hangs above the frame, so it must stay gray pad.
+        self.assertTrue(np.allclose(patch[8, 96], 127, atol=25))
+        # Person band should land in the middle of the patch, not be stretched
+        # from y=0 after clamping the crop to the frame.
+        mid = patch[int(256 * 0.50), 96, 0]
+        self.assertGreater(int(mid), 150)
+
+    def test_crop_keypoint_roundtrip(self):
+        x, y = map_crop_keypoint(96.0, 128.0, origin_x=10.0, origin_y=20.0, cw=192.0, ch=256.0)
+        self.assertAlmostEqual(x, 106.0, places=3)
+        self.assertAlmostEqual(y, 148.0, places=3)
+
+    def test_calibrated_desk_worker_is_human(self):
+        kpts = [(0.0, 0.0, 0.0)] * 17
+        # Raw TinyPose peaks captured on the laptop webcam (all < 0.35).
+        raw = {
+            0: ((290.0, 360.0), 0.11),
+            1: ((330.0, 328.0), 0.13),
+            2: ((250.0, 332.0), 0.13),
+            3: ((400.0, 310.0), 0.11),
+            4: ((210.0, 332.0), 0.22),
+            5: ((470.0, 470.0), 0.06),
+            6: ((210.0, 478.0), 0.08),
+        }
+        for idx, ((x, y), peak) in raw.items():
+            kpts[idx] = (x, y, heatmap_peak_to_conf(peak))
+        self.assertTrue(
+            is_human_pose(20.0, 175.0, 620.0, 479.0, kpts, 480, kpt_conf=0.35, box_conf=0.80)
+        )
+
+    def test_tinypose_runtime_kpt_conf_default(self):
+        self.assertLessEqual(resolve_kpt_conf({"pose_engine": "tinypose"}), 0.15)
 
 
 class TestTinyPosePipeline(unittest.TestCase):
