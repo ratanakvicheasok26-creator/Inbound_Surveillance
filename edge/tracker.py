@@ -223,7 +223,12 @@ class PersonTracker:
                 return trk.hits >= self.min_hits and not trk.clutter
         return False
 
-    def update(self, detections: list, low_detections: list | None = None) -> list:
+    def update(
+        self,
+        detections: list,
+        low_detections: list | None = None,
+        return_unconfirmed: bool = False,
+    ) -> list:
         self.frame_count += 1
         low_dets = list(low_detections or [])
         self.clutter_events = []
@@ -316,9 +321,26 @@ class PersonTracker:
         active_ids = {t.track_id for t in self.tracks}
         self._suppressed_clutter = {tid for tid in self._suppressed_clutter if tid in active_ids}
 
+        track_by_id = {t.track_id: t for t in self.tracks}
         confirmed_ids = {t.track_id for t in self.tracks if t.hits >= self.min_hits and not t.clutter}
-        all_active_dets = [detections[d_idx] for _, d_idx in matched] + [low_dets[low_d_idx] for _, low_d_idx in matched_low]
-        live = [d for d in all_active_dets if d.track_id in confirmed_ids]
+        all_active_dets = (
+            [detections[d_idx] for _, d_idx in matched]
+            + [low_dets[low_d_idx] for _, low_d_idx in matched_low]
+            + [detections[d_idx] for d_idx in unmatched_dets]
+        )
+        for d in all_active_dets:
+            tid = getattr(d, "track_id", None)
+            trk = track_by_id.get(tid)
+            if trk is not None:
+                d.hits = trk.hits
+                d.clutter = trk.clutter
+            d.confirmed = (tid in confirmed_ids)
+
+        if return_unconfirmed:
+            live = [d for d in all_active_dets if not getattr(d, "clutter", False)]
+        else:
+            live = [d for d in all_active_dets if d.track_id in confirmed_ids]
+
         live_ids = {d.track_id for d in live}
         for trk in self.tracks:
             if trk.track_id in confirmed_ids and trk.track_id not in live_ids:
@@ -541,6 +563,8 @@ class PersonTracker:
         gallery_name, score = self.gallery.match(feat, self.reid_threshold, camera_id=self.camera_id)
         staff_name = self._named_staff(det) or gallery_name
         det.track_id = self._next_id
+        det.hits = 1
+        det.clutter = False
         if gallery_name and not self._named_staff(det):
             det.identity = gallery_name
             det.is_staff = True
@@ -578,7 +602,6 @@ def should_extract_reid(
     tracker: PersonTracker,
     min_interval: int = 30,
 ) -> bool:
-    """Event-gated Re-ID throttle preventing 70-140ms CPU hot loops."""
     x1, y1, x2, y2 = det.box()
     w = max(0.0, float(x2 - x1))
     h = max(0.0, float(y2 - y1))
@@ -586,17 +609,17 @@ def should_extract_reid(
     if w < 20.0 or h < 40.0:
         return False
 
-    best_trk = None
+    current_f = tracker.frame_count
+
+    # 1. Existing confirmed track: check periodic interval or staff recognition
+    best_trk: Track | None = None
     best_iou = 0.0
     for trk in tracker.tracks:
-        iou = _iou(trk.bbox, det.box())
+        iou = _iou(det.box(), trk.predicted_bbox())
         if iou > best_iou:
             best_iou = iou
             best_trk = trk
 
-    current_f = tracker.frame_count
-
-    # 1. Matched to an existing track with sufficient spatial overlap
     if best_trk is not None and best_iou >= tracker.iou_threshold:
         # Initial profile if track is confirmed but features missing
         if best_trk.hits >= tracker.min_hits and not best_trk.reid_features:
@@ -624,6 +647,7 @@ def run_identity_pipeline(
     probe: LivenessProbe | None = None,
     low_detections: list | None = None,
     reid_interval: int = 30,
+    return_unconfirmed: bool = True,
 ) -> list:
     """Measure liveness, run face ID, throttled Re-ID extraction, then lock names on."""
     if probe is not None:
@@ -638,4 +662,8 @@ def run_identity_pipeline(
                 det.reid_feat = reid.extract(frame, det.box())
             else:
                 det.reid_feat = None
-    return tracker.update(detections, low_detections=low_detections)
+    return tracker.update(
+        detections,
+        low_detections=low_detections,
+        return_unconfirmed=return_unconfirmed,
+    )

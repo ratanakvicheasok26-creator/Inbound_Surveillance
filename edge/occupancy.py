@@ -594,23 +594,30 @@ def is_admissible_bay_occupant(
     if hits is not None and hits < 3:
         return False
 
-    # 2. Tier 2: Torso keypoint connectivity (shoulders + hips) or creeper/underbody whitelist
+    # 2. Tier 2: Torso keypoint connectivity (shoulders + hips) or creeper/hood/upper-body whitelist
     kpts = getattr(det, "keypoints", []) or []
     box = det.box() if hasattr(det, "box") else (det.x1, det.y1, det.x2, det.y2)
 
-    from person import is_creeper_or_underbody_pose
+    from person import is_creeper_or_underbody_pose, is_hood_lean_pose, is_upper_body_pose
 
-    is_creeper = is_under_vehicle_pose(kpts, kpt_conf * 0.85) or is_creeper_or_underbody_pose(
-        box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf
+    is_whitelisted = (
+        is_under_vehicle_pose(kpts, kpt_conf * 0.85)
+        or is_creeper_or_underbody_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
+        or is_hood_lean_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
+        or is_upper_body_pose(box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf)
     )
-    if not is_creeper:
+    if not is_whitelisted:
         ls = _kpt(kpts, L_SHOULDER, kpt_conf)
         rs = _kpt(kpts, R_SHOULDER, kpt_conf)
         lh = _kpt(kpts, L_HIP, kpt_conf)
         rh = _kpt(kpts, R_HIP, kpt_conf)
         has_shoulder = (ls is not None or rs is not None)
         has_hip = (lh is not None or rh is not None)
-        if not (has_shoulder and has_hip):
+        nose = _kpt(kpts, 0, kpt_conf)
+        ley = _kpt(kpts, 1, kpt_conf)
+        rey = _kpt(kpts, 2, kpt_conf)
+        has_head = (nose is not None or ley is not None or rey is not None)
+        if not ((has_shoulder and has_hip) or (has_head and has_shoulder)):
             return False
 
     # 3. Tier 3: Non-zero motion/jitter history (rejects completely frozen/inanimate clutter)

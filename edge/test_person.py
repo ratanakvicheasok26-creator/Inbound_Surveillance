@@ -230,6 +230,27 @@ class KinematicPoseTests(unittest.TestCase):
         self.assertFalse(bones_cross(swapped, 0.35))
         self.assertTrue(is_human_pose(50, 10, 150, 280, kpts, 480, kpt_conf=0.35))
 
+    def test_upper_body_webcam_pose_is_accepted(self):
+        from person import is_upper_body_pose
+        # Chest-up desk worker: head (nose, eyes, ears) + shoulders visible, hips/legs occluded
+        kpts = [(0.0, 0.0, 0.0)] * 17
+        kpts[0] = (160.0, 80.0, 0.90)   # Nose
+        kpts[1] = (150.0, 70.0, 0.85)   # Left eye
+        kpts[2] = (170.0, 70.0, 0.85)   # Right eye
+        kpts[3] = (140.0, 75.0, 0.80)   # Left ear
+        kpts[4] = (180.0, 75.0, 0.80)   # Right ear
+        kpts[5] = (110.0, 140.0, 0.88)  # Left shoulder
+        kpts[6] = (210.0, 142.0, 0.88)  # Right shoulder
+        self.assertTrue(is_upper_body_pose(80, 50, 240, 260, kpts, 480, kpt_conf=0.35))
+        self.assertTrue(is_human_pose(80, 50, 240, 260, kpts, 480, kpt_conf=0.35, box_conf=0.75))
+
+    def test_upper_body_pose_rejects_headless_clutter(self):
+        from person import is_upper_body_pose
+        kpts = [(0.0, 0.0, 0.0)] * 17
+        kpts[5] = (110.0, 140.0, 0.88)
+        kpts[6] = (210.0, 142.0, 0.88)
+        self.assertFalse(is_upper_body_pose(80, 50, 240, 260, kpts, 480, kpt_conf=0.35))
+
 
 class _Box:
     def __init__(self, xyxy, conf):

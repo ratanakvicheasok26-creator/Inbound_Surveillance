@@ -118,6 +118,7 @@ class Detection:
     # None until occupancy resolves the occupant; False means the time on this
     # box is provisional and has not been billed to anyone.
     verified: bool | None = None
+    confirmed: bool = True
 
     def box(self) -> tuple[float, float, float, float]:
         return self.x1, self.y1, self.x2, self.y2
@@ -558,6 +559,62 @@ def is_crouch_or_sit_pose(
     return head_visible >= 1 or torso_visible >= 2
 
 
+def is_upper_body_pose(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    keypoints: list[Keypoint],
+    frame_h: int,
+    min_dim_frac: float = 0.035,
+    kpt_conf: float = 0.35,
+) -> bool:
+    """Chest-up or desk worker: laptop webcam, workbench, or vehicle hood.
+
+    Head keypoints (nose, eyes, ears) and shoulders are visible, with the head
+    positioned anatomically above the shoulders, without requiring hips or legs.
+    """
+    width = max(x2 - x1, 1e-6)
+    height = max(y2 - y1, 1e-6)
+    if max(width, height) < min_dim_frac * max(frame_h, 1):
+        return False
+    if anatomy_is_weak(keypoints, kpt_conf):
+        return False
+    head_visible = _count_visible(keypoints, HEAD_POINTS, kpt_conf)
+    shoulders_visible = _count_visible(keypoints, (L_SHOULDER, R_SHOULDER), kpt_conf)
+    if head_visible < 1 or shoulders_visible < 1:
+        return False
+    if head_is_above_shoulders(keypoints, kpt_conf) is False:
+        return False
+
+    diag = _bbox_diag(x1, y1, x2, y2)
+    shoulder_bone = _bone_ok(keypoints, L_SHOULDER, R_SHOULDER, diag, kpt_conf)
+    upper_bones = count_valid_bones(
+        keypoints,
+        (
+            (NOSE, L_EYE),
+            (NOSE, R_EYE),
+            (L_EYE, L_EAR),
+            (R_EYE, R_EAR),
+            (L_SHOULDER, R_SHOULDER),
+            (L_SHOULDER, L_ELBOW),
+            (R_SHOULDER, R_ELBOW),
+            (L_ELBOW, L_WRIST),
+            (R_ELBOW, R_WRIST),
+        ),
+        x1,
+        y1,
+        x2,
+        y2,
+        kpt_conf,
+    )
+    if shoulder_bone and head_visible >= 1:
+        return True
+    if upper_bones >= 1 and head_visible >= 2 and shoulders_visible >= 1:
+        return True
+    return False
+
+
 def box_iou(
     a: tuple[float, float, float, float],
     b: tuple[float, float, float, float],
@@ -661,6 +718,14 @@ def is_human_pose(
 
     if is_crouch_or_sit_pose(
         x1, y1, x2, y2, keypoints, frame_h, min_height_frac * 0.7, kpt_conf
+    ):
+        return True
+
+    if (
+        allow_shortcuts
+        and is_upper_body_pose(
+            x1, y1, x2, y2, keypoints, frame_h, min_height_frac * 0.7, kpt_conf
+        )
     ):
         return True
 
@@ -853,18 +918,26 @@ def draw_detection(
     x1, y1, x2, y2 = (int(det.x1), int(det.y1), int(det.x2), int(det.y2))
     time_badge = f" ({det.active_time_str})" if getattr(det, "active_time_str", None) else ""
     if det.accepted:
-        color = (80, 220, 80) if in_roi else (170, 170, 170)
-        if det.identity and det.is_staff:
-            label = f"[Staff: {det.identity}]{time_badge} {det.conf:.2f}"
-            color = (50, 240, 50) if in_roi else (100, 200, 100)
-        elif det.identity:
-            label = f"[{det.identity}]{time_badge} {det.conf:.2f}"
-            color = (0, 165, 255) if in_roi else (170, 170, 170)
+        is_confirmed = getattr(det, "confirmed", True)
+        if not is_confirmed:
+            color = (255, 180, 50) if in_roi else (180, 150, 100)
+            label = f"[Acquiring] {det.conf:.2f}"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            if det.keypoints:
+                draw_skeleton(frame, det.keypoints, kpt_conf, color, det.box())
         else:
-            label = f"person{time_badge} {det.conf:.2f}"
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        if det.keypoints:
-            draw_skeleton(frame, det.keypoints, kpt_conf, color, det.box())
+            color = (80, 220, 80) if in_roi else (170, 170, 170)
+            if det.identity and det.is_staff:
+                label = f"[Staff: {det.identity}]{time_badge} {det.conf:.2f}"
+                color = (50, 240, 50) if in_roi else (100, 200, 100)
+            elif det.identity:
+                label = f"[{det.identity}]{time_badge} {det.conf:.2f}"
+                color = (0, 165, 255) if in_roi else (170, 170, 170)
+            else:
+                label = f"person{time_badge} {det.conf:.2f}"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            if det.keypoints:
+                draw_skeleton(frame, det.keypoints, kpt_conf, color, det.box())
     else:
         color = (120, 120, 120)
         label = f"blob {det.conf:.2f}"

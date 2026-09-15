@@ -1,157 +1,164 @@
-# Multi-Modal Identity Continuity, Throttled ReID & Bay State Hardening - Tasks
+# Worker Detection, Stream Mirroring & Multi-Camera Grid Resilience - Tasks
 
-## Task 1: Model Resolution Lock & OpenVINO Thread Pinning
-**Description:** Hard-code model export and inference resolutions in `edge/build_sidecar.py` and `edge/runtime.py` to `imgsz=640` for pose (`yolo11n-pose.onnx`) and `imgsz=512` for vehicles (`yolo11n.onnx`) to prevent anchor grid inflation and restore $\ge 25\text{ FPS}$ edge throughput. Restrict OpenVINO and ONNX CPU inference thread pools to physical core count (`num_threads=4`) in `runtime.py` to eliminate context switching and thread thrashing. Re-export weights and validate inference latency.
+## Task 1: Relax Upper-Body & Webcam Pose Acceptance Gate
+**Description:** In `edge/person.py`, add `is_upper_body_pose` to `is_human_pose` to ensure workers framed from chest-up by a laptop webcam, desk, tool bench, or engine hood are accepted as humans rather than rejected as inanimate clutter. Require head visibility (nose, eyes, or ears) plus a connected shoulder girdle (`L_SHOULDER` to `R_SHOULDER`) with the head positioned above the shoulders and bounding box confidence $\ge 0.35$. In `edge/occupancy.py`, update `is_admissible_bay_occupant` so bay occupancy admission accepts legitimate upper-body mechanics when hips/ankles are occluded by vehicle components.
 **Acceptance criteria:**
-- [x] `build_sidecar.py` explicitly exports pose models at `imgsz=640` and vehicle models at `imgsz=512`.
-- [x] `runtime.py` sets `num_threads=4` (or physical CPU core count) for ONNX Runtime and OpenVINO session options.
-- [x] Re-exported `yolo11n-pose.onnx` (640x640) measures $\le 40\text{ ms}$ latency on CPU execution (measured 33.92 ms ORT, 27.51 ms OpenVINO).
+- [ ] `is_human_pose` accepts webcam, seated, and desk workers who have head and shoulder visibility without requiring hip or leg joints.
+- [ ] `is_admissible_bay_occupant` in `edge/occupancy.py` accepts upper-body mechanics working over vehicle hoods or at service benches.
+- [ ] Hallucinated bike/engine frames with clustered joints or inverted anatomy continue to be rejected.
 **Verification:**
-- [x] Benchmark test passes: `.venv/bin/python -c "from runtime import benchmark_pose; print('640x640 Benchmark latency check')"`
-- [x] Tests pass: `.venv/bin/python -m unittest test_tinypose test_patch_fixes -v`
-- [x] Manual check: Confirm output model dimensions via Netron/ONNX inspection ($1 \times 3 \times 640 \times 640$).
+- [ ] Tests pass: `.venv/bin/python -m unittest test_person -k test_upper_body -v`
+- [ ] Tests pass: `.venv/bin/python -m unittest test_garage -k clutter -v`
+- [ ] Manual check: Run pose inference on webcam capture frame; verify person detection changes from rejected to accepted.
 **Dependencies:** None
 **Files likely touched:**
-- `edge/build_sidecar.py`
-- `edge/runtime.py`
-- `edge/launcher.py`
-**Estimated scope:** Medium (3 files)
-
----
-
-## Checkpoint 1: Performance Baseline & Resolution Lock
-- [x] YOLO11n-pose ONNX re-exported at 640x640 and YOLO11n at 512x512
-- [x] OpenVINO / CPU session thread count pinned to physical cores
-- [x] Inference latency verified at $\ge 25\text{ FPS}$ on edge CPU
-
----
-
-## Task 2: Persistent Inter-Camera ReID Gallery with Spatial Exclusivity
-**Description:** Implement `PersistentReIDGallery` in `edge/reid.py` and decouple gallery state from camera-level tracker resets in `edge/launcher.py`. Enforce a **spatial exclusivity constraint**: if Technician A has an active, confirmed track on Camera 1 (Bay 1), Camera 2 (Bay 3) cannot assign Technician A's identity to an ambiguous track unless Camera 1 registers a departure or track loss for $> 5.0\text{ seconds}$. Enforce strict anti-poisoning enrollment (requires face confidence $\ge 0.70$ and upright bounding box $H/W \ge 1.0$). Cap gallery to 16 embeddings per technician with FIFO eviction.
-**Acceptance criteria:**
-- [x] `PersistentReIDGallery` persists across active camera switches and tracker resets.
-- [x] Spatial exclusivity blocks Camera 2 from falsely claiming a technician who is currently active on Camera 1.
-- [x] Anti-poisoning policy rejects distorted, occluded, or low-confidence face crops.
-- [x] Gallery size is capped at 16 embeddings per person with FIFO eviction.
-**Verification:**
-- [x] Tests pass: `.venv/bin/python -m unittest test_tracker -k gallery -v`
-- [x] Build succeeds: `.venv/bin/python -c "import launcher, tracker, reid; print('Imports valid')"`
-- [x] Manual check: Simulate two camera feeds with synthetic dark-uniform crops; verify spatial exclusivity prevents duplicate identity assignment.
-**Dependencies:** Task 1
-**Files likely touched:**
-- `edge/reid.py`
-- `edge/tracker.py`
-- `edge/launcher.py`
-**Estimated scope:** Medium (3 files)
-
----
-
-## Task 3: Throttled & Event-Gated 360° Re-ID Handover
-**Description:** Implement cadenced, event-gated Re-ID extraction in `edge/tracker.py` to prevent the 70–140 ms OSNet CPU hot-loop. Extract 512-dim OSNet embeddings ONLY when: (1) a track hits $\ge 3$ hits and has no initial embedding (`track.features is None`), (2) spatial IoU / Kalman matching drops completely, or (3) as a background refresh throttled to at most once every **30–45 frames** ($2.0-3.0\text{s}$). Skip extraction completely on degenerate crops ($w < 20\text{ px}$ or $h < 40\text{ px}$). Match against `PersistentReIDGallery` with cosine similarity $\ge 0.65$.
-**Acceptance criteria:**
-- [x] OSNet forward pass is never invoked on every frame; extraction is capped at $\le 1$ pass per 30 frames per track.
-- [x] Extraction drops out immediately on degenerate crops ($w < 20$ or $h < 40$).
-- [x] Tracks with turned heads ($90^\circ-180^\circ$) recover confirmed staff identity without causing FPS degradation.
-**Verification:**
-- [x] Tests pass: `.venv/bin/python -m unittest test_tracker test_person -v`
-- [x] FPS benchmark check: Verify that running a 30-second sequence with 2 turned-away tracks maintains $\ge 20\text{ FPS}$.
-- [x] Manual check: Verify simulated track without face matches gallery embedding when spatial matching drops.
-**Dependencies:** Task 2
-**Files likely touched:**
-- `edge/tracker.py`
-- `edge/test_tracker.py`
-**Estimated scope:** Small (2 files)
-
----
-
-## Checkpoint 2: ReID & Multi-Camera Continuity
-- [x] All tracker unit tests pass (`.venv/bin/python -m unittest test_tracker -v`)
-- [x] ReID gallery survives camera switches without clearing embeddings
-- [x] Spatial exclusivity blocks cross-camera identity collisions
-- [x] Re-ID extraction throttling maintains $\ge 20\text{ FPS}$ with turned-away tracks
-
----
-
-## Task 4: Strict Three-Tier Bay Labor Admission Gate & Anti-Clutter
-**Description:** Update `BayZoneManager.update()` in `edge/occupancy.py` to enforce a strict three-tier admission gate before admitting a detection into a bay session or accumulating labor time. Detections must satisfy: (1) confirmed track status (`hits >= 3` and not flagged as `clutter`), (2) verified torso keypoint connectivity (shoulders + hips), and (3) non-zero motion/jitter history over a temporal window. Inanimate objects (boots, bags, jack stands, tires) are rejected at the gate and never start a bay session or accrue unverified seconds. Whitelist `is_creeper_or_underbody_pose` so legitimate mechanics working under chassis are preserved.
-**Acceptance criteria:**
-- [x] Inanimate clutter inside bay ROIs (shoes, backpacks, tires) is blocked from starting bay sessions.
-- [x] `bay.state` remains `EMPTY` / `IDLE` and `bay.unverified_seconds` stays 0.0 on stationary clutter.
-- [x] Mechanics lying on creepers (`is_creeper_or_underbody_pose`) pass admission and accumulate labor time.
-**Verification:**
-- [x] Tests pass: `.venv/bin/python -m unittest test_garage -k clutter -v`
-- [x] Tests pass: `.venv/bin/python -m unittest test_person -k creeper -v`
-- [x] Manual check: Run synthetic test with stationary shoes in Bay 1 ROI; verify zero wrench/unverified time accrued.
-**Dependencies:** Task 1
-**Files likely touched:**
+- `edge/person.py`
 - `edge/occupancy.py`
-- `edge/test_garage.py`
+- `edge/test_person.py`
+**Estimated scope:** Small (3 files)
+
+---
+
+## Task 2: Fix Unconfirmed Track Visibility & Dynamic Cadence Blind Spot
+**Description:** In `edge/tracker.py`, update `PersonTracker.update()` so that high-confidence detections (`conf >= 0.35`) in their initial confirmation window (`hits < 3`) are returned with an acquiring flag (`det.confirmed = False`) rather than being discarded into an empty list. In `edge/person.py`, update `draw_detection()` to render tentative tracks (e.g. dashed border or acquiring tag) so workers are immediately visible to the user from frame 1. In `edge/launcher.py`, ensure that when an acquiring person is present in the frame, `dynamic_interval` immediately switches to high-cadence detection ($1.0 / \text{detect\_fps}$) rather than sleeping for 3.0s.
+**Acceptance criteria:**
+- [ ] A person entering the frame is rendered on screen on frame 1 rather than being completely invisible until frame 3.
+- [ ] Motion/person presence immediately kicks `dynamic_interval` into high cadence ($8\text{ FPS}$).
+- [ ] Downstream bay wrench-time accumulation and Face ID enrollment continue to require confirmed tracks (`hits >= 3`) to prevent clutter accumulation.
+**Verification:**
+- [ ] Tests pass: `.venv/bin/python -m unittest test_tracker -v`
+- [ ] Tests pass: `.venv/bin/python -m unittest test_video_file -v`
+- [ ] Manual check: Verify new track appears immediately on screen during live stream ingest.
+**Dependencies:** Task 1
+**Files likely touched:**
+- `edge/tracker.py`
+- `edge/person.py`
+- `edge/launcher.py`
+**Estimated scope:** Medium (3 files)
+
+---
+
+## Task 3: Wire Frontend ML Toggle Checkbox to Backend State & API
+**Description:** In `edge/hub.html`, attach an `onchange` event listener to `#camera-ml-input` so toggling the switch invokes `/api/cameras/toggle-ml` immediately for the active camera. In `cameraPayload()` and `connectAndStreamCamera()`, include `ml_enabled: document.getElementById('camera-ml-input').checked` in the request body. In `edge/launcher.py`, update `save_camera()` to map and persist `ml_enabled` into `self.cfg["cameras"]`.
+**Acceptance criteria:**
+- [ ] Toggling the "AI Person & Vehicle Detection" switch immediately fires an API request to toggle ML on the active camera without needing to click "Save Camera".
+- [ ] Connecting a stream via `connectAndStreamCamera()` preserves the user's ML enabled/disabled state.
+- [ ] `save_camera()` persists `ml_enabled` in `config.yaml`.
+**Verification:**
+- [ ] Tests pass: `.venv/bin/python -m unittest test_background_ml -v`
+- [ ] Manual check: Toggle switch in UI; verify backend returns updated camera list with matching `ml_enabled`.
+**Dependencies:** None
+**Files likely touched:**
+- `edge/hub.html`
+- `edge/launcher.py`
 **Estimated scope:** Small (2 files)
 
 ---
 
-## Task 5: 30-Second Bay Occlusion Hysteresis & Polygon Exit Short-Circuit
-**Description:** Refine bay session state hysteresis in `edge/occupancy.py`. When a confirmed technician is working in a bay and becomes occluded under a vehicle or behind a lift pillar, maintain their active `WORKING` or `UNDER_VEHICLE` session and locked identity for up to 30 seconds before timing out to vacant. If the technician's bounding box is explicitly observed crossing the bay polygon boundary, short-circuit the 30-second dwell timer and close the bay session immediately.
+## Checkpoint 1: Detection & Tracking Verified
+- [ ] Laptop webcam detects user immediately with bounding box, skeleton, and face tracking
+- [ ] Unit tests pass clean: `.venv/bin/python -m unittest test_person test_tracker test_garage`
+
+---
+
+## Task 4: Propagate Dynamic Flip to Grabbers and Ingest Pipeline
+**Description:** In `edge/launcher.py`, update `set_orient()` so that when a flip mode (`'h'`, `'v'`, or `'none'`) is applied via `/api/orient`, it immediately sets `self.grabber.output_flip = new_flip` and updates `worker.grabber.output_flip = new_flip` and `worker.cfg["flip"] = new_flip` across all active camera pool workers. In `edge/capture.py`, ensure `AsyncFrameGrabber` applies `output_flip` reliably during JPEG generation and frame publication so all served frames match the requested orientation.
 **Acceptance criteria:**
-- [x] Occlusion dwell grace period holds state and active technician for up to 30 seconds during visual occlusions.
-- [x] Re-emergence within 30 seconds resumes labor on the same session without splitting records or reverting to `"Employee"`.
-- [x] Bounding box exiting the bay polygon short-circuits the grace timer and closes the session immediately.
+- [ ] Calling `/api/orient` with `flip: "h"` or `flip: "v"` dynamically changes the orientation of JPEGs served from `/api/frame.jpeg` and `/api/camera/<id>/frame.jpeg`.
+- [ ] Both the active grabber and background camera workers immediately reflect the updated flip mode without requiring a server restart.
 **Verification:**
-- [x] Tests pass: `.venv/bin/python -m unittest test_garage -k occlusion -v`
-- [x] Build succeeds: `.venv/bin/python -c "import occupancy; print('Occupancy clean')"`
-- [x] Manual check: Verify simulated 20s occlusion holds state; verify immediate exit closes session.
+- [ ] Tests pass: `.venv/bin/python -m unittest test_patch_fixes -k orient -v`
+- [ ] Manual check: Call `/api/orient` with `flip: "h"`; verify fetched `/api/frame.jpeg` has horizontally mirrored pixels.
+**Dependencies:** None
+**Files likely touched:**
+- `edge/launcher.py`
+- `edge/capture.py`
+**Estimated scope:** Small (2 files)
+
+---
+
+## Task 5: Implement Synchronized CSS Mirror Transforms and Feed Restart in UI
+**Description:** In `edge/hub.html`, update `toggleFlip(which)` and `paintOrient()` to apply a responsive CSS transform (`transform: scaleX(-1)` for horizontal, `scaleY(-1)` for vertical, or `scale(-1, -1)` for both) to `#live-camera-feed`, `#live-webrtc`, and active grid tile elements. Call `startLivePlayer(lastLiveStreamId, lastLiveMedia)` and `requestAnimationFrame(layoutVideoStage)` on flip toggles to ensure the video canvas and DOM ROI overlays remain in perfect pixel alignment.
+**Acceptance criteria:**
+- [ ] Clicking "Left-right" or "Up-down" immediately mirrors the camera feed display in the DOM.
+- [ ] The ROI box and camera view flip synchronously so bounding boxes never become inverted relative to the video image.
+- [ ] The transform applies cleanly in both single view and multi-camera grid tiles.
+**Verification:**
+- [ ] Tests pass: Inspect CSS styling rules and verify DOM element style assignment in `edge/hub.html`.
+- [ ] Manual check: Click "Left-right"; verify webcam feed flips horizontally alongside ROI boxes.
 **Dependencies:** Task 4
 **Files likely touched:**
-- `edge/occupancy.py`
-- `edge/test_garage.py`
-**Estimated scope:** Small (2 files)
+- `edge/hub.html`
+**Estimated scope:** Small (1 file)
 
 ---
 
-## Checkpoint 3: Bay State Machine & Labor Integrity
-- [x] All garage unit tests pass (`.venv/bin/python -m unittest test_garage -v`)
-- [x] Inanimate clutter never transitions bay to WORKING or accrues unverified seconds
-- [x] Mechanic under vehicle retains session continuity across 20-30s occlusions
-- [x] Physical bay departure closes session without lingering dwell time
+## Checkpoint 2: Mirror Options Verified
+- [ ] Clicking mirror buttons flips both the camera view and the ROI overlay simultaneously in single and grid mode
+- [ ] Grabbers encode flipped frames on backend; UI mirrors video feed in frontend
 
 ---
 
-## Task 6: Sidecar PyInstaller Build & DirectML/OpenVINO Packaging
-**Description:** Update `edge/build_sidecar.py` and `edge/inbound-engine.spec` to validate that all required models (`yolo11n-pose.onnx` at 640x640, `yolo11n.onnx` at 512x512, `osnet_x0_25_market1501.onnx`), runtime libraries (OpenVINO / DirectML / onnxruntime shared DLLs), MSVC runtimes, and modules (`one_euro`) are validated during the dry-run inspection step before PyInstaller packaging.
+## Task 6: Resilient Grid Tile Polling (Prevent HTTP 204 Error Collapse)
+**Description:** In `edge/hub.html`, overhaul the grid tile rendering in `renderMultiCamGrid()`. Rather than assigning `<img src>` which permanently triggers `onerror` on HTTP 204 (No Content) during startup, implement a resilient blob-based fetch loop with retry backoff (mirroring `startJpegPump`) or explicitly ignore HTTP 204 without toggling `img.style.display = 'none'`. When existing tiles are refreshed in `renderMultiCamGrid()`, ensure polling timers are restarted if paused.
 **Acceptance criteria:**
-- [x] `build_sidecar.py --dry-run` verifies presence of 640x640 and 512x512 ONNX models and `one_euro.py`.
-- [x] `inbound-engine.spec` bundles OpenVINO and onnxruntime shared libraries and hidden imports without missing symbols.
-- [x] Package dry-run confirms zero missing runtime dependencies.
+- [ ] Receiving an HTTP 204 response from `/api/camera/<id>/frame.jpeg` does NOT permanently hide the grid tile image or trigger the disconnected fallback.
+- [ ] Grid tiles smoothly reconnect and display frames as soon as the camera stream produces data.
+- [ ] Re-rendering the grid dimensions (e.g. switching between Auto, 2x2, 3x3) maintains active frame polling without freezing tiles.
 **Verification:**
-- [x] Dry-run command passes: `.venv/bin/python build_sidecar.py --dry-run`
-- [x] Spec check passes: `.venv/bin/python -c "import PyInstaller; print('PyInstaller available')"`
-**Dependencies:** Task 1, Task 2
+- [ ] Manual check: Switch between 1x1 and 2x2 grid; verify laptop camera tile streams continuously.
+- [ ] Tests pass: Frontend integration check in `edge/hub.html`.
+**Dependencies:** None
 **Files likely touched:**
-- `edge/build_sidecar.py`
-- `edge/inbound-engine.spec`
-**Estimated scope:** Small (2 files)
+- `edge/hub.html`
+**Estimated scope:** Small (1 file)
 
 ---
 
-## Task 7: Virtual Camera Live Multi-Stream Benchmark Test
-**Description:** Build an automated end-to-end regression script using `tools/virtual-camera/` and `edge/test_video_file.py` to stream realistic workshop video sequences through the complete ML pipeline. Measure tracking FPS ($\ge 20\text{ FPS}$ target on edge CPU), tracklet ID switch count, face-to-ReID handoff rate, and verify that bay wrench time accrues accurately within 5% tolerance.
+## Task 7: Ensure Main Webcam Frames Are Consistently Served in Grid Mode
+**Description:** In `edge/launcher.py`, update `get_camera_frame(cid)` and `CameraStreamPool`. When the active camera is a local webcam (`source: 0` or protocol `webcam`), ensure that grid requests for `/api/camera/<active_id>/frame.jpeg` cleanly share the active frame grabber's latest JPEG without competing for exclusive device access (`EBUSY`). If `is_streaming` is False when entering grid mode, auto-provision background worker grabbers so the webcam streams frames without requiring manual single-mode connection.
 **Acceptance criteria:**
-- [x] Test executes a 30-second garage video clip through `VideoFileAdapter` and `LiveStreamEngine`.
-- [x] Measures tracking continuity: zero unexpected track ID resets on walking technician.
-- [x] Average throughput exceeds $20\text{ FPS}$ on edge CPU.
-- [x] Bay wrench time matches expected ground-truth duration within 5% tolerance.
+- [ ] `/api/camera/<active_id>/frame.jpeg` reliably returns the latest frame for the laptop camera in grid mode.
+- [ ] No `EBUSY` or "busy device" conflicts occur between `CameraStreamPool` workers and `LiveStreamEngine`.
+- [ ] Switching between single-mode full screen (1x1) and multi-camera grid maintains uninterrupted video flow.
 **Verification:**
-- [x] Tests pass: `.venv/bin/python -m unittest test_video_file -v`
-- [x] Benchmark script executes cleanly: `.venv/bin/python -c "import adapters.video_file; print('Video adapter ready')"`
-**Dependencies:** Task 3, Task 5
+- [ ] Tests pass: `.venv/bin/python -m unittest test_video_file -k CameraStreamPool -v`
+- [ ] Tests pass: `.venv/bin/python -m unittest test_multicam_roi -v`
+- [ ] Manual check: Run grid mode with main camera; verify frame rate is steady and preview never drops.
+**Dependencies:** Task 6
 **Files likely touched:**
-- `edge/test_video_file.py`
-- `tools/virtual-camera/generate_test_clip.py`
-**Estimated scope:** Small (2 files)
+- `edge/launcher.py`
+- `edge/test_multicam_roi.py`
+**Estimated scope:** Medium (2 files)
+
+---
+
+## Checkpoint 3: Grid System Verified
+- [ ] Main laptop camera displays cleanly in 2x2, 3x3, auto grid, and 1x1 full screen
+- [ ] No race conditions, port locks, or HTTP 204 tile collapses
+
+---
+
+## Task 8: Invariant Rules & Regression Shielding
+**Description:** Create `.agents/rules/camera_detection_invariants.md` and automated regression tests in `edge/test_patch_fixes.py` and `edge/test_person.py` to freeze the core operational laws: (1) upper-body pose whitelist law, (2) orientation transform synchronization law, (3) grid stream resiliency law, and (4) UI ML toggle synchronization law. Ensure that any future refactor attempting to add strict hip requirements or un-mirrored flip handlers immediately fails the automated test suite.
+**Acceptance criteria:**
+- [ ] `.agents/rules/camera_detection_invariants.md` documents non-negotiable architectural rules.
+- [ ] Regression unit tests in `edge/test_person.py` and `edge/test_patch_fixes.py` enforce:
+  - Upper-body worker acceptance with occluded lower body.
+  - Grabber `output_flip` synchronization upon `/api/orient`.
+  - Non-collapsing grid tile response handlers.
+- [ ] 100% of repository test suite passes cleanly.
+**Verification:**
+- [ ] Run full test suite: `PYTHONPATH=edge edge/.venv/bin/python -m unittest discover -s edge -p "test_*.py"`
+**Dependencies:** Tasks 1–7
+**Files likely touched:**
+- `.agents/rules/camera_detection_invariants.md`
+- `edge/test_person.py`
+- `edge/test_patch_fixes.py`
+**Estimated scope:** Small (3 files)
 
 ---
 
 ## Checkpoint 4: Complete System Validation
-- [x] Full automated test suite passes: `.venv/bin/python -m unittest discover -s edge -p "test_*.py"`
-- [x] Zero track flapping, zero skeleton flailing, zero clutter hallucinations
-- [x] Multi-camera ReID and bay identity locking fully verified at $\ge 20\text{ FPS}$
+- [ ] Full automated test suite passes: `PYTHONPATH=edge edge/.venv/bin/python -m unittest discover -s edge -p "test_*.py"`
+- [ ] All 3 user issues resolved and guarded by regression tests

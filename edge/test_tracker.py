@@ -118,6 +118,26 @@ class TrackerIdentityTests(unittest.TestCase):
         missed = tracker.update([])
         self.assertEqual(missed, [])
 
+    def test_unconfirmed_tracks_returned_when_requested(self):
+        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3)
+        # Frame 1: new track, hits=1, return_unconfirmed=True
+        out = tracker.update([_det(name="George", staff=True)], return_unconfirmed=True)
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0].confirmed)
+        self.assertEqual(out[0].hits, 1)
+
+        # Frame 2: hits=2, still unconfirmed
+        out = tracker.update([_det(name="George", staff=True)], return_unconfirmed=True)
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0].confirmed)
+        self.assertEqual(out[0].hits, 2)
+
+        # Frame 3: hits=3, now confirmed!
+        out = tracker.update([_det(name="George", staff=True)], return_unconfirmed=True)
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0].confirmed)
+        self.assertEqual(out[0].hits, 3)
+
     def test_confirmed_track_coasts_on_miss(self):
         tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3)
         confirmed = []

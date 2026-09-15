@@ -1351,6 +1351,8 @@ class LiveStreamEngine:
                 camera_fields["source"] = self.cfg.get("source")
                 camera_fields["rotate"] = self.cfg.get("rotate")
                 camera_fields["flip"] = self.cfg.get("flip")
+                if "ml_enabled" in camera_fields:
+                    camera_fields["ml_enabled"] = bool(camera_fields["ml_enabled"])
                 upsert_camera(self.cfg, camera_fields)
             cameras = list(self.cfg.get("cameras") or [])
             active_id = str(cid or self.cfg.get("active_camera_id") or "")
@@ -1664,6 +1666,8 @@ class LiveStreamEngine:
             mapped["bays"] = fields.get("bays")
         if "enabled" in fields:
             mapped["enabled"] = bool(fields.get("enabled"))
+        if "ml_enabled" in fields:
+            mapped["ml_enabled"] = bool(fields.get("ml_enabled"))
         if "trigger_mode" in fields:
             mapped["trigger_mode"] = str(fields.get("trigger_mode") or "roi_state_change")
         with self.lock:
@@ -2523,6 +2527,27 @@ class LiveStreamEngine:
             cfg_to_save = dict(self.cfg)
 
         save_config(cfg_to_save)
+
+        rot_val = cfg_to_save.get("rotate")
+        try:
+            rot_int = int(rot_val) if rot_val != "auto" else 0
+        except (ValueError, TypeError):
+            rot_int = 0
+        flp_val = str(cfg_to_save.get("flip") or "none")
+
+        if hasattr(self, "grabber") and self.grabber is not None:
+            self.grabber.output_rotate = rot_int
+            self.grabber.output_flip = flp_val
+
+        if hasattr(self, "camera_pool") and self.camera_pool is not None:
+            active_cid = str(self.cfg.get("active_camera_id") or "")
+            worker = self.camera_pool.get_worker(active_cid)
+            if worker is not None:
+                worker.update_cfg({"rotate": rot_val, "flip": flp_val})
+                if hasattr(worker, "grabber") and worker.grabber is not None:
+                    worker.grabber.output_rotate = rot_int
+                    worker.grabber.output_flip = flp_val
+
         return {
             "success": True,
             "rotate": cfg_to_save.get("rotate"),
@@ -2766,8 +2791,9 @@ class LiveStreamEngine:
             # Dynamic AI Cadence: High FPS during active motion/work; Low-compute Sleep during static wait
             has_active_work = any(s.state in ("WORKING", "UNDER_VEHICLE") for s in snapshots)
             has_open_session = any(getattr(s, "session_open", False) for s in snapshots)
-            if motion_score > 1.2 or has_active_work or has_open_session:
-                dynamic_interval = interval  # Full high-cadence AI while a bay session is open
+            has_detected_person = len(last_accepted) > 0
+            if motion_score > 1.2 or has_active_work or has_open_session or has_detected_person:
+                dynamic_interval = interval  # Full high-cadence AI while a person/worker is detected
             elif any(s.state in ("PARKED_WAITING", "ON_BREAK") for s in snapshots):
                 dynamic_interval = 2.0  # Low-compute check (0.5 FPS during customer consultation wait)
             else:

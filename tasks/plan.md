@@ -1,99 +1,78 @@
-# Implementation Plan: Multi-Modal Identity Continuity, Throttled 360° ReID, and Bay State Machine Hardening
+# Implementation Plan: Machine Learning Worker Detection, Stream Mirroring & Multi-Camera Grid Hardening
 
 ## Overview
-Building upon the verified foundation of the **Edge Pose Tracking Plan** (8D size-aware Kalman filter, ByteTrack high/low association, OneEuro keypoint stabilization, and bilateral limb swap), this phase delivers production-grade identity continuity and bay labor integrity.
-
-This plan incorporates critical operational adjustments to eliminate performance traps and cross-camera collision hazards:
-1. **Model Resolution Lock (640x640 pose / 512x512 vehicle)** and OpenVINO thread-pinning are prioritized upfront to secure a $\ge 25\text{ FPS}$ foundation.
-2. **Throttled, Event-Gated OSNet Extraction** (capped to at most once per 30–45 frames, or strictly on spatial match drops) prevents the 70–140 ms edge CPU hot-loop bottleneck.
-3. **Spatial Exclusivity Constraints** in `PersistentReIDGallery` prevent dark-uniform cross-camera identity misattributions across simultaneous bay camera streams.
-4. **Three-Tier Bay Labor Admission & Whitelisted Creeper Support** blocks inanimate clutter (jack stands, tires, shoes) while preserving mechanics under chassis.
-5. **30-Second Occlusion Dwell with Boundary Exit Short-Circuit** provides seamless labor continuity while immediately terminating sessions when a technician physically walks out.
+This implementation plan diagnoses, isolates, and resolves the three critical functional regressions reported after the Edge Pose Tracking rollout, and installs unbreakable invariant guardrails to protect against future modifications:
+1. **Worker Detection & Tracking Failure**:
+   - The kinematic pose acceptance gate (`is_human_pose` in `edge/person.py`) and three-tier bay admission gate (`is_admissible_bay_occupant` in `edge/occupancy.py`) over-indexed on full-standing skeletons with connected hips/legs. When a worker is framed by a laptop webcam, desk, toolbench, or hood line, hips/legs are occluded, causing YOLO person boxes ($\text{conf} \ge 0.50-0.70$) to be rejected as "blobs" and excluded from tracking.
+   - `tracker.update()` hides unconfirmed tracks (`hits < 3`), creating an initial 2-frame blind spot which, compounded by the 3.0s idle cadence, causes the system to drop newly appearing workers before they ever become visible.
+   - The UI "AI Person & Vehicle Detection" switch (`#camera-ml-input`) lacked an `onchange` event listener and was omitted from `save_camera` and `/api/connect-stream` payloads, meaning toggling it in the form never updated the engine.
+2. **Mirror / Flip View Disconnect**:
+   - `edge/hub.html`'s `toggleFlip(which)` only mutated the DOM ROI polygon coordinates, leaving the video element and live WebRTC/JPEG player unflipped without CSS transforms or stream reloads.
+   - Dynamic `/api/orient` on the backend updated `cfg["flip"]` in memory and disk, but never propagated `output_flip` to the active `AsyncFrameGrabber` or `CameraStreamWorker` instances, causing pre-encoded server JPEGs to remain unflipped.
+3. **Main Laptop Camera Disappearing in Grid Mode**:
+   - The multi-camera grid rendered camera tiles using standard HTML `<img>` elements pointing to `/api/camera/${cam.id}/frame.jpeg`. In browsers, receiving HTTP 204 (No Content) during startup or frame intervals triggers `img.onerror`, which permanently hid the image element and displayed the fallback placeholder.
+   - When launching directly into grid mode or before clicking "Connect Stream", `self.is_streaming` was `False`, meaning `CameraStreamPool` was never initialized with active workers and `self.current_frame_jpeg` was `None`, resulting in immediate HTTP 204 responses for the main webcam.
 
 ---
 
-## Architecture Decisions
+## Architecture Decisions & Guardrails
 
-### 1. Upfront Model Resolution Lock & OpenVINO Thread Pinning
-- **Hard-lock Export & Inference Resolutions**:
-  - `yolo11n-pose`: $640 \times 640$ (reduces proposal grid from 18,900 down to 8,400 proposals vs $960$).
-  - `yolo11n` (vehicle): $512 \times 512$ at decoupled 1.0s cadence.
-- **Thread Pinning**:
-  - Restrict OpenVINO / ONNX CPU inference threads to physical core count (e.g. `num_threads=4`) in `runtime.py` to eliminate thread thrashing and context-switching overhead.
-- **Execution Order Rationale**:
-  - Performance must be stabilized first. Testing tracking continuity, Re-ID, and bay state hysteresis on an engine running below 2 FPS generates timing artifacts that invalidate test metrics.
-
-### 2. Throttled & Event-Gated Re-ID (Preventing the OSNet Hot-Loop)
-- **Problem**: Running 512-dim OSNet on edge CPU takes 70–140 ms per crop. Continuous extraction drops frame rate to 3–6 FPS.
+### 1. Robust Pose Acceptance for Upper-Body & Seated Workers (`edge/person.py`)
+- **Root Cause**: `is_face_closeup` disqualifies anyone when both shoulders are visible (`_count_visible >= 2 -> False`), forcing desk/webcam workers into `is_human_pose`, which demands $\ge 2$ kinematic bones (requiring hips/legs). Furthermore, `is_admissible_bay_occupant` strictly demands `has_shoulder and has_hip`.
 - **Solution**:
-  - **Never extract on every frame**.
-  - Extract appearance embeddings *only* when:
-    1. A new track confirms (`hits >= 3`) and has no initial embedding (`track.features is None`), OR
-    2. Spatial IoU and Kalman matching fail completely and track recovery is required, OR
-    3. As a background refresh throttled to at most once every **30–45 frames** (2.0–3.0 seconds).
-  - Degenerate crop guard: Skip extraction if $w < 20\text{ px}$ or $h < 40\text{ px}$.
+  - Add an explicit `is_upper_body_pose` path in `is_human_pose`: if a head (nose/eyes/ears) and both shoulders form a valid shoulder girdle (`L_SHOULDER` to `R_SHOULDER`) with the head positioned anatomically above the shoulders and $\text{conf} \ge 0.35$, the detection is accepted as human even if hips/legs are below the desk or vehicle bumper.
+  - Update `is_admissible_bay_occupant`: accept workers satisfying `(has_shoulder and has_hip) or (has_head and has_shoulder and upper_bones >= 1)`.
+  - In `PersonTracker.update()`: render high-confidence unconfirmed tracks (`hits < 3`) with a distinct tentative style (e.g. dashed bounding box / acquiring state) rather than discarding them completely from the frame's `last_accepted` rendering list.
 
-### 3. Cross-Camera Spatial Exclusivity in Shared Gallery
-- **Problem**: Mechanics wearing identical dark-blue/black shop uniforms can trigger false cross-camera Re-ID matches when matching solely against appearance embeddings ($\ge 0.65$).
+### 2. End-to-End Stream Mirroring Architecture (`edge/hub.html` & `edge/launcher.py`)
+- **Root Cause**: `toggleFlip()` in `hub.html` transformed ROI geometries but never styled `#live-camera-feed` / `#live-webrtc`, and `/api/orient` never updated `grabber.output_flip`.
 - **Solution**:
-  - `PersistentReIDGallery` tracks which camera stream currently holds a confirmed active technician.
-  - If Technician A has an active, confirmed track in Camera 1 (Bay 1), Camera 2 (Bay 3) **cannot** assign Technician A's identity to an ambiguous track unless Camera 1 registers a departure or total track loss for $> 5.0\text{ seconds}$.
-  - Gallery enrollment is strictly anti-poisoned: Requires face confidence $\ge 0.70$ and upright aspect ratio ($H/W \ge 1.0$).
-  - FIFO eviction caps each technician profile to 16 embeddings.
+  - In `edge/launcher.py`'s `set_orient`: explicitly update `self.grabber.output_flip = self.cfg["flip"]`, and iterate over all `self.camera_pool._workers` to update `worker.grabber.output_flip` and `worker.cfg["flip"]`.
+  - In `edge/capture.py`: ensure `AsyncFrameGrabber._capture_loop` applies `output_flip` to both the encoded JPEG and the frame metadata.
+  - In `edge/hub.html`: apply CSS transform matrix (`transform: scaleX(-1)` for `h`, `scaleY(-1)` for `v`, or `scale(-1, -1)` for both) to `#live-camera-feed`, `#live-webrtc`, and corresponding grid tile images so visual feedback is instantaneous, and call `startLivePlayer()` to align stream state.
 
-### 4. Three-Tier Bay Admission Gating & Creeper Whitelisting
-- In `BayZoneManager.update()`, admissions must pass:
-  1. **Track Confirmation**: Track must be confirmed (`hits >= 3`) and not flagged as clutter.
-  2. **Kinematic Torso Connectivity**: Shoulders and hips must form a connected graph (isolated shoe/ankle pairs are rejected).
-  3. **Motion / Jitter Proof**: Non-zero motion energy or joint variance over a temporal window.
-- **Whitelist**: `is_creeper_or_underbody_pose` is explicitly whitelisted to preserve legitimate floor mechanics.
+### 3. Grid Stream Resiliency & Unified Webcam Ingest (`edge/hub.html` & `edge/launcher.py`)
+- **Root Cause**: Grid tiles use raw `<img>` tags that collapse on HTTP 204. In addition, when the engine is in `STANDBY` (`is_streaming=False`), `get_camera_frame` returns `None` for the main camera because background workers are not started.
+- **Solution**:
+  - In `edge/hub.html`: replace brittle raw `<img src>` polling with robust fetch-and-blob-URL pipeline (identical to `startJpegPump`) or prevent `img.onerror` from hiding the video element on HTTP 204 / transient empty responses.
+  - In `edge/launcher.py`: ensure `get_camera_frame(cid)` can spin up on-demand preview capture for local webcams or serve the fallback grabber even if `is_streaming` has not been formally engaged. When in grid mode, ensure the main camera worker cleanly provisions frames without device busy locks (`EBUSY`).
 
-### 5. 30-Second Bay Occlusion Hysteresis with Polygon Exit Short-Circuit
-- Mechanics crawling under chassis or occluded behind vehicle pillars retain active `WORKING` / `UNDER_VEHICLE` state and locked technician name for up to 30 seconds.
-- **Boundary Exit Short-Circuit**: If the track's bounding box is observed leaving the bay polygon boundary, the session closes immediately without waiting for the 30s timeout.
-
----
-
-## Dependency Graph & Execution Order
-
-```
-Phase 1: Performance Baseline & Resolution Lock
-  │   - Task 1: Model Resolution Lock (640x640 / 512x512) & OpenVINO Thread Pinning
-  ▼
-Checkpoint 1: Performance Foundation (>= 25 FPS verified)
-  │
-Phase 2: Persistent ReID with Spatial Exclusivity & Throttling
-  │   - Task 2: Persistent Inter-Camera ReID Gallery with Spatial Exclusivity
-  │   - Task 3: Throttled & Event-Gated 360° Re-ID Handover (30-frame cap, crop gate)
-  ▼
-Checkpoint 2: ReID & Multi-Camera Continuity
-  │
-Phase 3: Bay State Machine Hardening & Occlusion Hysteresis
-  │   - Task 4: Strict Three-Tier Bay Labor Admission Gate & Anti-Clutter
-  │   - Task 5: 30-Second Bay Occlusion Hysteresis & Polygon Exit Short-Circuit
-  ▼
-Checkpoint 3: Bay State Machine & Labor Integrity
-  │
-Phase 4: Sidecar Packaging & End-to-End Verification
-  │   - Task 6: Sidecar PyInstaller Build & Dependency Verification (DirectML/OpenVINO)
-  │   - Task 7: Virtual Camera Multi-Stream Regression Benchmark (FPS, ID switches)
-  ▼
-Checkpoint 4: Complete System Validation
-```
+### 4. Regression Shielding & Invariant Guardrails (`.agents/rules/camera_detection_invariants.md`)
+- Create dedicated invariant rules documenting that:
+  - Upper-body / webcam workers must never be gated on hip or ankle keypoints.
+  - Orientation (`rotate` / `flip`) must always synchronize simultaneously across backend grabber encoding, DOM overlay geometries, and frontend video transforms.
+  - Multi-camera grid tiles must never hide the main camera feed on transient 204 responses.
+  - Unit tests in `test_person.py`, `test_tracker.py`, `test_multicam_roi.py`, and `test_patch_fixes.py` will enforce these contracts on every CI/test run.
 
 ---
 
-## Risks and Mitigations
+## Task List
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| OSNet Hot-Loop Latency Collapse | Critical | Throttled extraction capped at 30–45 frames; trigger on-demand only during spatial drop; reject degenerate crops ($w < 20, h < 40$). |
-| Cross-Camera Uniform False ReID | High | Enforce spatial exclusivity: camera 2 cannot claim an identity already confirmed active on camera 1 without 5s departure. |
-| Inadvertent Veto of Underbody Mechanics | High | Whitelist `is_creeper_or_underbody_pose` and preserve `tracker.protected_ids`. |
-| Excessive Occlusion Dwell Delaying Bay Vacancy | Medium | Short-circuit the 30-second dwell if the technician's track is explicitly observed crossing out of the bay polygon. |
-| OpenVINO Thread Over-Subscription | Medium | Explicitly configure `INFERENCE_NUM_THREADS = 4` in `runtime.py`. |
+### Phase 1: Machine Learning Detection & Tracking Fixes
+- [ ] Task 1: Relax upper-body & webcam pose acceptance in `edge/person.py` and `edge/occupancy.py`
+- [ ] Task 2: Fix unconfirmed track visibility and dynamic cadence in `edge/tracker.py` and `edge/launcher.py`
+- [ ] Task 3: Wire frontend ML toggle checkbox (`#camera-ml-input`) to backend `/api/cameras/toggle-ml` and payload handlers
 
----
+### Checkpoint: Detection & Tracking Verified
+- [ ] Laptop webcam detects user immediately with bounding box, skeleton, and face tracking
+- [ ] `test_person.py`, `test_tracker.py`, and `test_garage.py` pass without regression
 
-## Open Questions
-- None blocking. All constraints, guardrails, and architectural priorities have been aligned with production requirements.
+### Phase 2: Stream Mirroring & Orientation Synchronization
+- [ ] Task 4: Propagate dynamic flip to grabbers in `edge/launcher.py` and `edge/capture.py`
+- [ ] Task 5: Implement synchronized CSS mirror transforms and feed restart in `edge/hub.html`
+
+### Checkpoint: Mirror Options Verified
+- [ ] Clicking "Left-right" and "Up-down" mirrors the live video feed and ROI box simultaneously in both single and grid view
+
+### Phase 3: Multi-Camera Grid Resilience & Main Camera Ingest
+- [ ] Task 6: Resilient grid tile polling (prevent HTTP 204 error collapse) in `edge/hub.html`
+- [ ] Task 7: Ensure main webcam frames are consistently served via `get_camera_frame` in `edge/launcher.py`
+
+### Checkpoint: Grid System Verified
+- [ ] Main laptop camera streams continuously in 2x2, 3x3, auto grid, and 1x1 full screen
+
+### Phase 4: Invariant Rules & Regression Shielding
+- [ ] Task 8: Add regression test suite and system invariant documentation (`.agents/rules/camera_detection_invariants.md`)
+
+### Checkpoint: Complete System Validation
+- [ ] All 172+ automated tests pass clean with zero errors

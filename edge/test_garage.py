@@ -1493,6 +1493,25 @@ class GarageApiTests(unittest.TestCase):
         self.assertGreater(snaps["bay_1"].wrench_seconds, 1.5)
         self.assertGreater(snaps["bay_1"].under_vehicle_seconds, 1.5)
 
+        # 6. Whitelist: Upper body / desk worker leaning over hood or bench
+        upper_kpts = [(0.0, 0.0, 0.0)] * 17
+        upper_kpts[0] = (250.0, 300.0, 0.9)   # Nose
+        upper_kpts[1] = (240.0, 290.0, 0.85)  # L Eye
+        upper_kpts[2] = (260.0, 290.0, 0.85)  # R Eye
+        upper_kpts[5] = (200.0, 350.0, 0.88)  # L Shoulder
+        upper_kpts[6] = (300.0, 352.0, 0.88)  # R Shoulder
+        upper_det = _det(
+            upper_kpts,
+            x1=180, y1=280, x2=320, y2=450,
+            name="George",
+            staff=True,
+            hits=3,
+        )
+        manager.update([upper_det], 1000, 1000, t0 + 10.0, kpt_conf=0.4)
+        manager.update([upper_det], 1000, 1000, t0 + 12.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].mechanic_name, "George")
+
     def test_thirty_second_bay_occlusion_hysteresis(self):
         manager = BayZoneManager(
             DEFAULT_BAYS,

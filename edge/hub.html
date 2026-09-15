@@ -782,7 +782,7 @@
                 <span class="text-[11px] text-on-surface-variant">Track bay presence, ROI occupancy & wrench time for this camera</span>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="camera-ml-input" class="sr-only peer" checked>
+                <input type="checkbox" id="camera-ml-input" class="sr-only peer" checked onchange="onCameraMlToggle()">
                 <div class="w-9 h-5 bg-surface-container-high peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
               </label>
             </div>
@@ -2253,18 +2253,39 @@
       }
       [0, 90, 180, 270].forEach((d) => {
         const el = document.getElementById('rot-' + d);
-        el.className = 'px-3 py-1.5 text-xs rounded border ' + (rotateDeg === d
-          ? 'orient-on'
-          : 'border-outline-variant bg-surface-container-highest text-on-surface-variant');
+        if (el) {
+          el.className = 'px-3 py-1.5 text-xs rounded border ' + (rotateDeg === d
+            ? 'orient-on'
+            : 'border-outline-variant bg-surface-container-highest text-on-surface-variant');
+        }
       });
       ['h', 'v'].forEach((f) => {
         const el = document.getElementById('flip-' + f);
-        el.className = 'px-3 py-1.5 text-xs rounded border ' + (flipMode === f
-          ? 'orient-on'
-          : 'border-outline-variant bg-surface-container-highest text-on-surface-variant');
+        if (el) {
+          el.className = 'px-3 py-1.5 text-xs rounded border ' + (flipMode === f
+            ? 'orient-on'
+            : 'border-outline-variant bg-surface-container-highest text-on-surface-variant');
+        }
       });
-      document.getElementById('rotate-input').value = rotateDeg === 'auto' ? 'auto' : String(rotateDeg);
-      document.getElementById('flip-input').value = flipMode;
+      const rotInput = document.getElementById('rotate-input');
+      if (rotInput) rotInput.value = rotateDeg === 'auto' ? 'auto' : String(rotateDeg);
+      const flipInput = document.getElementById('flip-input');
+      if (flipInput) flipInput.value = flipMode;
+
+      // Synchronize CSS mirror transform across video elements and active grid tile
+      const flipTransform = flipMode === 'h'
+        ? 'scaleX(-1)'
+        : (flipMode === 'v' ? 'scaleY(-1)' : (flipMode === 'both' || flipMode === 'hv' ? 'scale(-1, -1)' : 'none'));
+
+      const feedEl = document.getElementById('live-camera-feed');
+      if (feedEl) feedEl.style.transform = flipTransform;
+      const webrtcEl = document.getElementById('live-webrtc');
+      if (webrtcEl) webrtcEl.style.transform = flipTransform;
+
+      if (activeCameraId) {
+        const activeTileImg = document.querySelector(`.grid-cam-tile[data-cam-id="${CSS.escape(activeCameraId)}"] img`);
+        if (activeTileImg) activeTileImg.style.transform = flipTransform;
+      }
     }
 
     function transformAllBaysGeometry(transformFn) {
@@ -2349,6 +2370,8 @@
       }
       paintOrient();
       pushOrient();
+      if (isStreamActive) startLivePlayer(lastLiveStreamId, lastLiveMedia);
+      requestAnimationFrame(layoutVideoStage);
     }
 
     async function pushOrient() {
@@ -4158,11 +4181,11 @@
       }
     }
 
-    async function toggleCameraML(id, ev) {
+    async function toggleCameraML(id, ev, forceState = null) {
       if (ev) ev.stopPropagation();
       const cam = cameras.find((c) => c.id === id);
       if (!cam) return;
-      const targetState = !(cam.ml_enabled !== false);
+      const targetState = forceState !== null ? Boolean(forceState) : !(cam.ml_enabled !== false);
       try {
         const res = await fetch('/api/cameras/toggle-ml', {
           method: 'POST',
@@ -4184,6 +4207,12 @@
       } catch (err) {
         console.error('Failed to toggle camera ML:', err);
       }
+    }
+
+    function onCameraMlToggle() {
+      const mlEl = document.getElementById('camera-ml-input');
+      if (!activeCameraId || !mlEl) return;
+      toggleCameraML(activeCameraId, null, mlEl.checked);
     }
 
     function setLiveChrome(on, label) {
@@ -4386,6 +4415,7 @@
             flip: payload.flip,
             roi: payload.roi,
             enabled: true,
+            ml_enabled: payload.ml_enabled !== false,
             telegram_chat_id: document.getElementById('tg-chat-input').value
           })
         });
