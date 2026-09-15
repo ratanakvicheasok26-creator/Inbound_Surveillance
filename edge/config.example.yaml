@@ -51,6 +51,8 @@ wifi_devices: []
 # Dual-target runtime: cpu | openvino | cuda | tensorrt
 # imgsz 960 keeps far 1080p workers large enough; set 1280 on cuda/tensorrt.
 runtime: cpu
+# Pose inference backend: "yolo" (Ultralytics YOLO11n-pose) or "tinypose" (PaddleDetection PP-TinyPose + PicoDet ONNX)
+pose_engine: yolo
 weights: yolo11n-pose.pt  # Person tracker needs pose keypoints; yolo11n_improved.pt is detect-only
 server_weights: yolo11s-pose.pt
 person_conf: 0.25
@@ -63,6 +65,8 @@ kpt_conf: 0.35
 bay_zoom: true
 bay_zoom_pad: 0.08
 detect_fps: 15
+# Decouple vehicle YOLO cadence from person pose (seconds between vehicle checks)
+vehicle_infer_interval: 1.0
 occupy_confirm_seconds: 1.0
 occupy_clear_seconds: 5.0
 # Keep WORKING while a mechanic ducks under a car; then ON_BREAK.
@@ -76,9 +80,10 @@ reid_match_threshold: 0.50
 # Set true to fetch OSNet ONNX on first run (needs internet). Otherwise a
 # local clothing-histogram embedding is used until you drop the file in models/.
 reid_download: false
-track_max_age: 30
+track_max_age: 90
 track_min_hits: 3
 track_iou_threshold: 0.3
+track_low_thresh: 0.10
 
 # Product default is 180. Use ~10 so mentors do not wait.
 absent_seconds: 10

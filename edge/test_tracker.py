@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from person import Detection, standing_person_keypoints
+from person import (
+    Detection,
+    backpack_clutter_keypoints,
+    standing_person_keypoints,
+)
 from reid import BodyReIDExtractor, appearance_embedding
 from runtime import (
     DEFAULT_KPT_CONF,
@@ -130,7 +134,7 @@ class TrackerIdentityTests(unittest.TestCase):
             coasted = tracker.update([])
         self.assertEqual(coasted, [])
 
-    def test_coasted_track_does_not_keep_skeleton(self):
+    def test_coasted_track_keeps_skeleton(self):
         tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3)
         confirmed = []
         for _ in range(3):
@@ -139,28 +143,29 @@ class TrackerIdentityTests(unittest.TestCase):
         coasted = tracker.update([])
         self.assertEqual(len(coasted), 1)
         self.assertTrue(coasted[0].coasting)
-        self.assertEqual(coasted[0].keypoints, [])
+        self.assertTrue(len(coasted[0].keypoints) > 0)
         self.assertEqual(coasted[0].identity, "George")
 
-    def test_static_low_conf_unknown_is_clutter(self):
+    def test_static_unknown_person_is_kept_tracked(self):
         tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=20)
         out = []
-        for _ in range(8):
-            det = _det(name=None, staff=False)
-            det.conf = 0.40
-            out = tracker.update([det])
-        self.assertEqual(out, [])
-        self.assertFalse(any(t.hits >= tracker.min_hits for t in tracker.tracks))
-
-    def test_static_high_conf_unknown_is_clutter(self):
-        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=20)
-        out = []
-        for _ in range(8):
+        for _ in range(25):
             det = _det(name=None, staff=False)
             det.conf = 0.75
             out = tracker.update([det])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].track_id, 1)
+        self.assertFalse(out[0].coasting)
+
+    def test_static_weak_anatomy_is_clutter(self):
+        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=10)
+        out = []
+        for _ in range(15):
+            det = Detection(80, 40, 160, 280, 0.40, backpack_clutter_keypoints())
+            det.accepted = True
+            out = tracker.update([det])
         self.assertEqual(out, [])
-        self.assertFalse(any(t.hits >= tracker.min_hits for t in tracker.tracks))
+        self.assertTrue(any(t.clutter for t in tracker.tracks))
 
     def test_moving_high_conf_unknown_is_kept(self):
         tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3, static_hits=20)
@@ -192,6 +197,64 @@ class TrackerIdentityTests(unittest.TestCase):
         self.assertEqual(len(shrunk), 1)
         self.assertEqual(shrunk[0].track_id, track_id)
         self.assertEqual(shrunk[0].identity, "George")
+
+    def test_stand_to_crouch_id_stability(self):
+        tracker = PersonTracker(max_age=30, min_hits=2, iou_threshold=0.3)
+        out = []
+        for _ in range(3):
+            out = tracker.update([_det(x1=100, y1=40, x2=180, y2=280, name="George", staff=True)])
+        self.assertEqual(len(out), 1)
+        track_id = out[0].track_id
+
+        # Morph from standing (80x240) to crouching (100x70) with low IoU
+        crouched_det = Detection(90, 210, 190, 280, 0.85, standing_person_keypoints())
+        crouched_det.accepted = True
+        crouch_out = tracker.update([crouched_det])
+        self.assertEqual(len(crouch_out), 1)
+        self.assertEqual(crouch_out[0].track_id, track_id)
+        self.assertEqual(crouch_out[0].identity, "George")
+
+    def test_low_conf_preserves_existing_track(self):
+        tracker = PersonTracker(max_age=10, min_hits=2, iou_threshold=0.3, low_iou_threshold=0.15)
+        out = []
+        for _ in range(3):
+            out = tracker.update([_det(x1=100, y1=40, x2=180, y2=280, name="George", staff=True)])
+        self.assertEqual(len(out), 1)
+        track_id = out[0].track_id
+
+        # Low confidence detection (conf=0.18) matching via ByteTrack secondary association
+        low_det = Detection(102, 42, 178, 278, 0.18, standing_person_keypoints())
+        low_out = tracker.update([], low_detections=[low_det])
+        self.assertEqual(len(low_out), 1)
+        self.assertEqual(low_out[0].track_id, track_id)
+        self.assertEqual(low_out[0].identity, "George")
+        self.assertFalse(low_out[0].coasting)
+
+    def test_low_conf_does_not_spawn_track(self):
+        tracker = PersonTracker(max_age=10, min_hits=2, iou_threshold=0.3)
+        low_det = Detection(100, 40, 180, 280, 0.18, standing_person_keypoints())
+        out = tracker.update([], low_detections=[low_det])
+        self.assertEqual(out, [])
+        self.assertEqual(len(tracker.tracks), 0)
+
+    def test_confirmed_track_with_weak_anatomy_not_killed(self):
+        tracker = PersonTracker(max_age=30, min_hits=2, iou_threshold=0.3, static_hits=10)
+        out = []
+        for _ in range(3):
+            out = tracker.update([_det(name=None, staff=False)])
+        self.assertEqual(len(out), 1)
+        track_id = out[0].track_id
+
+        # Person leans in / occluded - weak anatomy for 15 frames, but living person is not clutter
+        for _ in range(15):
+            det = Detection(80, 40, 160, 280, 0.70, backpack_clutter_keypoints())
+            det.accepted = True
+            # give slight motion so not frozen inanimate
+            det.liveness = 5.0
+            out = tracker.update([det])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].track_id, track_id)
+        self.assertFalse(tracker.tracks[0].clutter)
 
 
 class ReIDEmbeddingTests(unittest.TestCase):
@@ -233,6 +296,134 @@ class ReIDEmbeddingTests(unittest.TestCase):
     def test_appearance_embedding_rejects_empty_crop(self):
         zeros = appearance_embedding(np.zeros((4, 4, 3), dtype=np.uint8))
         self.assertEqual(float(np.linalg.norm(zeros)), 0.0)
+
+    def test_persistent_gallery_survives_tracker_reset(self):
+        from reid import PersistentReIDGallery
+        shared_gallery = PersistentReIDGallery()
+        tracker = PersonTracker(max_age=10, min_hits=2, gallery=shared_gallery, camera_id="cam-1")
+        dummy_feat = np.ones(512, dtype=np.float32)
+        dummy_feat /= np.linalg.norm(dummy_feat)
+        # Remember George with valid upright bbox
+        shared_gallery.remember("George", dummy_feat, bbox=(10, 10, 60, 150), face_conf=0.95, is_staff=True)
+        self.assertIn("George", shared_gallery.embeddings)
+        # Tracker reset with clear_gallery=False keeps embeddings
+        tracker.reset(clear_gallery=False)
+        self.assertIn("George", tracker.gallery.embeddings)
+        # Explicit clear_gallery=True wipes them
+        tracker.reset(clear_gallery=True)
+        self.assertNotIn("George", tracker.gallery.embeddings)
+
+    def test_spatial_exclusivity_blocks_cross_camera_identity_theft(self):
+        from reid import PersistentReIDGallery
+        gallery = PersistentReIDGallery(exclusivity_timeout=5.0)
+        feat = np.ones(512, dtype=np.float32)
+        feat /= np.linalg.norm(feat)
+        t0 = 1000.0
+        # Camera 1 enrolls and claims George
+        gallery.remember("George", feat, bbox=(10, 10, 60, 150), face_conf=0.90, camera_id="cam-1", now=t0)
+        # Camera 1 queries George -> match found
+        name1, score1 = gallery.match(feat, threshold=0.50, camera_id="cam-1", now=t0 + 1.0)
+        self.assertEqual(name1, "George")
+        # Camera 2 queries George while active on Camera 1 -> blocked by spatial exclusivity!
+        name2, score2 = gallery.match(feat, threshold=0.50, camera_id="cam-2", now=t0 + 1.0)
+        self.assertIsNone(name2)
+        # After 5.1 seconds of inactivity on Camera 1, Camera 2 can claim George
+        name2_after, score2_after = gallery.match(feat, threshold=0.50, camera_id="cam-2", now=t0 + 5.1)
+        self.assertEqual(name2_after, "George")
+
+    def test_anti_poisoning_rejects_horizontal_or_low_confidence_crops(self):
+        from reid import PersistentReIDGallery
+        gallery = PersistentReIDGallery()
+        feat = np.ones(512, dtype=np.float32)
+        feat /= np.linalg.norm(feat)
+        # 1. Low face confidence (< 0.70) rejected
+        ok = gallery.remember("George", feat, bbox=(10, 10, 50, 120), face_conf=0.65, is_staff=True)
+        self.assertFalse(ok)
+        self.assertNotIn("George", gallery.embeddings)
+        # 2. Horizontal / non-upright crop (w=100, h=40 -> aspect=0.4 < 1.0) rejected
+        ok = gallery.remember("George", feat, bbox=(10, 10, 110, 50), face_conf=0.95, is_staff=True)
+        self.assertFalse(ok)
+        self.assertNotIn("George", gallery.embeddings)
+        # 3. Tiny degenerate crop (w=10, h=15) rejected
+        ok = gallery.remember("George", feat, bbox=(10, 10, 20, 25), face_conf=0.95, is_staff=True)
+        self.assertFalse(ok)
+        self.assertNotIn("George", gallery.embeddings)
+        # 4. Valid upright worker crop accepted
+        ok = gallery.remember("George", feat, bbox=(10, 10, 60, 160), face_conf=0.85, is_staff=True)
+        self.assertTrue(ok)
+        self.assertIn("George", gallery.embeddings)
+
+    def test_gallery_capped_at_max_embeddings_with_fifo(self):
+        from reid import PersistentReIDGallery
+        gallery = PersistentReIDGallery(max_per_name=4)
+        for i in range(6):
+            vec = np.zeros(512, dtype=np.float32)
+            vec[i] = 1.0
+            gallery.remember("George", vec, bbox=(10, 10, 60, 160), face_conf=0.90, is_staff=True)
+        # Must be capped at 4
+        self.assertEqual(len(gallery.embeddings["George"]), 4)
+        # Oldest embeddings (0 and 1) should have been evicted by FIFO
+        self.assertEqual(gallery.embeddings["George"][0][2], 1.0)
+        self.assertEqual(gallery.embeddings["George"][-1][5], 1.0)
+
+    def test_should_extract_reid_throttling_and_gating(self):
+        from tracker import should_extract_reid
+        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3)
+        # 1. Degenerate crop: w < 20 or h < 40
+        det_skinny = Detection(10, 10, 25, 100, 0.9)  # w = 15 < 20
+        self.assertFalse(should_extract_reid(det_skinny, tracker))
+        det_short = Detection(10, 10, 50, 30, 0.9)   # h = 20 < 40
+        self.assertFalse(should_extract_reid(det_short, tracker))
+
+        # 2. Unmatched detection (no tracks yet) -> True
+        det_valid = Detection(10, 10, 60, 150, 0.9)
+        self.assertTrue(should_extract_reid(det_valid, tracker))
+
+        # Create confirmed track with 3 hits
+        for _ in range(3):
+            tracker.update([det_valid])
+        self.assertEqual(len(tracker.tracks), 1)
+        trk = tracker.tracks[0]
+        self.assertEqual(trk.hits, 3)
+
+        # Trk has no reid_features -> True to capture initial profile
+        self.assertTrue(should_extract_reid(det_valid, tracker))
+
+        # Now simulate track has extracted reid_features
+        trk.last_reid_frame = tracker.frame_count
+        trk.reid_features.append(np.ones(512, dtype=np.float32))
+
+        # Next frame (interval < 30) -> should NOT extract (throttled)
+        tracker.frame_count += 1
+        self.assertFalse(should_extract_reid(det_valid, tracker, min_interval=30))
+
+        # After 30 frames elapsed -> should extract periodically
+        tracker.frame_count += 35
+        self.assertTrue(should_extract_reid(det_valid, tracker, min_interval=30))
+
+        # Spatial match dropped (new detection far away) -> True (for recovery)
+        det_distant = Detection(300, 300, 350, 450, 0.9)
+        self.assertTrue(should_extract_reid(det_distant, tracker))
+
+    def test_pipeline_reid_call_count_throttled(self):
+        from unittest.mock import MagicMock
+        from tracker import run_identity_pipeline
+        tracker = PersonTracker(max_age=10, min_hits=3, iou_threshold=0.3)
+        mock_reid = MagicMock()
+        mock_reid.extract.return_value = np.ones(512, dtype=np.float32)
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Simulate 90 frames with 2 tracks
+        for _ in range(90):
+            d1 = Detection(50, 50, 150, 300, 0.9, standing_person_keypoints())
+            d2 = Detection(350, 50, 450, 300, 0.9, standing_person_keypoints())
+            run_identity_pipeline(frame, [d1, d2], tracker, reid=mock_reid, reid_interval=30)
+
+        # In 90 frames with 2 tracks:
+        # Without throttling: 90 * 2 = 180 calls!
+        # With throttling (interval=30): ~3-4 calls per track = 6-8 calls total.
+        self.assertLessEqual(mock_reid.extract.call_count, 8)
+        self.assertGreaterEqual(mock_reid.extract.call_count, 2)
 
 
 class LivenessAndNegativesTests(unittest.TestCase):

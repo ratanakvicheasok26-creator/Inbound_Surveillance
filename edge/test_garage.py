@@ -61,7 +61,23 @@ from vehicle import VehicleDetection, extract_vehicle_detections
 
 
 class _Det:
-    def __init__(self, kpts, *, x1=180, y1=220, x2=320, y2=620, name="Hour-Meng", staff=True):
+    def __init__(
+        self,
+        kpts,
+        *,
+        x1=180,
+        y1=220,
+        x2=320,
+        y2=620,
+        name="Hour-Meng",
+        staff=True,
+        hits=3,
+        clutter=False,
+        liveness=None,
+        jitter=None,
+        motion=None,
+        track_id=None,
+    ):
         self.x1, self.y1, self.x2, self.y2 = x1, y1, x2, y2
         self.conf = 0.9
         self.keypoints = kpts
@@ -69,6 +85,12 @@ class _Det:
         self.identity = name
         self.identity_conf = 0.9
         self.is_staff = staff
+        self.hits = hits
+        self.clutter = clutter
+        self.liveness = liveness
+        self.jitter = jitter
+        self.motion = motion
+        self.track_id = track_id
 
     def box(self):
         return self.x1, self.y1, self.x2, self.y2
@@ -1414,6 +1436,134 @@ class GarageApiTests(unittest.TestCase):
         departed = mgr.sync_auto_vehicles([car], 640, 480, now=0.0, auto_create=False)
         self.assertEqual(len(mgr._bays), 1)
         self.assertTrue(mgr._bays[0].vehicle_present)
+
+    def test_three_tier_clutter_rejection_and_creeper_whitelist(self):
+        from person import backpack_clutter_keypoints
+        manager = BayZoneManager(
+            DEFAULT_BAYS,
+            occupy_confirm_seconds=0.01,
+            occupy_clear_seconds=0.01,
+        )
+        t0 = 100.0
+
+        # 1. Shoes on floor inside Bay 1 ROI (only ankles visible, no hips/knees)
+        shoes_kpts = [(0.0, 0.0, 0.0)] * 17
+        shoes_kpts[15] = (250.0, 400.0, 0.9)
+        shoes_kpts[16] = (290.0, 400.0, 0.9)
+        shoes_det = _det(shoes_kpts, x1=220, y1=380, x2=320, y2=420, staff=False)
+
+        # 2. Backpack clutter inside Bay 1 ROI
+        bp_det = _det(backpack_clutter_keypoints(), x1=200, y1=300, x2=300, y2=400, staff=False)
+
+        # 3. Completely inanimate / frozen clutter (motion=0, jitter=0, liveness=0)
+        inanimate_det = _det(
+            idle_standing_keypoints(),
+            x1=200, y1=250, x2=300, y2=450,
+            staff=False, motion=0.0, jitter=0.0, liveness=0.0, clutter=True
+        )
+
+        # 4. Unconfirmed track (hits=1)
+        unconfirmed_det = _det(
+            working_pose_keypoints(),
+            x1=200, y1=250, x2=300, y2=450,
+            staff=False, hits=1
+        )
+
+        for clutter_item in (shoes_det, bp_det, inanimate_det, unconfirmed_det):
+            manager.update([clutter_item], 1000, 1000, t0, kpt_conf=0.4)
+            manager.update([clutter_item], 1000, 1000, t0 + 2.0, kpt_conf=0.4)
+            snaps = {s.bay_id: s for s in manager.snapshots()}
+            self.assertEqual(snaps["bay_1"].state, "EMPTY")
+            self.assertEqual(snaps["bay_1"].unverified_seconds, 0.0)
+            self.assertEqual(snaps["bay_1"].wrench_seconds, 0.0)
+            self.assertFalse(snaps["bay_1"].session_open)
+
+        # 5. Whitelist: Real mechanic lying on creeper under vehicle
+        creeper_det = _det(
+            _shift_kpts(under_vehicle_pose_keypoints(), 100, 150),
+            name="Hour-Meng",
+            staff=True,
+            hits=3,
+        )
+        manager.update([creeper_det], 1000, 1000, t0 + 5.0, kpt_conf=0.4)
+        manager.update([creeper_det], 1000, 1000, t0 + 7.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "UNDER_VEHICLE")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+        self.assertGreater(snaps["bay_1"].wrench_seconds, 1.5)
+        self.assertGreater(snaps["bay_1"].under_vehicle_seconds, 1.5)
+
+    def test_thirty_second_bay_occlusion_hysteresis(self):
+        manager = BayZoneManager(
+            DEFAULT_BAYS,
+            under_car_grace_seconds=30.0,
+            break_timeout_seconds=3600.0,
+            occupy_confirm_seconds=0.01,
+            occupy_clear_seconds=0.01,
+        )
+        work = _det(_shift_kpts(working_pose_keypoints(), 80, 280), name="Hour-Meng", staff=True, track_id=1)
+        t0 = 100.0
+
+        # Mechanic working in Bay 1
+        manager.update([work], 1000, 1000, t0, kpt_conf=0.4)
+        manager.update([work], 1000, 1000, t0 + 2.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "WORKING")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+        wrench_before = snaps["bay_1"].wrench_seconds
+
+        # Occluded under vehicle for 25 seconds (no detections in frame)
+        manager.update([], 1000, 1000, t0 + 27.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "WORKING")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+        self.assertTrue(snaps["bay_1"].session_open)
+        self.assertGreater(snaps["bay_1"].wrench_seconds, wrench_before)
+
+        # Re-emergence at 28 seconds without face detection (just body)
+        reemerged = _det(_shift_kpts(working_pose_keypoints(), 80, 280), name="Employee", staff=False, track_id=1)
+        manager.update([reemerged], 1000, 1000, t0 + 29.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "WORKING")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")  # Kept locked identity!
+
+        # Now mechanic stays missing past 30s grace (at t0 + 65.0) -> transitions to ON_BREAK
+        manager.update([], 1000, 1000, t0 + 65.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "ON_BREAK")
+
+    def test_polygon_exit_short_circuits_dwell_timer_immediately(self):
+        manager = BayZoneManager(
+            DEFAULT_BAYS,
+            under_car_grace_seconds=30.0,
+            break_timeout_seconds=3600.0,
+            occupy_confirm_seconds=0.01,
+            occupy_clear_seconds=0.01,
+        )
+        work_in_bay = _det(_shift_kpts(working_pose_keypoints(), 80, 280), name="Hour-Meng", staff=True, track_id=5)
+        t0 = 100.0
+
+        # Mechanic working in Bay 1 (x ~ 260, y ~ 500)
+        manager.update([work_in_bay], 1000, 1000, t0, kpt_conf=0.4)
+        manager.update([work_in_bay], 1000, 1000, t0 + 2.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "WORKING")
+        self.assertTrue(snaps["bay_1"].session_open)
+
+        # Mechanic explicitly steps OUTSIDE Bay 1 (x ~ 800, outside Bay 1 ROI)
+        work_outside = _det(
+            _shift_kpts(working_pose_keypoints(), 600, 280),
+            x1=700, y1=220, x2=850, y2=620,
+            name="Hour-Meng",
+            staff=True,
+            track_id=5,
+        )
+        # Should short-circuit 30s dwell timer immediately!
+        manager.update([work_outside], 1000, 1000, t0 + 3.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "EMPTY")
+        self.assertFalse(snaps["bay_1"].session_open)
+        self.assertIsNone(snaps["bay_1"].mechanic_name)
 
 
 if __name__ == "__main__":

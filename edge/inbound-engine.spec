@@ -25,6 +25,7 @@ hiddenimports = [
     "torch",
     "torchvision",
     "cv2",
+    "onnxruntime",
     "yaml",
     "requests",
     "requests.auth",
@@ -68,6 +69,8 @@ hiddenimports = [
     "liveness",
     "corroborate",
     "negatives",
+    "one_euro",
+    "tinypose",
 ]
 
 
@@ -99,6 +102,8 @@ for name in (
     "yolo11n_improved.pt",
     "yolo11n-pose.pt",
     "yolo11n.pt",
+    "yolo11n-pose.onnx",
+    "yolo11n.onnx",
     "config.example.yaml",
     "hub.html",
     "inb_surveillance.png",
@@ -110,6 +115,10 @@ for name in (
     repo_src = EDGE.parent / name
     if repo_src.exists() and (str(repo_src), ".") not in datas:
         datas.append((str(repo_src), "."))
+
+for ov_dir in list(EDGE.glob("*_openvino_model")) + list(EDGE.parent.glob("*_openvino_model")):
+    if ov_dir.is_dir():
+        datas.append((str(ov_dir), ov_dir.name))
 
 REPO = EDGE.parent
 for env_candidate in (EDGE / ".env", REPO / ".env"):
@@ -127,6 +136,9 @@ models = EDGE / "models"
 if models.is_dir():
     for onnx in models.glob("*.onnx"):
         datas.append((str(onnx), "models"))
+videos = EDGE / "videos"
+if videos.is_dir():
+    datas.append((str(videos), "videos"))
 
 go2rtc_name = "go2rtc.exe" if sys.platform == "win32" else "go2rtc"
 go2rtc_bin = EDGE / "bin" / go2rtc_name
@@ -167,7 +179,14 @@ def _msvc_runtime_binaries() -> list[tuple[str, str]]:
 
 binaries += _msvc_runtime_binaries()
 
-for pkg in ("ultralytics", "torch", "torchvision", "cv2", "PIL", "yaml", "requests"):
+pkgs_to_collect = ["ultralytics", "torch", "torchvision", "cv2", "PIL", "yaml", "requests", "onnxruntime"]
+try:
+    import openvino
+    pkgs_to_collect.append("openvino")
+except Exception:
+    pass
+
+for pkg in pkgs_to_collect:
     try:
         pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     except Exception:

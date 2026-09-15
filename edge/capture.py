@@ -25,8 +25,10 @@ def _orient_bgr(frame, rotate_deg, flip):
         frame = cv2.rotate(frame, cv2.ROTATE_180)
     elif rot == 270:
         frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    flp = str(flip or "none")
-    if flp in ("h", "horizontal"):
+    flp = str(flip or "none").strip().lower()
+    if flp in ("both", "hv", "vh", "all"):
+        frame = cv2.flip(frame, -1)
+    elif flp in ("h", "horizontal"):
         frame = cv2.flip(frame, 1)
     elif flp in ("v", "vertical"):
         frame = cv2.flip(frame, 0)

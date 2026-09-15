@@ -22,34 +22,50 @@ def resolve_video_path(raw_path: str | Path) -> Path:
         raw = raw[7:]
 
     p = Path(raw)
-    if p.is_absolute() and p.is_file():
-        return p
+    if p.is_file():
+        return p.resolve()
 
     from paths import data_dir, is_frozen, resource_dir
+    import sys
+
+    filename = p.name
+    if "?" in filename:
+        filename = filename.split("?")[0]
 
     resource = resource_dir()
     data_videos = data_dir() / "videos"
 
-    candidates = [
-        p,
-        Path.cwd() / p,
-        data_videos / p,
-        data_videos / p.name,
-        resource / "videos" / p,
-        resource / "videos" / p.name,
-    ]
-    if not is_frozen():
-        project_root = resource.parent
-        candidates.extend(
-            [
-                project_root / "tools" / "virtual-camera" / "videos" / p,
-                project_root / "tools" / "virtual-camera" / "videos" / p.name,
-                Path.cwd() / "tools" / "virtual-camera" / "videos" / p,
-                Path.cwd() / "tools" / "virtual-camera" / "videos" / p.name,
-                project_root / p,
-                resource / p,
-            ]
-        )
+    candidates: list[Path] = []
+    if not p.is_absolute():
+        candidates.extend([
+            p,
+            Path.cwd() / p,
+            resource / p,
+            resource / "videos" / p,
+            data_videos / p,
+        ])
+
+    if filename:
+        candidates.extend([
+            resource / "videos" / filename,
+            resource / filename,
+            data_videos / filename,
+            data_dir() / filename,
+            Path.cwd() / "edge" / "videos" / filename,
+            Path.cwd() / "videos" / filename,
+            Path.cwd() / filename,
+            Path(__file__).resolve().parent.parent / "videos" / filename,
+        ])
+        exe_parent = Path(sys.executable).resolve().parent
+        candidates.extend([
+            exe_parent / "videos" / filename,
+            exe_parent / "edge" / "videos" / filename,
+        ])
+        project_root = resource.parent if not is_frozen() else Path.cwd()
+        candidates.extend([
+            project_root / "edge" / "videos" / filename,
+            project_root / "tools" / "virtual-camera" / "videos" / filename,
+        ])
 
     for cand in candidates:
         try:

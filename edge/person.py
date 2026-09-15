@@ -111,6 +111,10 @@ class Detection:
     bay_name: str | None = None
     coasting: bool = False
     liveness: float | None = None
+    hits: int | None = None
+    clutter: bool = False
+    motion: float | None = None
+    jitter: float | None = None
     # None until occupancy resolves the occupant; False means the time on this
     # box is provisional and has not been billed to anyone.
     verified: bool | None = None
@@ -282,6 +286,85 @@ def bones_cross(keypoints: list[Keypoint], kpt_conf: float) -> bool:
     return _segments_intersect(ls, lh, rs, rh)
 
 
+def count_bone_crossings(keypoints: list[Keypoint], kpt_conf: float) -> int:
+    crossings = 0
+    ls = _pt(keypoints, L_SHOULDER, kpt_conf)
+    le = _pt(keypoints, L_ELBOW, kpt_conf)
+    lw = _pt(keypoints, L_WRIST, kpt_conf)
+    rs = _pt(keypoints, R_SHOULDER, kpt_conf)
+    re = _pt(keypoints, R_ELBOW, kpt_conf)
+    rw = _pt(keypoints, R_WRIST, kpt_conf)
+    lh = _pt(keypoints, L_HIP, kpt_conf)
+    rh = _pt(keypoints, R_HIP, kpt_conf)
+    lk = _pt(keypoints, L_KNEE, kpt_conf)
+    rk = _pt(keypoints, R_KNEE, kpt_conf)
+    la = _pt(keypoints, L_ANKLE, kpt_conf)
+    ra = _pt(keypoints, R_ANKLE, kpt_conf)
+
+    if _segments_intersect(ls, le, rs, re):
+        crossings += 1
+    if _segments_intersect(ls, lw or le, rs, rw or re):
+        crossings += 1
+    if _segments_intersect(le, lw, re, rw):
+        crossings += 1
+    if _segments_intersect(ls, lh, rs, rh):
+        crossings += 1
+    if _segments_intersect(lh, lk, rh, rk):
+        crossings += 1
+    if _segments_intersect(lk, la, rk, ra):
+        crossings += 1
+    return crossings
+
+
+def _swap_indices(keypoints: list[Keypoint], pairs: list[tuple[int, int]]) -> list[Keypoint]:
+    swapped = list(keypoints)
+    for a, b in pairs:
+        if a < len(swapped) and b < len(swapped):
+            swapped[a], swapped[b] = swapped[b], swapped[a]
+    return swapped
+
+
+def resolve_bilateral_swap(keypoints: list[Keypoint], kpt_conf: float = 0.25) -> list[Keypoint]:
+    """Resolve Left/Right limb swaps on crossed-arm or back-turned postures.
+
+    If bones_cross, tests candidate swaps of shoulders-arms and/or hips-legs
+    and keeps the variant with the fewest bone crossings.
+    """
+    if not bones_cross(keypoints, kpt_conf):
+        return keypoints
+
+    base_crossings = count_bone_crossings(keypoints, kpt_conf)
+    if base_crossings == 0:
+        return keypoints
+
+    arm_pairs = [(L_ELBOW, R_ELBOW), (L_WRIST, R_WRIST)]
+    upper_pairs = [(L_SHOULDER, R_SHOULDER), (L_ELBOW, R_ELBOW), (L_WRIST, R_WRIST), (L_EYE, R_EYE), (L_EAR, R_EAR)]
+    leg_pairs = [(L_KNEE, R_KNEE), (L_ANKLE, R_ANKLE)]
+    lower_pairs = [(L_HIP, R_HIP), (L_KNEE, R_KNEE), (L_ANKLE, R_ANKLE)]
+    full_pairs = upper_pairs + lower_pairs
+
+    candidates = [
+        _swap_indices(keypoints, arm_pairs),
+        _swap_indices(keypoints, upper_pairs),
+        _swap_indices(keypoints, leg_pairs),
+        _swap_indices(keypoints, lower_pairs),
+        _swap_indices(keypoints, upper_pairs + leg_pairs),
+        _swap_indices(keypoints, full_pairs),
+    ]
+
+    best_kpts = keypoints
+    min_crossings = base_crossings
+    for cand in candidates:
+        c = count_bone_crossings(cand, kpt_conf)
+        if c < min_crossings:
+            min_crossings = c
+            best_kpts = cand
+            if min_crossings == 0:
+                break
+
+    return best_kpts
+
+
 def head_is_above_shoulders(keypoints: list[Keypoint], kpt_conf: float) -> bool | None:
     """Image y grows downward. None when there is not enough anatomy to judge."""
     head_ys = [
@@ -310,9 +393,20 @@ def skeleton_is_plausible(
     """Reject engine/bike hallucinations: clustered joints or crossing limbs."""
     if keypoints_are_clustered(keypoints, x1, y1, x2, y2, kpt_conf):
         return False
-    if bones_cross(keypoints, kpt_conf):
+    if not bones_cross(keypoints, kpt_conf):
+        return True
+    swapped = resolve_bilateral_swap(keypoints, kpt_conf)
+    if not bones_cross(swapped, kpt_conf):
+        return True
+    # If both cross and joints are clustered or head is below shoulders, still reject (engine/bike fixtures)
+    if head_is_above_shoulders(swapped, kpt_conf) is False or keypoints_are_clustered(swapped, x1, y1, x2, y2, kpt_conf):
         return False
-    return True
+    # If still cross and no connected torso shortcut, reject
+    torso_visible = _count_visible(swapped, TORSO_POINTS, kpt_conf)
+    torso_bones = count_valid_bones(swapped, TORSO_EDGES, x1, y1, x2, y2, kpt_conf)
+    if torso_visible >= 3 and torso_bones >= 2:
+        return True
+    return False
 
 
 def is_creeper_or_underbody_pose(
@@ -464,6 +558,62 @@ def is_crouch_or_sit_pose(
     return head_visible >= 1 or torso_visible >= 2
 
 
+def box_iou(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(ax2 - ax1, 1e-6) * max(ay2 - ay1, 1e-6)
+    area_b = max(bx2 - bx1, 1e-6) * max(by2 - by1, 1e-6)
+    return inter / (area_a + area_b - inter + 1e-6)
+
+
+def box_containment(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    """Fraction of the smaller box that is inside the larger box."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(ax2 - ax1, 1e-6) * max(ay2 - ay1, 1e-6)
+    area_b = max(bx2 - bx1, 1e-6) * max(by2 - by1, 1e-6)
+    return inter / min(area_a, area_b)
+
+
+def suppress_nested_boxes(
+    dets: list[Detection],
+    containment_threshold: float = 0.75,
+    iou_threshold: float = 0.40,
+) -> list[Detection]:
+    """Suppress nested duplicate boxes (e.g. torso inside full body)."""
+    if len(dets) <= 1:
+        return list(dets)
+    sorted_dets = sorted(dets, key=lambda d: d.conf, reverse=True)
+    kept: list[Detection] = []
+    for det in sorted_dets:
+        is_nested = False
+        for existing in kept:
+            iou = box_iou(det.box(), existing.box())
+            cont = box_containment(det.box(), existing.box())
+            if cont >= containment_threshold or iou >= iou_threshold:
+                is_nested = True
+                break
+        if not is_nested:
+            kept.append(det)
+    return kept
+
+
 def is_human_pose(
     x1: float,
     y1: float,
@@ -485,6 +635,8 @@ def is_human_pose(
     height = y2 - y1
     width = max(x2 - x1, 1e-6)
     allow_shortcuts = float(box_conf) >= SHORTCUT_MIN_CONF
+
+    keypoints = resolve_bilateral_swap(keypoints, kpt_conf=kpt_conf)
 
     if not skeleton_is_plausible(keypoints, x1, y1, x2, y2, kpt_conf):
         return False
@@ -562,17 +714,30 @@ def person_detections(
     min_aspect: float = 1.1,
     min_keypoints: int = 3,
     kpt_conf: float = 0.25,
-) -> tuple[list[Detection], list[Detection]]:
+    track_low_thresh: float = 0.10,
+    return_low: bool = False,
+) -> tuple[list[Detection], list[Detection]] | tuple[list[Detection], list[Detection], list[Detection]]:
     accepted: list[Detection] = []
     rejected: list[Detection] = []
+    low_score: list[Detection] = []
     if result.boxes is None:
+        if return_low:
+            return accepted, rejected, low_score
         return accepted, rejected
     for i, box in enumerate(result.boxes):
         conf = float(box.conf[0])
-        if conf < conf_min:
+        if conf < track_low_thresh:
             continue
         x1, y1, x2, y2 = (float(v) for v in box.xyxy[0].tolist())
         keypoints = extract_keypoints(result, i)
+        if conf < conf_min:
+            # Low-score detection: for secondary tracker association only
+            det = Detection(x1, y1, x2, y2, conf, keypoints)
+            det.accepted = False
+            low_score.append(det)
+            continue
+
+        keypoints = resolve_bilateral_swap(keypoints, kpt_conf=kpt_conf)
         det = Detection(x1, y1, x2, y2, conf, keypoints)
         det.accepted = is_human_pose(
             x1,
@@ -588,11 +753,38 @@ def person_detections(
             box_conf=conf,
         )
         (accepted if det.accepted else rejected).append(det)
-    return accepted, rejected
+    suppressed = suppress_nested_boxes(accepted)
+    if return_low:
+        return suppressed, rejected, low_score
+    return suppressed, rejected
 
 
-DRAW_KPT_FLOOR = 0.35
-DRAW_BBOX_MARGIN = 0.08
+def person_detections_split(
+    result,
+    frame_h: int,
+    conf_min: float = 0.25,
+    track_low_thresh: float = 0.10,
+    min_height_frac: float = 0.05,
+    min_aspect: float = 1.1,
+    min_keypoints: int = 3,
+    kpt_conf: float = 0.25,
+) -> tuple[list[Detection], list[Detection], list[Detection]]:
+    """Return (accepted_high, rejected_high, low_score_dets)."""
+    return person_detections(
+        result,
+        frame_h,
+        conf_min=conf_min,
+        min_height_frac=min_height_frac,
+        min_aspect=min_aspect,
+        min_keypoints=min_keypoints,
+        kpt_conf=kpt_conf,
+        track_low_thresh=track_low_thresh,
+        return_low=True,
+    )
+
+
+DRAW_KPT_FLOOR = 0.25
+DRAW_BBOX_MARGIN = 0.18
 
 
 def draw_skeleton(
@@ -608,7 +800,7 @@ def draw_skeleton(
     so a box accepted on two good torso bones still painted YOLO's scattered
     wrist/ankle points across the shop floor.
     """
-    floor = max(float(kpt_conf), DRAW_KPT_FLOOR)
+    floor = float(kpt_conf) if kpt_conf is not None else DRAW_KPT_FLOOR
     clip: tuple[float, float, float, float] | None = None
     diag = 1.0
     if bbox is not None:
@@ -671,7 +863,7 @@ def draw_detection(
         else:
             label = f"person{time_badge} {det.conf:.2f}"
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        if not det.coasting and det.keypoints:
+        if det.keypoints:
             draw_skeleton(frame, det.keypoints, kpt_conf, color, det.box())
     else:
         color = (120, 120, 120)

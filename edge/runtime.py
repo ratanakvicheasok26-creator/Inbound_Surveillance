@@ -9,8 +9,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import time
 from typing import Any
+
+import numpy as np
 
 try:
     import cv2
@@ -45,10 +49,12 @@ DEFAULT_MIN_KEYPOINTS = 3
 DEFAULT_KPT_CONF = 0.35
 DEFAULT_OCCUPY_CLEAR_SECONDS = 5.0
 DEFAULT_UNDER_CAR_GRACE_SECONDS = 30.0
-DEFAULT_IMGSZ = 960
+DEFAULT_IMGSZ = 640
+DEFAULT_VEHICLE_IMGSZ = 512
 GPU_IMGSZ = 1280
 DEFAULT_BAY_ZOOM = True
 DEFAULT_BAY_ZOOM_PAD = 0.08
+DEFAULT_NUM_THREADS = min(4, max(1, os.cpu_count() or 4))
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,7 @@ class RuntimeProfile:
     track_min_hits: int
     track_iou_threshold: float
     reid_match_threshold: float
+    pose_engine: str = "yolo"
 
     @property
     def is_gpu(self) -> bool:
@@ -167,6 +174,18 @@ def person_weights_name(raw: object | None) -> str:
     return EDGE_WEIGHTS
 
 
+DEFAULT_POSE_ENGINE = "yolo"
+
+
+def resolve_pose_engine(cfg: dict | None = None) -> str:
+    """Select pose inference backend: 'yolo' (default) or 'tinypose'."""
+    cfg = cfg or {}
+    raw = str(cfg.get("pose_engine") or cfg.get("engine") or DEFAULT_POSE_ENGINE).strip().lower()
+    if raw in ("tinypose", "tiny_pose", "paddle", "paddle_onnx", "picodet_tinypose"):
+        return "tinypose"
+    return "yolo"
+
+
 def resolve_runtime(cfg: dict | None = None) -> RuntimeProfile:
     """Pick an execution profile from config, falling back if GPU is missing."""
     cfg = cfg or {}
@@ -193,6 +212,8 @@ def resolve_runtime(cfg: dict | None = None) -> RuntimeProfile:
         dnn_backend, dnn_target = backend_opencv, target_cpu
         weights_name = person_weights_name(cfg.get("weights") or EDGE_WEIGHTS)
 
+    pose_engine = resolve_pose_engine(cfg)
+
     return RuntimeProfile(
         name=name,
         yolo_device=yolo_device,
@@ -200,12 +221,13 @@ def resolve_runtime(cfg: dict | None = None) -> RuntimeProfile:
         dnn_backend=dnn_backend,
         dnn_target=dnn_target,
         reid_enabled=bool(cfg.get("enable_reid", True)),
-        track_max_age=max(1, int(cfg.get("track_max_age") if cfg.get("track_max_age") is not None else 30)),
+        track_max_age=max(1, int(cfg.get("track_max_age") if cfg.get("track_max_age") is not None else 90)),
         track_min_hits=max(1, int(cfg.get("track_min_hits") if cfg.get("track_min_hits") is not None else 3)),
         track_iou_threshold=float(cfg.get("track_iou_threshold") if cfg.get("track_iou_threshold") is not None else 0.3),
         reid_match_threshold=float(
             cfg.get("reid_match_threshold") if cfg.get("reid_match_threshold") is not None else 0.50
         ),
+        pose_engine=pose_engine,
     )
 
 
@@ -239,17 +261,17 @@ def resolve_weights_file(cfg: dict, resource_path, data_dir: Path) -> str:
     if profile.name == "tensorrt":
         preferred_exts = (".engine", ".pt", ".onnx")
     elif profile.name == "openvino":
-        preferred_exts = (".onnx", ".pt")
+        preferred_exts = ("_openvino_model", ".onnx", ".pt")
     elif profile.name == "cuda":
         preferred_exts = (".pt", ".engine", ".onnx")
     else:
         preferred_exts = (".onnx", ".pt")
 
     candidates: list[str] = []
-    if Path(profile.weights_name).suffix:
-        candidates.append(name)
     for ext in preferred_exts:
         candidates.append(f"{stem}{ext}")
+    if Path(profile.weights_name).suffix and name not in candidates:
+        candidates.append(name)
     seen: set[str] = set()
     for cand in candidates:
         if cand in seen:
@@ -257,6 +279,101 @@ def resolve_weights_file(cfg: dict, resource_path, data_dir: Path) -> str:
         seen.add(cand)
         for folder in search_dirs:
             path = folder / cand
-            if path.is_file():
+            if path.is_file() or (cand.endswith("_openvino_model") and path.is_dir()):
                 return str(path)
     return str(profile.weights_name)
+
+
+def configure_onnx_session_options(num_threads: int = DEFAULT_NUM_THREADS):
+    """Configures ONNX Runtime SessionOptions with thread pinning."""
+    import onnxruntime as ort
+
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = num_threads
+    opts.inter_op_num_threads = 1
+    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    return opts
+
+
+def configure_openvino_properties(core, num_threads: int = DEFAULT_NUM_THREADS):
+    """Configures OpenVINO Core properties to prioritize low latency on edge CPUs."""
+    core.set_property(
+        "CPU",
+        {
+            "PERFORMANCE_HINT": "LATENCY",
+            "INFERENCE_NUM_THREADS": str(num_threads),
+            "NUM_STREAMS": "1",
+        },
+    )
+
+
+def benchmark_pose(model_path: str, imgsz: int = 640, runs: int = 60) -> float:
+    """Executes warmup and benchmark inferences to verify execution latency.
+    Returns: Average execution latency in milliseconds.
+    """
+    path = Path(model_path)
+    if path.suffix == ".onnx":
+        try:
+            import onnxruntime as ort
+
+            opts = configure_onnx_session_options()
+            sess = ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
+            input_name = sess.get_inputs()[0].name
+            dummy = np.zeros((1, 3, imgsz, imgsz), dtype=np.float32)
+            for _ in range(5):
+                sess.run(None, {input_name: dummy})
+            t0 = time.perf_counter()
+            for _ in range(runs):
+                sess.run(None, {input_name: dummy})
+            elapsed = time.perf_counter() - t0
+            latency_ms = (elapsed / runs) * 1000.0
+            fps = runs / elapsed
+            print(f"[BENCHMARK] {model_path} ({imgsz}x{imgsz}) [ORT]: {latency_ms:.2f} ms/frame ({fps:.1f} FPS)")
+            return latency_ms
+        except Exception as ex:
+            print(f"[BENCHMARK] Direct ORT benchmark skipped: {ex}")
+    elif (path.is_dir() and (path / "yolo11n-pose.xml").exists()) or path.suffix == ".xml":
+        try:
+            import openvino as ov
+
+            core = ov.Core()
+            configure_openvino_properties(core)
+            xml_path = str(path / "yolo11n-pose.xml") if path.is_dir() else str(path)
+            model = core.read_model(xml_path)
+            compiled = core.compile_model(model, "CPU")
+            dummy = np.zeros((1, 3, imgsz, imgsz), dtype=np.float32)
+            req = compiled.create_infer_request()
+            for _ in range(5):
+                req.infer([dummy])
+            t0 = time.perf_counter()
+            for _ in range(runs):
+                req.infer([dummy])
+            elapsed = time.perf_counter() - t0
+            latency_ms = (elapsed / runs) * 1000.0
+            fps = runs / elapsed
+            print(f"[BENCHMARK] {model_path} ({imgsz}x{imgsz}) [OpenVINO]: {latency_ms:.2f} ms/frame ({fps:.1f} FPS)")
+            return latency_ms
+        except Exception as ex:
+            print(f"[BENCHMARK] Direct OpenVINO benchmark skipped: {ex}")
+
+    from ultralytics import YOLO
+
+    model = YOLO(str(model_path), task="pose")
+    dummy_frame = np.zeros((imgsz, imgsz, 3), dtype=np.uint8)
+
+    # Warmup
+    for _ in range(5):
+        _ = model(dummy_frame, imgsz=imgsz, verbose=False)
+
+    # Timed run
+    t0 = time.perf_counter()
+    for _ in range(runs):
+        _ = model(dummy_frame, imgsz=imgsz, verbose=False)
+    elapsed = time.perf_counter() - t0
+
+    latency_ms = (elapsed / runs) * 1000.0
+    fps = runs / elapsed
+    print(f"[BENCHMARK] {model_path} ({imgsz}x{imgsz}): {latency_ms:.2f} ms/frame ({fps:.1f} FPS)")
+    return latency_ms
+

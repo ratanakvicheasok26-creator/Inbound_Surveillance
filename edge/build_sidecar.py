@@ -92,6 +92,101 @@ def ensure_weights() -> None:
             )
 
 
+def ensure_exported_weights(weights_dir: Path | None = None, force_reexport: bool = False) -> None:
+    """Exports YOLO models strictly at 640x640 (pose) and 512x512 (vehicles).
+    Guarantees proposal grid reduction from 18,900 down to 8,400 boxes.
+    """
+    from ultralytics import YOLO
+
+    if weights_dir is None:
+        weights_dir = EDGE
+    weights_dir = Path(weights_dir)
+    weights_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Pose Model: Strict 640x640
+    pose_pt = weights_dir / "yolo11n-pose.pt"
+    if not pose_pt.exists() and (EDGE / "yolo11n-pose.pt").exists():
+        pose_pt = EDGE / "yolo11n-pose.pt"
+    pose_onnx = weights_dir / "yolo11n-pose.onnx"
+    edge_pose_onnx = EDGE / "yolo11n-pose.onnx"
+    if pose_pt.exists() and (not pose_onnx.exists() or not edge_pose_onnx.exists() or force_reexport):
+        print("[BUILD] Exporting yolo11n-pose to ONNX/OpenVINO at 640x640...", flush=True)
+        model = YOLO(str(pose_pt))
+        model.export(
+            format="onnx",
+            imgsz=640,
+            half=False,
+            dynamic=False,
+            simplify=True,
+        )
+        if pose_pt.parent != weights_dir and (pose_pt.with_suffix(".onnx")).exists():
+            shutil.copy2(pose_pt.with_suffix(".onnx"), pose_onnx)
+        if pose_pt.parent != EDGE and (pose_pt.with_suffix(".onnx")).exists():
+            shutil.copy2(pose_pt.with_suffix(".onnx"), edge_pose_onnx)
+        try:
+            import openvino
+
+            model.export(
+                format="openvino",
+                imgsz=640,
+                half=True,
+                dynamic=False,
+            )
+            print("[BUILD] Exported yolo11n-pose to OpenVINO FP16 (640x640)", flush=True)
+        except ImportError:
+            print("[BUILD] OpenVINO not installed; ONNX export retained.", flush=True)
+        except Exception as ex:
+            print(f"[BUILD] OpenVINO export failed for yolo11n-pose: {ex}", flush=True)
+
+    # 2. Vehicle Model: Strict 512x512
+    veh_pt = weights_dir / "yolo11n.pt"
+    if not veh_pt.exists() and (EDGE / "yolo11n.pt").exists():
+        veh_pt = EDGE / "yolo11n.pt"
+    veh_onnx = weights_dir / "yolo11n.onnx"
+    edge_veh_onnx = EDGE / "yolo11n.onnx"
+    if veh_pt.exists() and (not veh_onnx.exists() or not edge_veh_onnx.exists() or force_reexport):
+        print("[BUILD] Exporting yolo11n to ONNX/OpenVINO at 512x512...", flush=True)
+        model = YOLO(str(veh_pt))
+        model.export(
+            format="onnx",
+            imgsz=512,
+            half=False,
+            dynamic=False,
+            simplify=True,
+        )
+        if veh_pt.parent != weights_dir and (veh_pt.with_suffix(".onnx")).exists():
+            shutil.copy2(veh_pt.with_suffix(".onnx"), veh_onnx)
+        if veh_pt.parent != EDGE and (veh_pt.with_suffix(".onnx")).exists():
+            shutil.copy2(veh_pt.with_suffix(".onnx"), edge_veh_onnx)
+        try:
+            import openvino
+
+            model.export(
+                format="openvino",
+                imgsz=512,
+                half=True,
+                dynamic=False,
+            )
+            print("[BUILD] Exported yolo11n to OpenVINO FP16 (512x512)", flush=True)
+        except ImportError:
+            pass
+        except Exception as ex:
+            print(f"[BUILD] OpenVINO export failed for yolo11n: {ex}", flush=True)
+
+
+def ensure_osnet() -> None:
+    """Ensure OSNet person re-identification ONNX model is available."""
+    models_dir = EDGE / "models"
+    try:
+        from reid import ensure_reid_model
+
+        path = ensure_reid_model(models_dir, download=True)
+        if path and path.exists():
+            print(f"Bundled OSNet ReID model: {path}", flush=True)
+    except Exception as ex:
+        print(f"OSNet ReID check skipped: {ex}", flush=True)
+
+
 def exe_name() -> str:
     return "inbound-engine.exe" if sys.platform == "win32" else "inbound-engine"
 
@@ -104,6 +199,8 @@ REQUIRED_PYZ_MODULES = (
     "paths",
     "db",
     "face_id",
+    "tinypose",
+    "one_euro",
     "adapters.video_file",
 )
 
@@ -159,6 +256,115 @@ def ensure_go2rtc() -> Path:
     return path
 
 
+def verify_dry_run() -> bool:
+    """Validate all required models, runtime libraries, and modules before packaging."""
+    print("=== Inbound Sidecar Build: Dry-Run Inspection ===", flush=True)
+    all_ok = True
+
+    # 1. Models & Resolution Lock
+    pose_onnx = EDGE / "yolo11n-pose.onnx"
+    veh_onnx = EDGE / "yolo11n.onnx"
+    osnet_onnx = EDGE / "models" / "osnet_x0_25_market1501.onnx"
+
+    import onnxruntime as ort
+
+    print("\n[1/4] Verifying models & resolution lock...")
+    if not pose_onnx.exists():
+        print(f"  FAIL: Missing {pose_onnx}", flush=True)
+        all_ok = False
+    else:
+        try:
+            sess = ort.InferenceSession(str(pose_onnx), providers=["CPUExecutionProvider"])
+            shape = sess.get_inputs()[0].shape
+            if list(shape[-2:]) == [640, 640]:
+                print(f"  PASS: yolo11n-pose.onnx locked at 640x640 (shape: {shape})", flush=True)
+            else:
+                print(f"  FAIL: yolo11n-pose.onnx shape is {shape}, expected [..., 640, 640]", flush=True)
+                all_ok = False
+        except Exception as ex:
+            print(f"  FAIL: Error inspecting yolo11n-pose.onnx: {ex}", flush=True)
+            all_ok = False
+
+    if not veh_onnx.exists():
+        print(f"  FAIL: Missing {veh_onnx}", flush=True)
+        all_ok = False
+    else:
+        try:
+            sess = ort.InferenceSession(str(veh_onnx), providers=["CPUExecutionProvider"])
+            shape = sess.get_inputs()[0].shape
+            if list(shape[-2:]) == [512, 512]:
+                print(f"  PASS: yolo11n.onnx locked at 512x512 (shape: {shape})", flush=True)
+            else:
+                print(f"  FAIL: yolo11n.onnx shape is {shape}, expected [..., 512, 512]", flush=True)
+                all_ok = False
+        except Exception as ex:
+            print(f"  FAIL: Error inspecting yolo11n.onnx: {ex}", flush=True)
+            all_ok = False
+
+    if not osnet_onnx.exists():
+        print(f"  FAIL: Missing OSNet ReID model at {osnet_onnx}", flush=True)
+        all_ok = False
+    else:
+        print(f"  PASS: OSNet ReID model present ({osnet_onnx.name}, {osnet_onnx.stat().st_size // 1024} KB)", flush=True)
+
+    # 2. First-party modules
+    print("\n[2/4] Verifying required modules...")
+    modules_to_check = (
+        "one_euro",
+        "tracker",
+        "reid",
+        "occupancy",
+        "ai_auditor",
+        "person",
+        "tinypose",
+        "vehicle",
+        "bay_zoom",
+        "runtime",
+    )
+    for mod in modules_to_check:
+        mod_path = EDGE / f"{mod}.py"
+        if mod_path.exists():
+            print(f"  PASS: Module {mod}.py present", flush=True)
+        else:
+            print(f"  FAIL: Module {mod}.py missing at {mod_path}", flush=True)
+            all_ok = False
+
+    # 3. Runtime execution providers
+    print("\n[3/4] Verifying runtime libraries...")
+    providers = ort.get_available_providers()
+    print(f"  PASS: ONNX Runtime available (providers: {providers})", flush=True)
+
+    try:
+        import openvino as ov
+        core = ov.Core()
+        devices = core.available_devices
+        print(f"  PASS: OpenVINO runtime available (devices: {devices})", flush=True)
+    except Exception as ex:
+        print(f"  INFO: OpenVINO runtime not loaded: {ex}", flush=True)
+
+    # 4. PyInstaller environment
+    print("\n[4/4] Verifying packaging spec & PyInstaller...")
+    if not SPEC.exists():
+        print(f"  FAIL: Spec file missing at {SPEC}", flush=True)
+        all_ok = False
+    else:
+        print(f"  PASS: Spec file present ({SPEC.name})", flush=True)
+
+    try:
+        import PyInstaller
+        print(f"  PASS: PyInstaller available (version: {PyInstaller.__version__})", flush=True)
+    except ImportError:
+        print("  FAIL: PyInstaller not installed in environment", flush=True)
+        all_ok = False
+
+    print("\n=== Dry-Run Inspection Result ===", flush=True)
+    if all_ok:
+        print("All required models, modules, and packaging dependencies verified successfully!\n", flush=True)
+    else:
+        print("Dry-run inspection failed with missing or invalid dependencies!\n", flush=True)
+    return all_ok
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the inbound-engine Tauri sidecar")
     parser.add_argument(
@@ -171,10 +377,21 @@ def main() -> None:
         action="store_true",
         help="Do not download YOLO weights if missing",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate models, runtime libraries, and modules without running full PyInstaller build",
+    )
     args = parser.parse_args()
+
+    if args.dry_run:
+        ok = verify_dry_run()
+        sys.exit(0 if ok else 1)
 
     if not args.skip_download:
         ensure_weights()
+        ensure_exported_weights()
+        ensure_osnet()
     elif not WEIGHTS.exists():
         print("WARNING: edge/yolo11n-pose.pt is missing; the sidecar will download at runtime.", flush=True)
 

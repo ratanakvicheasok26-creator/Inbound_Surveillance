@@ -117,7 +117,11 @@ class TestAIAuditor(unittest.TestCase):
         # Create a detection with pose holding scanner / phone near face
         kpts = [(0.0, 0.0, 0.0)] * 17
         kpts[0] = (300.0, 150.0, 0.9)  # NOSE
+        kpts[5] = (280.0, 200.0, 0.9)  # L_SHOULDER
+        kpts[6] = (320.0, 200.0, 0.9)  # R_SHOULDER
         kpts[9] = (295.0, 155.0, 0.9)  # L_WRIST near face
+        kpts[11] = (285.0, 300.0, 0.9)  # L_HIP
+        kpts[12] = (315.0, 300.0, 0.9)  # R_HIP
 
         det = Detection(
             x1=150, y1=100, x2=350, y2=400, conf=0.9, accepted=True,
@@ -191,7 +195,11 @@ class TestAIAuditor(unittest.TestCase):
         # Person in bay holding phone to ear
         kpts = [(0.0, 0.0, 0.0)] * 17
         kpts[0] = (300.0, 150.0, 0.9)  # NOSE
+        kpts[5] = (280.0, 200.0, 0.9)  # L_SHOULDER
+        kpts[6] = (320.0, 200.0, 0.9)  # R_SHOULDER
         kpts[9] = (295.0, 155.0, 0.9)  # L_WRIST near ear
+        kpts[11] = (285.0, 300.0, 0.9)  # L_HIP
+        kpts[12] = (315.0, 300.0, 0.9)  # R_HIP
 
         det = Detection(
             x1=200, y1=100, x2=400, y2=450, conf=0.9, accepted=True,

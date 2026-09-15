@@ -11,6 +11,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+
+# Pin OpenMP and MKL threads globally to avoid thread explosion
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+
 import signal
 import socket
 import subprocess
@@ -223,9 +229,9 @@ try:
     from corroborate import veto_vehicle_interior
     from liveness import LivenessProbe
     from negatives import bank_hard_negatives
-    from person import Detection, draw_detection, person_detections
+    from person import Detection, draw_detection, person_detections, person_detections_split
     from proof import save_proof, scale_roi_px
-    from reid import try_create_body_reid
+    from reid import PersistentReIDGallery, try_create_body_reid
     from report import build_report
     from runtime import (
         resolve_bay_zoom,
@@ -550,13 +556,14 @@ def suggest_rotate(source: Any, frame) -> int:
 def resolve_orient(
     rotate_value: Any, source: Any = None, frame=None, flip_value: Any = "none"
 ) -> tuple[int, str]:
-    if is_auto_rotate(rotate_value):
-        return suggest_rotate(source, frame), "none"
-    return parse_rotate(rotate_value), parse_flip(flip_value)
+    rot = suggest_rotate(source, frame) if is_auto_rotate(rotate_value) else parse_rotate(rotate_value)
+    return rot, parse_flip(flip_value)
 
 
 def parse_flip(value: Any) -> str:
     text = str(value or "none").strip().lower()
+    if text in ("both", "hv", "vh", "all"):
+        return "both"
     if text in ("h", "horizontal", "x"):
         return "h"
     if text in ("v", "vertical", "y"):
@@ -572,9 +579,12 @@ def orient_frame(frame, rotate_deg: int, flip: str):
     elif rotate_deg == 270:
         frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-    if flip == "h":
+    flp = parse_flip(flip)
+    if flp == "both":
+        frame = cv2.flip(frame, -1)
+    elif flp == "h":
         frame = cv2.flip(frame, 1)
-    elif flip == "v":
+    elif flp == "v":
         frame = cv2.flip(frame, 0)
     return frame
 
@@ -994,6 +1004,7 @@ class LiveStreamEngine:
         self.model = None
         self.face_rec = None
         self.tracker: PersonTracker | None = None
+        self.shared_gallery = PersistentReIDGallery()
         self.reid = None
         self.liveness_probe: LivenessProbe | None = None
         self.runtime_profile = None
@@ -1190,7 +1201,9 @@ class LiveStreamEngine:
             with self.infer_lock:
                 count = self.face_rec.reload_enrolled_faces()
             if self.tracker is not None:
-                self.tracker.reset()
+                self.tracker.reset(clear_gallery=True)
+            if hasattr(self, "shared_gallery") and self.shared_gallery is not None:
+                self.shared_gallery.clear()
             if self.bay_manager is not None:
                 for bay in getattr(self.bay_manager, "_bays", []):
                     bay.locked_tracks.clear()
@@ -2093,7 +2106,7 @@ class LiveStreamEngine:
                 try:
                     veh_res = self.vehicle_model.predict(
                         frame,
-                        imgsz=640,
+                        imgsz=512,
                         classes=[2, 3, 5, 7],
                         conf=0.18,
                         device=None,
@@ -2551,7 +2564,27 @@ class LiveStreamEngine:
         if not veh_weights_path.exists():
             veh_weights_path = DATA_DIR / "yolo11n.pt"
         try:
-            self.model = YOLO(str(weights_path))
+            if getattr(self.runtime_profile, "pose_engine", "yolo") == "tinypose":
+                try:
+                    from tinypose import PaddlePoseEngine
+
+                    models_dir = get_resource_path("models")
+                    if not models_dir.exists():
+                        models_dir = DATA_DIR / "models"
+                    self.model = PaddlePoseEngine(models_dir=models_dir, runtime_profile=self.runtime_profile)
+                    print(
+                        f"[LiveStreamEngine] Initialized PP-TinyPose pose engine ({self.runtime_profile.name})",
+                        flush=True,
+                    )
+                except Exception as ex:
+                    print(
+                        f"[LiveStreamEngine] Failed to init PP-TinyPose ({ex}); falling back to YOLO",
+                        flush=True,
+                    )
+                    self.model = YOLO(str(weights_path), task="pose")
+            else:
+                self.model = YOLO(str(weights_path), task="pose")
+
             if getattr(self.model, "task", None) != "pose":
                 fallback = get_resource_path("yolo11n-pose.pt")
                 print(
@@ -2561,10 +2594,17 @@ class LiveStreamEngine:
                     flush=True,
                 )
                 weights_path = fallback
-                self.model = YOLO(str(weights_path))
-            self.vehicle_model = YOLO(str(veh_weights_path) if veh_weights_path.exists() else "yolo11n.pt")
+                self.model = YOLO(str(weights_path), task="pose")
+            self.vehicle_model = YOLO(
+                str(veh_weights_path) if veh_weights_path.exists() else "yolo11n.pt",
+                task="detect",
+            )
+            self.cached_vehicles: list = []
+            self.last_vehicle_infer: float = 0.0
+            self.vehicle_infer_interval: float = float(self.cfg.get("vehicle_infer_interval", 1.0))
             print(
                 f"[LiveStreamEngine] Models ready ({self.runtime_profile.name}, "
+                f"engine={getattr(self.runtime_profile, 'pose_engine', 'yolo')}, "
                 f"device={self.runtime_profile.yolo_device}, weights={weights_path})"
             )
             self.face_rec = try_create_face_recognizer(self.cfg)
@@ -2575,6 +2615,8 @@ class LiveStreamEngine:
                 min_hits=self.runtime_profile.track_min_hits,
                 iou_threshold=self.runtime_profile.track_iou_threshold,
                 reid_threshold=self.runtime_profile.reid_match_threshold,
+                gallery=self.shared_gallery,
+                camera_id=str(self.cfg.get("active_camera_id") or "cam-1"),
             )
         except Exception as e:
             self.error_message = f"Failed to load YOLO model: {e}"
@@ -2677,7 +2719,8 @@ class LiveStreamEngine:
                 frame_count = 0
                 t_fps = time.time()
                 if self.tracker is not None:
-                    self.tracker.reset()
+                    self.tracker.camera_id = str(self.cfg.get("active_camera_id") or "cam-1")
+                    self.tracker.reset(clear_gallery=False)
                 rotate_deg, flip = resolve_orient(cfg.get("rotate"), source, packet.frame, cfg.get("flip"))
                 first_oriented = orient_frame(packet.frame, rotate_deg, flip)
                 h0, w0 = first_oriented.shape[:2]
@@ -2750,18 +2793,25 @@ class LiveStreamEngine:
                             device=self.runtime_profile.yolo_device if self.runtime_profile else None,
                             verbose=False,
                         )[0]
-                        vehicles = []
-                        if getattr(self, "vehicle_model", None) is not None:
+                        vehicles = getattr(self, "cached_vehicles", [])
+                        vehicle_interval = getattr(self, "vehicle_infer_interval", 1.0)
+                        should_infer_vehicle = (
+                            getattr(self, "vehicle_model", None) is not None
+                            and (self.force_infer or not vehicles or (now - getattr(self, "last_vehicle_infer", 0.0)) >= vehicle_interval)
+                        )
+                        if should_infer_vehicle:
                             try:
                                 veh_res = self.vehicle_model.predict(
                                     frame,
-                                    imgsz=imgsz,
+                                    imgsz=512,
                                     classes=[2, 3, 5, 7],
                                     conf=0.18,
                                     device=None,
                                     verbose=False,
                                 )[0]
                                 vehicles = extract_vehicle_detections(veh_res, w, h, conf_min=0.18)
+                                self.cached_vehicles = vehicles
+                                self.last_vehicle_infer = now
                             except Exception as ex:
                                 print(f"[VehicleInfer] Prediction error: {ex}")
 
@@ -2780,10 +2830,12 @@ class LiveStreamEngine:
                                             print(f"[Performance Evaluation] Job {eval_report.job_id}: Grade={eval_report.performance_grade}, Score={eval_report.performance_score}, Efficiency={eval_report.efficiency_pct:.1f}% by {eval_report.primary_technician}")
                                     except Exception as ex:
                                         print(f"[Vehicle Departure] Error completing/evaluating job {bay_cfg.get('job_id')}: {ex}")
-                    last_accepted, last_rejected = person_detections(
+                    track_low_thresh = float(self.cfg.get("track_low_thresh", 0.10))
+                    last_accepted, last_rejected, low_dets = person_detections_split(
                         result,
                         h,
                         conf_min=person_conf,
+                        track_low_thresh=track_low_thresh,
                         min_height_frac=min_person_height,
                         min_aspect=min_aspect,
                         min_keypoints=min_keypoints,
@@ -2816,6 +2868,7 @@ class LiveStreamEngine:
                             face_rec=self.face_rec,
                             reid=self.reid,
                             probe=self.liveness_probe,
+                            low_detections=low_dets,
                         )
                         self._bank_hard_negatives(frame, self.tracker.clutter_events)
                     elif self.face_rec is not None:

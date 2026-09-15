@@ -1,56 +1,99 @@
-# Implementation Plan: Virtual Camera Streaming Container for ML Demo
+# Implementation Plan: Multi-Modal Identity Continuity, Throttled 360° ReID, and Bay State Machine Hardening
 
 ## Overview
-Build a standalone Docker container (`tools/virtual-camera`) that allows uploading local video files or ingesting online videos (via direct URL or YouTube/yt-dlp) and streams them continuously in real-time over RTSP (and HTTP/WebRTC) in an infinite loop. This simulates physical IP cameras in a garage, allowing Inbound Surveillance's computer vision and ML pipeline (YOLO11 pose detection, vehicle tracking, bay occupancy, and wrench-time calculations) to ingest and analyze the footage identically to real live cameras.
+Building upon the verified foundation of the **Edge Pose Tracking Plan** (8D size-aware Kalman filter, ByteTrack high/low association, OneEuro keypoint stabilization, and bilateral limb swap), this phase delivers production-grade identity continuity and bay labor integrity.
+
+This plan incorporates critical operational adjustments to eliminate performance traps and cross-camera collision hazards:
+1. **Model Resolution Lock (640x640 pose / 512x512 vehicle)** and OpenVINO thread-pinning are prioritized upfront to secure a $\ge 25\text{ FPS}$ foundation.
+2. **Throttled, Event-Gated OSNet Extraction** (capped to at most once per 30–45 frames, or strictly on spatial match drops) prevents the 70–140 ms edge CPU hot-loop bottleneck.
+3. **Spatial Exclusivity Constraints** in `PersistentReIDGallery` prevent dark-uniform cross-camera identity misattributions across simultaneous bay camera streams.
+4. **Three-Tier Bay Labor Admission & Whitelisted Creeper Support** blocks inanimate clutter (jack stands, tires, shoes) while preserving mechanics under chassis.
+5. **30-Second Occlusion Dwell with Boundary Exit Short-Circuit** provides seamless labor continuity while immediately terminating sessions when a technician physically walks out.
+
+---
 
 ## Architecture Decisions
-- **RTSP Streaming Core**: MediaMTX (formerly rtsp-simple-server) paired with FFmpeg in real-time mode (`-re -stream_loop -1`). This provides sub-second latency, zero frame drift, and native compatibility with OpenCV/FFmpeg and go2rtc.
-- **Port Strategy**: Default RTSP port mapped to `8556` on the host (since host Inbound Surveillance's embedded `go2rtc` already occupies `8554`), and Web UI on `8090`. All ports configurable via environment variables in `docker-compose.yml`.
-- **Ingest Capabilities**:
-  1. Direct file upload (MP4, MKV, MOV, AVI, WebM).
-  2. Online video link download using `yt-dlp` (supports YouTube, Vimeo, direct MP4 links, CDNs).
-  3. Built-in synthetic test video generator for immediate offline testing.
-- **Web UI & API**: FastAPI serving a responsive, dark-mode control center with video library, stream status, in-browser live preview, and a 1-click "Copy RTSP URL for Inbound Surveillance" button.
-- **Persistence**: Host volume mount `./videos` to persist demo videos across container restarts.
 
-## Task List
+### 1. Upfront Model Resolution Lock & OpenVINO Thread Pinning
+- **Hard-lock Export & Inference Resolutions**:
+  - `yolo11n-pose`: $640 \times 640$ (reduces proposal grid from 18,900 down to 8,400 proposals vs $960$).
+  - `yolo11n` (vehicle): $512 \times 512$ at decoupled 1.0s cadence.
+- **Thread Pinning**:
+  - Restrict OpenVINO / ONNX CPU inference threads to physical core count (e.g. `num_threads=4`) in `runtime.py` to eliminate thread thrashing and context-switching overhead.
+- **Execution Order Rationale**:
+  - Performance must be stabilized first. Testing tracking continuity, Re-ID, and bay state hysteresis on an engine running below 2 FPS generates timing artifacts that invalidate test metrics.
 
-### Phase 1: Streaming Core & Process Management
-- [ ] Task 1: Create MediaMTX configuration and FFmpeg stream manager (`tools/virtual-camera/stream_manager.py`)
-- [ ] Task 2: Build synthetic clip generator for immediate offline testing
+### 2. Throttled & Event-Gated Re-ID (Preventing the OSNet Hot-Loop)
+- **Problem**: Running 512-dim OSNet on edge CPU takes 70–140 ms per crop. Continuous extraction drops frame rate to 3–6 FPS.
+- **Solution**:
+  - **Never extract on every frame**.
+  - Extract appearance embeddings *only* when:
+    1. A new track confirms (`hits >= 3`) and has no initial embedding (`track.features is None`), OR
+    2. Spatial IoU and Kalman matching fail completely and track recovery is required, OR
+    3. As a background refresh throttled to at most once every **30–45 frames** (2.0–3.0 seconds).
+  - Degenerate crop guard: Skip extraction if $w < 20\text{ px}$ or $h < 40\text{ px}$.
 
-### Checkpoint: Streaming Core
-- [ ] Stream manager can launch MediaMTX and push an infinite looped real-time RTSP stream.
+### 3. Cross-Camera Spatial Exclusivity in Shared Gallery
+- **Problem**: Mechanics wearing identical dark-blue/black shop uniforms can trigger false cross-camera Re-ID matches when matching solely against appearance embeddings ($\ge 0.65$).
+- **Solution**:
+  - `PersistentReIDGallery` tracks which camera stream currently holds a confirmed active technician.
+  - If Technician A has an active, confirmed track in Camera 1 (Bay 1), Camera 2 (Bay 3) **cannot** assign Technician A's identity to an ambiguous track unless Camera 1 registers a departure or total track loss for $> 5.0\text{ seconds}$.
+  - Gallery enrollment is strictly anti-poisoned: Requires face confidence $\ge 0.70$ and upright aspect ratio ($H/W \ge 1.0$).
+  - FIFO eviction caps each technician profile to 16 embeddings.
 
-### Phase 2: API & Video Ingest Engine
-- [ ] Task 3: Implement FastAPI application (`tools/virtual-camera/app.py`) with upload and yt-dlp download endpoints
-- [ ] Task 4: Add stream control endpoints (start, stop, list channels, stream status)
+### 4. Three-Tier Bay Admission Gating & Creeper Whitelisting
+- In `BayZoneManager.update()`, admissions must pass:
+  1. **Track Confirmation**: Track must be confirmed (`hits >= 3`) and not flagged as clutter.
+  2. **Kinematic Torso Connectivity**: Shoulders and hips must form a connected graph (isolated shoe/ankle pairs are rejected).
+  3. **Motion / Jitter Proof**: Non-zero motion energy or joint variance over a temporal window.
+- **Whitelist**: `is_creeper_or_underbody_pose` is explicitly whitelisted to preserve legitimate floor mechanics.
 
-### Checkpoint: Ingest & API
-- [ ] File upload and URL download work, saving videos to `/videos` and exposing stream control via REST.
+### 5. 30-Second Bay Occlusion Hysteresis with Polygon Exit Short-Circuit
+- Mechanics crawling under chassis or occluded behind vehicle pillars retain active `WORKING` / `UNDER_VEHICLE` state and locked technician name for up to 30 seconds.
+- **Boundary Exit Short-Circuit**: If the track's bounding box is observed leaving the bay polygon boundary, the session closes immediately without waiting for the 30s timeout.
 
-### Phase 3: Web Dashboard UI
-- [ ] Task 5: Build responsive Web UI dashboard (`tools/virtual-camera/static/index.html`, `app.js`, `style.css`)
-- [ ] Task 6: Add Inbound Surveillance connection helper card with 1-click copyable RTSP URLs and live video player preview
+---
 
-### Checkpoint: Web UI
-- [ ] User can open `http://localhost:8090`, upload a video or paste a URL, start streaming, and copy the RTSP URL.
+## Dependency Graph & Execution Order
 
-### Phase 4: Docker Containerization & Verification
-- [ ] Task 7: Create `Dockerfile`, `docker-compose.yml`, `.env.example`, and `run.sh`
-- [ ] Task 8: Build container and verify end-to-end integration with Inbound Surveillance ML grabber
+```
+Phase 1: Performance Baseline & Resolution Lock
+  │   - Task 1: Model Resolution Lock (640x640 / 512x512) & OpenVINO Thread Pinning
+  ▼
+Checkpoint 1: Performance Foundation (>= 25 FPS verified)
+  │
+Phase 2: Persistent ReID with Spatial Exclusivity & Throttling
+  │   - Task 2: Persistent Inter-Camera ReID Gallery with Spatial Exclusivity
+  │   - Task 3: Throttled & Event-Gated 360° Re-ID Handover (30-frame cap, crop gate)
+  ▼
+Checkpoint 2: ReID & Multi-Camera Continuity
+  │
+Phase 3: Bay State Machine Hardening & Occlusion Hysteresis
+  │   - Task 4: Strict Three-Tier Bay Labor Admission Gate & Anti-Clutter
+  │   - Task 5: 30-Second Bay Occlusion Hysteresis & Polygon Exit Short-Circuit
+  ▼
+Checkpoint 3: Bay State Machine & Labor Integrity
+  │
+Phase 4: Sidecar Packaging & End-to-End Verification
+  │   - Task 6: Sidecar PyInstaller Build & Dependency Verification (DirectML/OpenVINO)
+  │   - Task 7: Virtual Camera Multi-Stream Regression Benchmark (FPS, ID switches)
+  ▼
+Checkpoint 4: Complete System Validation
+```
 
-### Checkpoint: Complete
-- [ ] Container runs via `docker compose up -d`.
-- [ ] Inbound Surveillance connects to `rtsp://localhost:8556/<channel>` and ML runs successfully.
+---
 
 ## Risks and Mitigations
+
 | Risk | Impact | Mitigation |
-|------|--------|------------|
-| Port conflict with existing `go2rtc` on host port 8554 | High | Default RTSP port set to 8556 in docker-compose. Inbound Surveillance supports custom RTSP ports natively (`rtsp://localhost:8556/channel`). |
-| FFmpeg CPU usage high when re-encoding high-res video | Medium | Implement smart codec detection: use `-c:v copy` if source is already H.264, or `-c:v libx264 -preset ultrafast -tune zerolatency` if transcoding is needed. |
-| Inbound Surveillance ML grabber timing out on stream start | Medium | MediaMTX holds the RTSP path open; FFmpeg feeds it continuously so clients connecting/disconnecting won't terminate the stream. |
-| Online video formats varying widely | Low | `yt-dlp` automatically formats into standard MP4 (H.264 + AAC) compatible with all RTSP clients. |
+|---|---|---|
+| OSNet Hot-Loop Latency Collapse | Critical | Throttled extraction capped at 30–45 frames; trigger on-demand only during spatial drop; reject degenerate crops ($w < 20, h < 40$). |
+| Cross-Camera Uniform False ReID | High | Enforce spatial exclusivity: camera 2 cannot claim an identity already confirmed active on camera 1 without 5s departure. |
+| Inadvertent Veto of Underbody Mechanics | High | Whitelist `is_creeper_or_underbody_pose` and preserve `tracker.protected_ids`. |
+| Excessive Occlusion Dwell Delaying Bay Vacancy | Medium | Short-circuit the 30-second dwell if the technician's track is explicitly observed crossing out of the bay polygon. |
+| OpenVINO Thread Over-Subscription | Medium | Explicitly configure `INFERENCE_NUM_THREADS = 4` in `runtime.py`. |
+
+---
 
 ## Open Questions
-- None blocking. Default settings will support both local upload and online video URLs with multi-camera channel support.
+- None blocking. All constraints, guardrails, and architectural priorities have been aligned with production requirements.

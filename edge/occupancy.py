@@ -414,9 +414,11 @@ def is_under_vehicle_pose(keypoints: list, kpt_conf: float = 0.35) -> bool:
     ankles = _mid(la, ra)
 
     # 1. Lower body limbs visible extending out from chassis (ankles or knees present, upper occluded)
+    # Must have hips or knees; two disconnected ankles alone is just a pair of shoes/boots on the floor.
     lower_pts = sum(1 for p in (lh, rh, lk, rk, la, ra) if p is not None)
     upper_pts = sum(1 for p in (ls, rs) if p is not None)
-    if lower_pts >= 2 and upper_pts == 0:
+    has_hip_or_knee = any(p is not None for p in (lh, rh, lk, rk))
+    if lower_pts >= 2 and upper_pts == 0 and has_hip_or_knee:
         # Must be horizontal limb profile (legs extending horizontally out from chassis)
         if valid_pts:
             span_w = max(xs) - min(xs)
@@ -572,6 +574,54 @@ def detection_in_bay(
     if hasattr(det, "in_roi"):
         return bool(det.in_roi(roi_px, kpt_conf))
     return box_center_in_roi((det.x1, det.y1, det.x2, det.y2), roi_px)
+
+
+def is_admissible_bay_occupant(
+    det,
+    bay: _BayRuntime | dict,
+    frame_h: int,
+    kpt_conf: float = 0.35,
+) -> bool:
+    """Strict three-tier bay admission gate:
+    1. Confirmed track status: hits >= 3 and not flagged as clutter.
+    2. Verified torso keypoint connectivity (shoulders + hips), or whitelisted creeper/underbody pose.
+    3. Non-zero motion/jitter history: rejects inanimate clutter (boots, backpacks, tires, engine blocks).
+    """
+    # 1. Tier 1: Track confirmation & clutter reject
+    if getattr(det, "clutter", False):
+        return False
+    hits = getattr(det, "hits", None)
+    if hits is not None and hits < 3:
+        return False
+
+    # 2. Tier 2: Torso keypoint connectivity (shoulders + hips) or creeper/underbody whitelist
+    kpts = getattr(det, "keypoints", []) or []
+    box = det.box() if hasattr(det, "box") else (det.x1, det.y1, det.x2, det.y2)
+
+    from person import is_creeper_or_underbody_pose
+
+    is_creeper = is_under_vehicle_pose(kpts, kpt_conf * 0.85) or is_creeper_or_underbody_pose(
+        box[0], box[1], box[2], box[3], kpts, frame_h, kpt_conf=kpt_conf
+    )
+    if not is_creeper:
+        ls = _kpt(kpts, L_SHOULDER, kpt_conf)
+        rs = _kpt(kpts, R_SHOULDER, kpt_conf)
+        lh = _kpt(kpts, L_HIP, kpt_conf)
+        rh = _kpt(kpts, R_HIP, kpt_conf)
+        has_shoulder = (ls is not None or rs is not None)
+        has_hip = (lh is not None or rh is not None)
+        if not (has_shoulder and has_hip):
+            return False
+
+    # 3. Tier 3: Non-zero motion/jitter history (rejects completely frozen/inanimate clutter)
+    liveness = getattr(det, "liveness", None)
+    jitter = getattr(det, "jitter", None)
+    motion = getattr(det, "motion", None)
+    if liveness is not None and jitter is not None and motion is not None:
+        if liveness <= 0.0 and jitter <= 0.0 and motion <= 0.0:
+            return False
+
+    return True
 
 
 def fmt_duration(seconds: float) -> str:
@@ -779,6 +829,7 @@ class _BayRuntime:
         self.vehicle_present: bool = bool(cfg.get("vehicle_present", False))
         self.timeline: list[tuple[float, str]] = []
         self.ai_verdict: dict | None = None
+        self.active_track_ids: set[int] = set()
 
     def log_event(self, now: float, description: str) -> None:
         time_str = time.strftime("%H:%M:%S", time.localtime(now))
@@ -979,20 +1030,59 @@ class BayZoneManager:
     ) -> list[BaySnapshot]:
         ticks: list[tuple[str, str | None, bool, float, str, str | None]] = []
         for bay in self._bays:
-            inside = [
+            raw_inside = [
                 det for det in detections if detection_in_bay(det, bay.as_config(), frame_w, frame_h, kpt_conf)
             ]
-            occupied = bay.gate.update(bool(inside), now)
+            inside = [
+                det for det in raw_inside if is_admissible_bay_occupant(det, bay, frame_h, kpt_conf)
+            ]
+
             dt = 0.0
             if bay.last_t is not None:
                 dt = max(0.0, min(now - bay.last_t, MAX_ACTIVITY_DT))
             bay.last_t = now
+
+            # Check if an occupant previously active in this bay has explicitly exited the bay polygon / ROI
+            explicit_exit = False
+            if not inside and bay.session_open:
+                for det in detections:
+                    tid = getattr(det, "track_id", None)
+                    name = getattr(det, "identity", None)
+                    was_in_bay = False
+                    if tid is not None and (tid in bay.locked_tracks or tid in getattr(bay, "active_track_ids", set())):
+                        was_in_bay = True
+                    elif name and name != UNKNOWN_WORKER and (name == bay.last_working_technician or name == bay.technician):
+                        was_in_bay = True
+
+                    if was_in_bay and not detection_in_bay(det, bay.as_config(), frame_w, frame_h, kpt_conf):
+                        explicit_exit = True
+                        break
+
+            if not inside and explicit_exit and bay.session_open:
+                # Explicit boundary exit short-circuits the 30-second dwell timer and closes the session immediately
+                bay.session_open = False
+                prev_state = bay.state
+                bay.state = "PARKED_WAITING" if bay.vehicle_present else "EMPTY"
+                bay.technician = None
+                bay.last_working_technician = None
+                bay.locked_tracks.clear()
+                bay.active_track_ids.clear()
+                bay.stationary_since = None
+                bay.last_anchor = None
+                bay.gate.occupied = False
+                bay.gate._hold = 0.0
+                bay.log_event(now, f"Technician exited bay polygon - session closed to {bay.state}")
+                ticks.append((bay.id, None, False, dt, bay.state, bay.job_id))
+                continue
+
+            occupied = bay.gate.update(bool(inside), now)
 
             time_since_active = (
                 (now - bay.last_active_t) if bay.last_active_t is not None else 999999.0
             )
             occluded_hold = (
                 not inside
+                and not explicit_exit
                 and bay.session_open
                 and bay.type == "vehicle_bay"
                 and bay.state in ("WORKING", "UNDER_VEHICLE")
@@ -1040,6 +1130,9 @@ class BayZoneManager:
                     bay.log_event(now, f"Technician entered bay ({technician or UNKNOWN_WORKER})")
                 if inside:
                     bay.last_active_t = now
+                    bay.active_track_ids = {
+                        getattr(d, "track_id") for d in inside if getattr(d, "track_id", None) is not None
+                    }
 
                 # Track negative behavior duration with brief grace
                 if is_phone:
@@ -1217,6 +1310,7 @@ class BayZoneManager:
                     bay.labor_started = False
                     bay.last_working_technician = None
                     bay.locked_tracks.clear()
+                    bay.active_track_ids.clear()
                     bay.ai_verdict = None
                     # Nobody ever claimed this time; it never becomes labour.
                     bay.unverified_seconds = 0.0

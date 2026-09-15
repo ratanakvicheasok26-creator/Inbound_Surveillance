@@ -294,7 +294,20 @@ def run_camera(cfg: dict, conn, bot: TelegramOut, cfg_path: Path) -> None:
     open_preview_window(WIN, editor.on_mouse)
 
     weights = resolve_weights(cfg)
-    model = YOLO(weights)
+    if getattr(profile, "pose_engine", "yolo") == "tinypose":
+        try:
+            from tinypose import PaddlePoseEngine
+
+            models_dir = get_resource_path("models")
+            if not models_dir.exists():
+                models_dir = DATA_DIR / "models"
+            model = PaddlePoseEngine(models_dir=models_dir, runtime_profile=profile)
+            print(f"[Main] Initialized PP-TinyPose pose engine ({profile.name})", flush=True)
+        except Exception as ex:
+            print(f"[Main] Failed to init PP-TinyPose ({ex}); falling back to YOLO", flush=True)
+            model = YOLO(weights)
+    else:
+        model = YOLO(weights)
     # Dual Neural Network Law: the COCO detector runs alongside pose so vehicle
     # boxes are available to veto skeletons hallucinated onto engines and bikes.
     try:

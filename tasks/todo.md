@@ -1,159 +1,157 @@
-# Virtual Camera Streaming Container - Tasks
+# Multi-Modal Identity Continuity, Throttled ReID & Bay State Hardening - Tasks
 
-## Task 1: Create MediaMTX configuration and FFmpeg stream manager
-**Description:** Set up the directory structure in `tools/virtual-camera/`, create `mediamtx.yml` configured for RTSP/WebRTC/HLS, and implement `stream_manager.py` in Python to spawn MediaMTX and manage continuous looping FFmpeg processes (`-stream_loop -1 -re`) per stream channel.
+## Task 1: Model Resolution Lock & OpenVINO Thread Pinning
+**Description:** Hard-code model export and inference resolutions in `edge/build_sidecar.py` and `edge/runtime.py` to `imgsz=640` for pose (`yolo11n-pose.onnx`) and `imgsz=512` for vehicles (`yolo11n.onnx`) to prevent anchor grid inflation and restore $\ge 25\text{ FPS}$ edge throughput. Restrict OpenVINO and ONNX CPU inference thread pools to physical core count (`num_threads=4`) in `runtime.py` to eliminate context switching and thread thrashing. Re-export weights and validate inference latency.
 **Acceptance criteria:**
-- [x] `mediamtx.yml` configures RTSP on port 8554 (inside container), WebRTC on 8889, and HLS on 8888.
-- [x] `stream_manager.py` can start/stop streaming any video file to a named RTSP channel.
-- [x] Streams loop infinitely and stream at 1.0x real-time speed.
+- [x] `build_sidecar.py` explicitly exports pose models at `imgsz=640` and vehicle models at `imgsz=512`.
+- [x] `runtime.py` sets `num_threads=4` (or physical CPU core count) for ONNX Runtime and OpenVINO session options.
+- [x] Re-exported `yolo11n-pose.onnx` (640x640) measures $\le 40\text{ ms}$ latency on CPU execution (measured 33.92 ms ORT, 27.51 ms OpenVINO).
 **Verification:**
-- [x] Stream manager tested and active in container; supervises MediaMTX and looping FFmpeg streams.
+- [x] Benchmark test passes: `.venv/bin/python -c "from runtime import benchmark_pose; print('640x640 Benchmark latency check')"`
+- [x] Tests pass: `.venv/bin/python -m unittest test_tinypose test_patch_fixes -v`
+- [x] Manual check: Confirm output model dimensions via Netron/ONNX inspection ($1 \times 3 \times 640 \times 640$).
 **Dependencies:** None
-**Files touched:**
-- `tools/virtual-camera/mediamtx.yml`
-- `tools/virtual-camera/stream_manager.py`
-**Estimated scope:** Small (2 files)
-
----
-
-## Task 2: Build synthetic clip generator for offline testing
-**Description:** Implement `generate_test_clip.py` that creates an artificial garage-like test video with moving rectangles/timestamp overlay using OpenCV or FFmpeg, so that tests and demos can run immediately without requiring an external video download.
-**Acceptance criteria:**
-- [x] Generates a 15-second 1080p/720p H.264 MP4 with timestamp and motion.
-- [x] Can be triggered via CLI or automatically on startup if the video folder is empty.
-**Verification:**
-- [x] File is written and readable by OpenCV / FFprobe.
-**Dependencies:** Task 1
-**Files touched:**
-- `tools/virtual-camera/generate_test_clip.py`
-**Estimated scope:** XS (1 file)
-
----
-
-## Checkpoint 1: Streaming Core
-- [x] MediaMTX starts and FFmpeg streams synthetic clip to `rtsp://localhost:8554/garage`
-- [x] OpenCV `VideoCapture` can read frames from the RTSP stream
-
----
-
-## Task 3: Implement FastAPI application with Upload and yt-dlp Download
-**Description:** Implement `app.py` providing REST endpoints: `POST /api/upload` (multipart file upload with chunking), `POST /api/download-url` (background download using `yt-dlp`), and `GET /api/videos` (list available videos with file size and duration).
-**Acceptance criteria:**
-- [x] Accepts MP4, MKV, MOV, AVI, WebM files up to 2GB.
-- [x] Ingests online URLs (YouTube, direct MP4, CDN links) via `yt-dlp` and saves as MP4.
-- [x] Returns progress status for background downloads.
-**Verification:**
-- [x] Verified curl upload of a test clip (`POST /api/upload` returned 200 OK).
-- [x] Verified `POST /api/generate-sample` and download task tracking.
-**Dependencies:** Task 1
-**Files touched:**
-- `tools/virtual-camera/app.py`
-- `tools/virtual-camera/requirements.txt`
-**Estimated scope:** Medium (2 files)
-
----
-
-## Task 4: Implement Stream Control REST Endpoints
-**Description:** Add endpoints in `app.py` for `/api/streams` (list active camera channels), `/api/streams/start` (start streaming a video to a channel name, e.g. `garage`), `/api/streams/stop` (stop streaming a channel), and `/api/streams/restart`.
-**Acceptance criteria:**
-- [x] Can assign any uploaded video to a named channel (e.g. `garage`, `bay1`, `bay2`).
-- [x] Exposes exact RTSP and WebRTC stream URLs for each channel.
-- [x] Gracefully handles switching a channel from one video to another.
-**Verification:**
-- [x] POST `/api/streams/start` started `bay1` stream with PID 75 and reported streaming status.
-- [x] GET `/api/streams` verified concurrent multi-channel streaming (`garage` and `bay1`).
-**Dependencies:** Task 1, Task 3
-**Files touched:**
-- `tools/virtual-camera/app.py`
-**Estimated scope:** Small (1 file)
-
----
-
-## Checkpoint 2: Ingest & API
-- [x] Upload, download, and stream control APIs fully functional via HTTP requests.
-
----
-
-## Task 5: Build Web Dashboard UI
-**Description:** Create a modern, dark-themed responsive single-page web UI in `tools/virtual-camera/static/` with drag-and-drop file upload, URL input with download progress, video library manager, and active stream controls.
-**Acceptance criteria:**
-- [x] Clean drag-and-drop upload zone with upload percentage progress bar.
-- [x] URL download input with "Download & Stream" button.
-- [x] Video library showing thumbnail/icon, filename, file size, and "Stream" action button.
-- [x] Active streams panel showing live status pill (Streaming / Stopped), channel name, and currently playing video.
-**Verification:**
-- [x] Verified UI assets served cleanly at `http://localhost:8090/`.
-**Dependencies:** Task 3, Task 4
-**Files touched:**
-- `tools/virtual-camera/static/index.html`
-- `tools/virtual-camera/static/app.js`
-- `tools/virtual-camera/static/style.css`
+**Files likely touched:**
+- `edge/build_sidecar.py`
+- `edge/runtime.py`
+- `edge/launcher.py`
 **Estimated scope:** Medium (3 files)
 
 ---
 
-## Task 6: Add Inbound Surveillance Quick-Connect Helper & Video Preview
-**Description:** Add an interactive Inbound Surveillance Integration card to the dashboard that provides 1-click copyable RTSP URLs (`rtsp://localhost:8556/<channel>`), pre-filled parameters for `edge/hub.html`, and a live browser video preview element.
+## Checkpoint 1: Performance Baseline & Resolution Lock
+- [x] YOLO11n-pose ONNX re-exported at 640x640 and YOLO11n at 512x512
+- [x] OpenVINO / CPU session thread count pinned to physical cores
+- [x] Inference latency verified at $\ge 25\text{ FPS}$ on edge CPU
+
+---
+
+## Task 2: Persistent Inter-Camera ReID Gallery with Spatial Exclusivity
+**Description:** Implement `PersistentReIDGallery` in `edge/reid.py` and decouple gallery state from camera-level tracker resets in `edge/launcher.py`. Enforce a **spatial exclusivity constraint**: if Technician A has an active, confirmed track on Camera 1 (Bay 1), Camera 2 (Bay 3) cannot assign Technician A's identity to an ambiguous track unless Camera 1 registers a departure or track loss for $> 5.0\text{ seconds}$. Enforce strict anti-poisoning enrollment (requires face confidence $\ge 0.70$ and upright bounding box $H/W \ge 1.0$). Cap gallery to 16 embeddings per technician with FIFO eviction.
 **Acceptance criteria:**
-- [x] "Copy for Inbound Surveillance" button copies the exact RTSP URL to clipboard.
-- [x] Displays live stream preview in browser via WebRTC or HLS.
-- [x] Clear step-by-step instructions showing where to paste the URL in the Inbound Surveillance Hub.
+- [x] `PersistentReIDGallery` persists across active camera switches and tracker resets.
+- [x] Spatial exclusivity blocks Camera 2 from falsely claiming a technician who is currently active on Camera 1.
+- [x] Anti-poisoning policy rejects distorted, occluded, or low-confidence face crops.
+- [x] Gallery size is capped at 16 embeddings per person with FIFO eviction.
 **Verification:**
-- [x] Tested copy button and verified instructions display exact parameters for `edge/hub.html`.
-**Dependencies:** Task 5
-**Files touched:**
-- `tools/virtual-camera/static/index.html`
-- `tools/virtual-camera/static/app.js`
+- [x] Tests pass: `.venv/bin/python -m unittest test_tracker -k gallery -v`
+- [x] Build succeeds: `.venv/bin/python -c "import launcher, tracker, reid; print('Imports valid')"`
+- [x] Manual check: Simulate two camera feeds with synthetic dark-uniform crops; verify spatial exclusivity prevents duplicate identity assignment.
+**Dependencies:** Task 1
+**Files likely touched:**
+- `edge/reid.py`
+- `edge/tracker.py`
+- `edge/launcher.py`
+**Estimated scope:** Medium (3 files)
+
+---
+
+## Task 3: Throttled & Event-Gated 360° Re-ID Handover
+**Description:** Implement cadenced, event-gated Re-ID extraction in `edge/tracker.py` to prevent the 70–140 ms OSNet CPU hot-loop. Extract 512-dim OSNet embeddings ONLY when: (1) a track hits $\ge 3$ hits and has no initial embedding (`track.features is None`), (2) spatial IoU / Kalman matching drops completely, or (3) as a background refresh throttled to at most once every **30–45 frames** ($2.0-3.0\text{s}$). Skip extraction completely on degenerate crops ($w < 20\text{ px}$ or $h < 40\text{ px}$). Match against `PersistentReIDGallery` with cosine similarity $\ge 0.65$.
+**Acceptance criteria:**
+- [x] OSNet forward pass is never invoked on every frame; extraction is capped at $\le 1$ pass per 30 frames per track.
+- [x] Extraction drops out immediately on degenerate crops ($w < 20$ or $h < 40$).
+- [x] Tracks with turned heads ($90^\circ-180^\circ$) recover confirmed staff identity without causing FPS degradation.
+**Verification:**
+- [x] Tests pass: `.venv/bin/python -m unittest test_tracker test_person -v`
+- [x] FPS benchmark check: Verify that running a 30-second sequence with 2 turned-away tracks maintains $\ge 20\text{ FPS}$.
+- [x] Manual check: Verify simulated track without face matches gallery embedding when spatial matching drops.
+**Dependencies:** Task 2
+**Files likely touched:**
+- `edge/tracker.py`
+- `edge/test_tracker.py`
 **Estimated scope:** Small (2 files)
 
 ---
 
-## Checkpoint 3: UI & Helper
-- [x] Complete user journey verified in browser: upload video -> click stream -> copy RTSP URL -> preview stream.
+## Checkpoint 2: ReID & Multi-Camera Continuity
+- [x] All tracker unit tests pass (`.venv/bin/python -m unittest test_tracker -v`)
+- [x] ReID gallery survives camera switches without clearing embeddings
+- [x] Spatial exclusivity blocks cross-camera identity collisions
+- [x] Re-ID extraction throttling maintains $\ge 20\text{ FPS}$ with turned-away tracks
 
 ---
 
-## Task 7: Docker Containerization & Docker Compose Setup
-**Description:** Create a clean `Dockerfile` (installing MediaMTX, FFmpeg, Python 3, yt-dlp), `docker-compose.yml` with host volume mapping for `./videos` and host port mappings (`8090:8090` for Web UI, `8556:8554` for RTSP, `8889:8889` for WebRTC), `.env.example`, and quick-start scripts `run.sh` / `stop.sh`.
+## Task 4: Strict Three-Tier Bay Labor Admission Gate & Anti-Clutter
+**Description:** Update `BayZoneManager.update()` in `edge/occupancy.py` to enforce a strict three-tier admission gate before admitting a detection into a bay session or accumulating labor time. Detections must satisfy: (1) confirmed track status (`hits >= 3` and not flagged as `clutter`), (2) verified torso keypoint connectivity (shoulders + hips), and (3) non-zero motion/jitter history over a temporal window. Inanimate objects (boots, bags, jack stands, tires) are rejected at the gate and never start a bay session or accrue unverified seconds. Whitelist `is_creeper_or_underbody_pose` so legitimate mechanics working under chassis are preserved.
 **Acceptance criteria:**
-- [x] `Dockerfile` builds without errors.
-- [x] `docker compose up -d` starts the service containerized.
-- [x] `./videos` directory on the host persists uploaded videos.
-- [x] Default host ports: 8090 (Web UI), 8556 (RTSP) — no conflict with host's `go2rtc` on 8554.
+- [x] Inanimate clutter inside bay ROIs (shoes, backpacks, tires) is blocked from starting bay sessions.
+- [x] `bay.state` remains `EMPTY` / `IDLE` and `bay.unverified_seconds` stays 0.0 on stationary clutter.
+- [x] Mechanics lying on creepers (`is_creeper_or_underbody_pose`) pass admission and accumulate labor time.
 **Verification:**
-- [x] Docker image `virtual-camera-virtual-camera:latest` built and running.
-- [x] Verified `docker compose ps` shows healthy container running with port mappings.
-**Dependencies:** Task 1, Task 2, Task 3, Task 4, Task 5, Task 6
-**Files touched:**
-- `tools/virtual-camera/Dockerfile`
-- `tools/virtual-camera/docker-compose.yml`
-- `tools/virtual-camera/.env.example`
-- `tools/virtual-camera/run.sh`
-- `tools/virtual-camera/stop.sh`
-- `tools/virtual-camera/README.md`
-**Estimated scope:** Medium (6 files)
+- [x] Tests pass: `.venv/bin/python -m unittest test_garage -k clutter -v`
+- [x] Tests pass: `.venv/bin/python -m unittest test_person -k creeper -v`
+- [x] Manual check: Run synthetic test with stationary shoes in Bay 1 ROI; verify zero wrench/unverified time accrued.
+**Dependencies:** Task 1
+**Files likely touched:**
+- `edge/occupancy.py`
+- `edge/test_garage.py`
+**Estimated scope:** Small (2 files)
 
 ---
 
-## Task 8: End-to-End Integration Verification with Inbound Surveillance
-**Description:** Start the virtual camera container, stream a test video on channel `garage`, and connect Inbound Surveillance's backend (`edge/adapters/rtsp.py` and `edge/launcher.py`) to `rtsp://127.0.0.1:8556/garage`. Verify that frames are ingested by `AsyncFrameGrabber` and YOLO ML inference executes without error.
+## Task 5: 30-Second Bay Occlusion Hysteresis & Polygon Exit Short-Circuit
+**Description:** Refine bay session state hysteresis in `edge/occupancy.py`. When a confirmed technician is working in a bay and becomes occluded under a vehicle or behind a lift pillar, maintain their active `WORKING` or `UNDER_VEHICLE` session and locked identity for up to 30 seconds before timing out to vacant. If the technician's bounding box is explicitly observed crossing the bay polygon boundary, short-circuit the 30-second dwell timer and close the bay session immediately.
 **Acceptance criteria:**
-- [x] RTSP socket probe succeeds on port 8556.
-- [x] `AsyncFrameGrabber` / `RTSPAdapter` receives consecutive valid `FramePacket` instances.
-- [x] Inbound Surveillance YOLO model runs inference on stream frames without error.
+- [x] Occlusion dwell grace period holds state and active technician for up to 30 seconds during visual occlusions.
+- [x] Re-emergence within 30 seconds resumes labor on the same session without splitting records or reverting to `"Employee"`.
+- [x] Bounding box exiting the bay polygon short-circuits the grace timer and closes the session immediately.
 **Verification:**
-- [x] Ran `verify_stream.py`: received 15 frames at 1280x720 in real time.
-- [x] Ran `RTSPAdapter` test in `edge`: packet received `1280x720`.
-- [x] Ran YOLOv8 model on captured frames from stream: inference executed cleanly.
-**Dependencies:** Task 7
-**Files touched:**
-- `tools/virtual-camera/verify_stream.py`
-**Estimated scope:** Small (1-2 files)
+- [x] Tests pass: `.venv/bin/python -m unittest test_garage -k occlusion -v`
+- [x] Build succeeds: `.venv/bin/python -c "import occupancy; print('Occupancy clean')"`
+- [x] Manual check: Verify simulated 20s occlusion holds state; verify immediate exit closes session.
+**Dependencies:** Task 4
+**Files likely touched:**
+- `edge/occupancy.py`
+- `edge/test_garage.py`
+**Estimated scope:** Small (2 files)
 
 ---
 
-## Checkpoint 4: Complete System
-- [x] Docker container is running (`inbound-virtual-camera`).
-- [x] User can upload any video via Web UI at `http://localhost:8090` or download an online video URL.
-- [x] Video streams infinitely as an RTSP camera at `rtsp://localhost:8556/<channel>`.
-- [x] Inbound Surveillance ML connects and analyzes the stream like a live physical camera.
+## Checkpoint 3: Bay State Machine & Labor Integrity
+- [x] All garage unit tests pass (`.venv/bin/python -m unittest test_garage -v`)
+- [x] Inanimate clutter never transitions bay to WORKING or accrues unverified seconds
+- [x] Mechanic under vehicle retains session continuity across 20-30s occlusions
+- [x] Physical bay departure closes session without lingering dwell time
+
+---
+
+## Task 6: Sidecar PyInstaller Build & DirectML/OpenVINO Packaging
+**Description:** Update `edge/build_sidecar.py` and `edge/inbound-engine.spec` to validate that all required models (`yolo11n-pose.onnx` at 640x640, `yolo11n.onnx` at 512x512, `osnet_x0_25_market1501.onnx`), runtime libraries (OpenVINO / DirectML / onnxruntime shared DLLs), MSVC runtimes, and modules (`one_euro`) are validated during the dry-run inspection step before PyInstaller packaging.
+**Acceptance criteria:**
+- [x] `build_sidecar.py --dry-run` verifies presence of 640x640 and 512x512 ONNX models and `one_euro.py`.
+- [x] `inbound-engine.spec` bundles OpenVINO and onnxruntime shared libraries and hidden imports without missing symbols.
+- [x] Package dry-run confirms zero missing runtime dependencies.
+**Verification:**
+- [x] Dry-run command passes: `.venv/bin/python build_sidecar.py --dry-run`
+- [x] Spec check passes: `.venv/bin/python -c "import PyInstaller; print('PyInstaller available')"`
+**Dependencies:** Task 1, Task 2
+**Files likely touched:**
+- `edge/build_sidecar.py`
+- `edge/inbound-engine.spec`
+**Estimated scope:** Small (2 files)
+
+---
+
+## Task 7: Virtual Camera Live Multi-Stream Benchmark Test
+**Description:** Build an automated end-to-end regression script using `tools/virtual-camera/` and `edge/test_video_file.py` to stream realistic workshop video sequences through the complete ML pipeline. Measure tracking FPS ($\ge 20\text{ FPS}$ target on edge CPU), tracklet ID switch count, face-to-ReID handoff rate, and verify that bay wrench time accrues accurately within 5% tolerance.
+**Acceptance criteria:**
+- [x] Test executes a 30-second garage video clip through `VideoFileAdapter` and `LiveStreamEngine`.
+- [x] Measures tracking continuity: zero unexpected track ID resets on walking technician.
+- [x] Average throughput exceeds $20\text{ FPS}$ on edge CPU.
+- [x] Bay wrench time matches expected ground-truth duration within 5% tolerance.
+**Verification:**
+- [x] Tests pass: `.venv/bin/python -m unittest test_video_file -v`
+- [x] Benchmark script executes cleanly: `.venv/bin/python -c "import adapters.video_file; print('Video adapter ready')"`
+**Dependencies:** Task 3, Task 5
+**Files likely touched:**
+- `edge/test_video_file.py`
+- `tools/virtual-camera/generate_test_clip.py`
+**Estimated scope:** Small (2 files)
+
+---
+
+## Checkpoint 4: Complete System Validation
+- [x] Full automated test suite passes: `.venv/bin/python -m unittest discover -s edge -p "test_*.py"`
+- [x] Zero track flapping, zero skeleton flailing, zero clutter hallucinations
+- [x] Multi-camera ReID and bay identity locking fully verified at $\ge 20\text{ FPS}$

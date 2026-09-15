@@ -49,6 +49,25 @@ def box_iou(
     return inter / (area_a + area_b - inter + 1e-6)
 
 
+def box_containment(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    """Fraction of the smaller box that is inside the larger box."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(ax2 - ax1, 1e-6) * max(ay2 - ay1, 1e-6)
+    area_b = max(bx2 - bx1, 1e-6) * max(by2 - by1, 1e-6)
+    return inter / min(area_a, area_b)
+
+
 def bay_crop_xyxy(
     bay: dict,
     frame_w: int,
@@ -119,19 +138,67 @@ def remap_detection(det: Detection, crop_xyxy: tuple[int, int, int, int]) -> Det
     return out
 
 
+def suppress_nested_boxes(
+    dets: list[Detection],
+    containment_threshold: float = 0.75,
+    iou_threshold: float = 0.40,
+) -> list[Detection]:
+    """Suppress nested duplicate boxes (e.g. torso inside full body)."""
+    if len(dets) <= 1:
+        return list(dets)
+    sorted_dets = sorted(dets, key=lambda d: d.conf, reverse=True)
+    kept: list[Detection] = []
+    for det in sorted_dets:
+        is_nested = False
+        for existing in kept:
+            iou = box_iou(det.box(), existing.box())
+            cont = box_containment(det.box(), existing.box())
+            if cont >= containment_threshold or iou >= iou_threshold:
+                is_nested = True
+                break
+        if not is_nested:
+            kept.append(det)
+    return kept
+
+
 def merge_detections(
     full_accepted: list[Detection],
     full_rejected: list[Detection],
     zoom_accepted: list[Detection],
     zoom_rejected: list[Detection],
     iou_threshold: float = DEFAULT_MERGE_IOU,
+    containment_threshold: float = 0.70,
 ) -> tuple[list[Detection], list[Detection]]:
-    """Keep full-frame boxes; add zoom boxes that do not overlap them."""
+    """Merge full-frame detections and zoom detections.
+    
+    If a zoom detection overlaps an existing full-frame detection, prefer the zoom
+    detection if it has higher confidence or richer keypoints (since zoom crops offer
+    higher spatial resolution). Add non-overlapping zoom boxes.
+    """
     merged_accepted = list(full_accepted)
     for det in zoom_accepted:
-        if any(box_iou(det.box(), other.box()) >= iou_threshold for other in full_accepted):
-            continue
-        merged_accepted.append(det)
+        matched_idx = -1
+        best_overlap = 0.0
+        for idx, other in enumerate(merged_accepted):
+            iou = box_iou(det.box(), other.box())
+            cont = box_containment(det.box(), other.box())
+            overlap = max(iou, cont)
+            if (iou >= iou_threshold or cont >= containment_threshold) and overlap > best_overlap:
+                best_overlap = overlap
+                matched_idx = idx
+
+        if matched_idx >= 0:
+            existing = merged_accepted[matched_idx]
+            existing_kpts_vis = sum(1 for pt in existing.keypoints if len(pt) >= 3 and pt[2] >= 0.25) if existing.keypoints else 0
+            zoom_kpts_vis = sum(1 for pt in det.keypoints if len(pt) >= 3 and pt[2] >= 0.25) if det.keypoints else 0
+            if det.conf >= existing.conf or zoom_kpts_vis > existing_kpts_vis + 2:
+                det.track_id = det.track_id or existing.track_id
+                det.identity = det.identity or existing.identity
+                det.is_staff = det.is_staff or existing.is_staff
+                merged_accepted[matched_idx] = det
+        else:
+            merged_accepted.append(det)
+
     merged_rejected = list(full_rejected)
     for det in zoom_rejected:
         if any(box_iou(det.box(), other.box()) >= iou_threshold for other in merged_accepted):
@@ -139,7 +206,42 @@ def merge_detections(
         if any(box_iou(det.box(), other.box()) >= iou_threshold for other in full_rejected):
             continue
         merged_rejected.append(det)
-    return merged_accepted, merged_rejected
+    return suppress_nested_boxes(merged_accepted), merged_rejected
+
+
+def candidate_vehicle_bays(
+    bays: list[dict],
+    accepted: list[Detection],
+    frame_w: int,
+    frame_h: int,
+    kpt_conf: float,
+    occupancy_by_id: dict[str, dict] | None = None,
+    only_empty: bool = False,
+) -> list[dict]:
+    """Vehicle bays to zoom.
+    
+    If only_empty is True, bays with an already-accepted person are skipped.
+    In active production (only_empty=False), bays with active vehicles, open sessions,
+    or configured vehicle bays are zoomed so all mechanics (foreground, occluded, or background)
+    are detected simultaneously.
+    """
+    out: list[dict] = []
+    for bay in bays or []:
+        if not isinstance(bay, dict):
+            continue
+        bay_type = str(bay.get("type") or "vehicle_bay").strip() or "vehicle_bay"
+        if bay_type != "vehicle_bay":
+            continue
+        if only_empty and any(detection_in_bay(det, bay, frame_w, frame_h, kpt_conf) for det in accepted):
+            continue
+        if occupancy_by_id is not None:
+            hint = occupancy_by_id.get(str(bay.get("id") or ""), {})
+            has_activity = bool(hint.get("session_open") or hint.get("vehicle_present"))
+            has_person = any(detection_in_bay(det, bay, frame_w, frame_h, kpt_conf) for det in accepted)
+            if not has_activity and not has_person:
+                continue
+        out.append(bay)
+    return out
 
 
 def empty_vehicle_bays(
@@ -149,23 +251,18 @@ def empty_vehicle_bays(
     frame_h: int,
     kpt_conf: float,
     occupancy_by_id: dict[str, dict] | None = None,
+    only_empty: bool = True,
 ) -> list[dict]:
-    """Vehicle bays with no accepted person. Occupancy hints skip unused empty bays."""
-    out: list[dict] = []
-    for bay in bays or []:
-        if not isinstance(bay, dict):
-            continue
-        bay_type = str(bay.get("type") or "vehicle_bay").strip() or "vehicle_bay"
-        if bay_type != "vehicle_bay":
-            continue
-        if any(detection_in_bay(det, bay, frame_w, frame_h, kpt_conf) for det in accepted):
-            continue
-        if occupancy_by_id is not None:
-            hint = occupancy_by_id.get(str(bay.get("id") or ""), {})
-            if not (hint.get("session_open") or hint.get("vehicle_present")):
-                continue
-        out.append(bay)
-    return out
+    """Vehicle bays with no accepted person. Kept for backwards compatibility."""
+    return candidate_vehicle_bays(
+        bays,
+        accepted,
+        frame_w,
+        frame_h,
+        kpt_conf,
+        occupancy_by_id=occupancy_by_id,
+        only_empty=only_empty,
+    )
 
 
 def detections_from_result(result, conf_min: float) -> list[Detection]:
@@ -226,13 +323,24 @@ def zoom_empty_bays(
     kpt_conf: float,
     pad: float = DEFAULT_BAY_ZOOM_PAD,
     occupancy_by_id: dict[str, dict] | None = None,
+    only_empty: bool = False,
 ) -> tuple[list[Detection], list[Detection]]:
-    """Second-pass YOLO on empty vehicle bays. No-op when every bay already has a person."""
+    """Second-pass YOLO/TinyPose on vehicle bays.
+    
+    Zooms vehicle bays to resolve occluded or background workers.
+    Occupancy hints skip inactive empty bays when vehicles are not present.
+    """
     if model is None or frame is None or not bays:
         return accepted, rejected
     frame_h, frame_w = frame.shape[:2]
-    targets = empty_vehicle_bays(
-        bays, accepted, frame_w, frame_h, kpt_conf, occupancy_by_id=occupancy_by_id
+    targets = candidate_vehicle_bays(
+        bays,
+        accepted,
+        frame_w,
+        frame_h,
+        kpt_conf,
+        occupancy_by_id=occupancy_by_id,
+        only_empty=only_empty,
     )
     if not targets:
         return accepted, rejected

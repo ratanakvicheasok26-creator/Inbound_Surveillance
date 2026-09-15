@@ -32,10 +32,12 @@ from corroborate import veto_vehicle_interior
 from vehicle import VehicleDetection
 from bay_zoom import (
     bay_crop_xyxy,
+    candidate_vehicle_bays,
     empty_vehicle_bays,
     merge_detections,
     remap_detection,
     remap_keypoints,
+    suppress_nested_boxes,
     zoom_empty_bays,
 )
 
@@ -217,6 +219,17 @@ class KinematicPoseTests(unittest.TestCase):
             )
         )
 
+    def test_crossed_arms_accepted_with_bilateral_swap(self):
+        kpts = standing_person_keypoints()
+        # Cross arms: left elbow reaches right, right elbow reaches left
+        kpts[7] = (130.0, 120.0, 0.85)
+        kpts[8] = (70.0, 120.0, 0.85)
+        from person import bones_cross, resolve_bilateral_swap
+        self.assertTrue(bones_cross(kpts, 0.35))
+        swapped = resolve_bilateral_swap(kpts, 0.35)
+        self.assertFalse(bones_cross(swapped, 0.35))
+        self.assertTrue(is_human_pose(50, 10, 150, 280, kpts, 480, kpt_conf=0.35))
+
 
 class _Box:
     def __init__(self, xyxy, conf):
@@ -282,6 +295,30 @@ class BayZoomTests(unittest.TestCase):
         zoom = Detection(500.0, 200.0, 580.0, 420.0, 0.8, standing_person_keypoints())
         accepted, _ = merge_detections([full], [], [zoom], [])
         self.assertEqual(len(accepted), 2)
+
+    def test_zoom_merge_upgrades_higher_confidence_zoom_person(self):
+        full = Detection(100.0, 80.0, 180.0, 300.0, 0.5, standing_person_keypoints())
+        zoom = Detection(105.0, 85.0, 175.0, 290.0, 0.85, standing_person_keypoints())
+        accepted, rejected = merge_detections([full], [], [zoom], [])
+        self.assertEqual(len(accepted), 1)
+        self.assertIs(accepted[0], zoom)
+        self.assertEqual(accepted[0].conf, 0.85)
+
+    def test_candidate_vehicle_bays_includes_occupied_bay_by_default(self):
+        bays = [
+            {"id": "bay_1", "name": "Lift", "type": "vehicle_bay", "roi": [0.10, 0.20, 0.35, 0.60]},
+            {"id": "bay_2", "name": "Bay 2", "type": "vehicle_bay", "roi": [0.55, 0.20, 0.35, 0.60]},
+        ]
+        person = Detection(150.0, 300.0, 220.0, 620.0, 0.9, standing_person_keypoints())
+        candidates = candidate_vehicle_bays(bays, [person], 1000, 1000, 0.25, only_empty=False)
+        self.assertEqual([b["id"] for b in candidates], ["bay_1", "bay_2"])
+
+    def test_suppress_nested_boxes_removes_contained_duplicate(self):
+        full = Detection(100.0, 80.0, 200.0, 350.0, 0.8, standing_person_keypoints())
+        torso = Detection(110.0, 85.0, 195.0, 220.0, 0.6, standing_person_keypoints())
+        suppressed = suppress_nested_boxes([full, torso])
+        self.assertEqual(len(suppressed), 1)
+        self.assertIs(suppressed[0], full)
 
     def test_empty_vehicle_bays_skip_occupied_and_tool_area(self):
         bays = [
@@ -401,6 +438,26 @@ class BayZoomTests(unittest.TestCase):
         )
         self.assertEqual(accepted, [])
         self.assertGreaterEqual(len(rejected), 1)
+
+
+class PersonDetectionSplitTests(unittest.TestCase):
+    def test_person_detections_split_returns_low_score_boxes(self):
+        from person import person_detections_split
+
+        kpts_data = [standing_person_keypoints(), standing_person_keypoints()]
+        boxes = [
+            _Box((50, 10, 150, 280), 0.85),
+            _Box((200, 10, 300, 280), 0.18),
+        ]
+        res = _FakeResult(boxes, _Keypoints(kpts_data))
+        accepted, rejected, low = person_detections_split(
+            res, 480, conf_min=0.25, track_low_thresh=0.10
+        )
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0].conf, 0.85)
+        self.assertEqual(len(low), 1)
+        self.assertEqual(low[0].conf, 0.18)
+        self.assertFalse(low[0].accepted)
 
 
 class SkeletonRenderTests(unittest.TestCase):
