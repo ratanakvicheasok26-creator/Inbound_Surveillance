@@ -2611,7 +2611,7 @@ class LiveStreamEngine:
     def _worker_loop(self):
         from ultralytics import YOLO
 
-        print("[LiveStreamEngine] Loading YOLO pose model...")
+        print("[LiveStreamEngine] Loading person pose model...")
         self.conn = connect(DATA_DIR / "events.db")
         self.runtime_profile = resolve_runtime(self.cfg)
         weights_path = resolve_weights_file(self.cfg, get_resource_path, DATA_DIR)
@@ -2623,26 +2623,15 @@ class LiveStreamEngine:
         if not veh_weights_path.exists():
             veh_weights_path = DATA_DIR / "yolo11n.pt"
         try:
-            if getattr(self.runtime_profile, "pose_engine", "yolo") == "tinypose":
-                try:
-                    from tinypose import PaddlePoseEngine
+            from rtmpose import load_person_pose_model, resolve_models_dir
 
-                    models_dir = get_resource_path("models")
-                    if not models_dir.exists():
-                        models_dir = DATA_DIR / "models"
-                    self.model = PaddlePoseEngine(models_dir=models_dir, runtime_profile=self.runtime_profile)
-                    print(
-                        f"[LiveStreamEngine] Initialized PP-TinyPose pose engine ({self.runtime_profile.name})",
-                        flush=True,
-                    )
-                except Exception as ex:
-                    print(
-                        f"[LiveStreamEngine] Failed to init PP-TinyPose ({ex}); falling back to YOLO",
-                        flush=True,
-                    )
-                    self.model = YOLO(str(weights_path), task="pose")
-            else:
-                self.model = YOLO(str(weights_path), task="pose")
+            self.model = load_person_pose_model(
+                self.runtime_profile,
+                models_dir=resolve_models_dir(get_resource_path, DATA_DIR),
+                weights_path=weights_path,
+                cfg=self.cfg,
+                yolo_cls=YOLO,
+            )
 
             if getattr(self.model, "task", None) != "pose":
                 fallback = get_resource_path("yolo11n-pose.pt")
@@ -2663,7 +2652,7 @@ class LiveStreamEngine:
             self.vehicle_infer_interval: float = float(self.cfg.get("vehicle_infer_interval", 1.0))
             print(
                 f"[LiveStreamEngine] Models ready ({self.runtime_profile.name}, "
-                f"engine={getattr(self.runtime_profile, 'pose_engine', 'yolo')}, "
+                f"engine={getattr(self.runtime_profile, 'pose_engine', 'rtmpose')}, "
                 f"device={self.runtime_profile.yolo_device}, weights={weights_path})"
             )
             self.face_rec = try_create_face_recognizer(self.cfg)

@@ -198,6 +198,8 @@ class TestTinyPosePipeline(unittest.TestCase):
         profile = resolve_runtime(cfg_tiny)
         self.assertEqual(profile.pose_engine, "tinypose")
 
+        self.assertEqual(resolve_pose_engine({"pose_engine": "rtmpose"}), "rtmpose")
+
     def test_06_benchmark_tinypose_speed(self):
         engine = PaddlePoseEngine(MODELS_DIR, auto_download=False)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)

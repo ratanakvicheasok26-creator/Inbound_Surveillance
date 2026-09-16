@@ -70,7 +70,7 @@ class RuntimeProfile:
     track_min_hits: int
     track_iou_threshold: float
     reid_match_threshold: float
-    pose_engine: str = "yolo"
+    pose_engine: str = "rtmpose"
 
     @property
     def is_gpu(self) -> bool:
@@ -179,16 +179,18 @@ def person_weights_name(raw: object | None) -> str:
     return EDGE_WEIGHTS
 
 
-DEFAULT_POSE_ENGINE = "yolo"
+DEFAULT_POSE_ENGINE = "rtmpose"
 
 
 def resolve_pose_engine(cfg: dict | None = None) -> str:
-    """Select pose inference backend: 'yolo' (default) or 'tinypose'."""
+    """Select pose inference backend: rtmpose (default), yolo, or tinypose."""
     cfg = cfg or {}
     raw = str(cfg.get("pose_engine") or cfg.get("engine") or DEFAULT_POSE_ENGINE).strip().lower()
     if raw in ("tinypose", "tiny_pose", "paddle", "paddle_onnx", "picodet_tinypose"):
         return "tinypose"
-    return "yolo"
+    if raw in ("yolo", "yolo11", "ultralytics", "yolov8", "yolov5"):
+        return "yolo"
+    return "rtmpose"
 
 
 def resolve_runtime(cfg: dict | None = None) -> RuntimeProfile:

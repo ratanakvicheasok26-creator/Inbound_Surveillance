@@ -71,6 +71,7 @@ hiddenimports = [
     "negatives",
     "one_euro",
     "tinypose",
+    "rtmpose",
 ]
 
 
@@ -179,7 +180,7 @@ def _msvc_runtime_binaries() -> list[tuple[str, str]]:
 
 binaries += _msvc_runtime_binaries()
 
-pkgs_to_collect = ["ultralytics", "torch", "torchvision", "cv2", "PIL", "yaml", "requests", "onnxruntime"]
+pkgs_to_collect = ["ultralytics", "torch", "torchvision", "cv2", "PIL", "yaml", "requests", "onnxruntime", "rtmlib"]
 try:
     import openvino
     pkgs_to_collect.append("openvino")

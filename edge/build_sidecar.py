@@ -200,6 +200,7 @@ REQUIRED_PYZ_MODULES = (
     "db",
     "face_id",
     "tinypose",
+    "rtmpose",
     "one_euro",
     "adapters.video_file",
 )
@@ -317,6 +318,7 @@ def verify_dry_run() -> bool:
         "ai_auditor",
         "person",
         "tinypose",
+        "rtmpose",
         "vehicle",
         "bay_zoom",
         "runtime",

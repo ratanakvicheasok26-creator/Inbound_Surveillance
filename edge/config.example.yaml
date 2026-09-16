@@ -44,23 +44,26 @@ bays:
 # Mechanic phones on garage Wi-Fi (MAC and/or static IP from the ARP table).
 wifi_devices: []
 
-# Person detector — YOLO11n-pose on the edge, optional YOLO11s on GPU servers.
+# Person detector — RTMPose (YOLOX person boxes + COCO-17 skeletons).
 # Staff = connected kinematic skeleton OR a close-up face (laptop webcam).
 # Shoes, bags, and jackets fail: no head/torso tree. Blankets still fail.
 # detect_fps caps inference; the preview still follows the camera.
 # Dual-target runtime: cpu | openvino | cuda | tensorrt
 # imgsz 960 keeps far 1080p workers large enough; set 1280 on cuda/tensorrt.
 runtime: cpu
-# Pose inference backend: "yolo" (Ultralytics YOLO11n-pose) or "tinypose" (PaddleDetection PP-TinyPose + PicoDet ONNX)
-pose_engine: yolo
-weights: yolo11n-pose.pt  # Person tracker needs pose keypoints; yolo11n_improved.pt is detect-only
+# Pose backend: "rtmpose" (OpenMMLab RTMPose via rtmlib), "yolo" (YOLO11n-pose),
+# or "tinypose" (PP-TinyPose). Vehicle boxes still use Ultralytics YOLO.
+pose_engine: rtmpose
+# lightweight = YOLOX-tiny+RTMPose-s (CPU). balanced = YOLOX-m+RTMPose-m.
+rtmpose_mode: lightweight
+weights: yolo11n-pose.pt  # Fallback if RTMPose cannot load; yolo11n_improved.pt is detect-only
 server_weights: yolo11s-pose.pt
 person_conf: 0.25
 imgsz: 960
 min_person_height: 0.05
 min_aspect: 1.1
 min_keypoints: 3
-kpt_conf: 0.35  # YOLO-pose joint floor. Omit this key for TinyPose (defaults to 0.12).
+kpt_conf: 0.35  # Joint floor for RTMPose / YOLO-pose. Omit this key for TinyPose (defaults to 0.12).
 # Zoom empty vehicle bays (SAHI-style crop) when full-frame YOLO misses a crouch.
 bay_zoom: true
 bay_zoom_pad: 0.08

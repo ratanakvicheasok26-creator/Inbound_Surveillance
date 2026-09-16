@@ -5,3 +5,5 @@ requests>=2.32.0
 zeroconf>=0.132.0
 onnxruntime>=1.18.0
 onnx>=1.16.0
+rtmlib>=0.0.13
+tqdm>=4.66.0
