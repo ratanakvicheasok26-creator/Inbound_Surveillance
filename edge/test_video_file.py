@@ -65,6 +65,16 @@ def test_routing_and_gateway_bypass() -> None:
         "rtsp://hello@home/george/Documents/Inbound-Surveillance/edge/videos/clip.mp4"
     )
     assert recovered == "/home/george/Documents/Inbound-Surveillance/edge/videos/clip.mp4"
+    from adapters.base import decode_file_uri
+
+    assert decode_file_uri("file:///tmp/clip.mp4") == "/tmp/clip.mp4"
+    assert decode_file_uri("/tmp/clip.mp4") == "/tmp/clip.mp4"
+    windows_uri = decode_file_uri("file:///C:/Users/test/clip.mp4")
+    if sys.platform == "win32":
+        assert windows_uri.replace("/", "\\").lower().startswith("c:\\users\\test\\clip.mp4")
+    else:
+        assert windows_uri.endswith("C:/Users/test/clip.mp4") or "clip.mp4" in windows_uri
+    assert protocol_from_source("file:///C:/Users/test/clip.mp4") == "video"
     assert protocol_from_source("test.avi") == "video"
     assert protocol_from_source("test.mov") == "video"
     assert protocol_from_source("test.webm") == "video"

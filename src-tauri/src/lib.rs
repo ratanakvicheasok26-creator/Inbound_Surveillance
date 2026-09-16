@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
+#[cfg(target_os = "windows")]
+use std::sync::atomic::AtomicBool;
+
 #[cfg(unix)]
 use std::time::Duration;
 
@@ -14,6 +17,9 @@ struct EngineProcess(Mutex<Option<CommandChild>>);
 /// Sidecar PID kept outside Tauri managed state so we can still kill it
 /// after `RunEvent::Exit` has already dropped app state.
 static ENGINE_PID: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(target_os = "windows")]
+static VC_REDIST_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
 const ENGINE_PORT: &str = "8765";
 const READY_MARKER: &str = "[INBOUND_SERVER_READY]";
@@ -225,6 +231,87 @@ fn bundled_vc_redist_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> 
     candidates.into_iter().find(|path| path.is_file())
 }
 
+#[cfg(target_os = "windows")]
+fn notify_boot_status(app: &tauri::AppHandle, text: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let escaped = text
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('\n', " ");
+        let _ = window.eval(&format!(
+            "const el=document.getElementById('status'); if(el) el.textContent='{escaped}';"
+        ));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn vcredist_present() -> bool {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let system32 = std::path::Path::new(&system_root).join("System32");
+    ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"]
+        .iter()
+        .all(|name| system32.join(name).is_file())
+}
+
+#[cfg(target_os = "windows")]
+fn run_bundled_vc_redist(app: &tauri::AppHandle) -> Result<String, String> {
+    let path = bundled_vc_redist_path(app).ok_or_else(|| {
+        "The Visual C++ installer was not bundled with this app. Reinstall using the Setup.exe from the latest build."
+            .to_string()
+    })?;
+    let path_str = path.to_string_lossy().replace('\'', "''");
+    let status = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!(
+                "Start-Process -FilePath '{path_str}' -ArgumentList '/install /passive /norestart' -Verb RunAs -Wait"
+            ),
+        ])
+        .status()
+        .map_err(|err| format!("Could not start Visual C++ installer: {err}"))?;
+    if status.success() {
+        Ok("Visual C++ runtime installed. Click Retry Engine.".into())
+    } else {
+        Err(format!(
+            "Visual C++ installer exited with {}. If you cancelled the Windows permission prompt, click Install now again.",
+            status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn ensure_windows_runtimes(app: &tauri::AppHandle) {
+    if vcredist_present() {
+        return;
+    }
+    if VC_REDIST_ATTEMPTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    log::info!("Visual C++ runtime missing; launching bundled installer");
+    notify_boot_status(
+        app,
+        "Installing the missing Visual C++ runtime. Windows may ask for permission…",
+    );
+    match run_bundled_vc_redist(app) {
+        Ok(msg) => {
+            log::info!("{msg}");
+            notify_boot_status(app, "Visual C++ runtime installed. Starting camera engine…");
+        }
+        Err(err) => {
+            log::warn!("automatic VC++ install failed: {err}");
+            notify_boot_status(
+                app,
+                "Could not auto-install Visual C++. Starting engine anyway…",
+            );
+        }
+    }
+}
+
 fn notify_engine_ready(app: &tauri::AppHandle, port: u16) {
     let _ = app.emit("engine-ready", port);
     if let Some(window) = app.get_webview_window("main") {
@@ -344,6 +431,8 @@ fn spawn_engine(app: tauri::AppHandle) {
     let log_file = engine_log_path(&app);
     let log_path_str = log_file.to_string_lossy().to_string();
     kill_stale_engines();
+    #[cfg(target_os = "windows")]
+    ensure_windows_runtimes(&app);
 
     let command = match app.shell().sidecar("inbound-engine") {
         Ok(cmd) => cmd.args(["--port", ENGINE_PORT, "--no-browser"]),
@@ -512,31 +601,7 @@ fn install_bundled_runtime(app: tauri::AppHandle) -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        let path = bundled_vc_redist_path(&app).ok_or_else(|| {
-            "The Visual C++ installer was not bundled with this app. Reinstall using the Setup.exe from the latest build."
-                .to_string()
-        })?;
-        let path_str = path.to_string_lossy().replace('\'', "''");
-        let status = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &format!(
-                    "Start-Process -FilePath '{path_str}' -ArgumentList '/install /passive /norestart' -Verb RunAs -Wait"
-                ),
-            ])
-            .status()
-            .map_err(|err| format!("Could not start Visual C++ installer: {err}"))?;
-        if status.success() {
-            Ok("Visual C++ runtime installed. Click Retry Engine.".into())
-        } else {
-            Err(format!(
-                "Visual C++ installer exited with {}. If you cancelled the Windows permission prompt, click Install now again.",
-                status.code().unwrap_or(-1)
-            ))
-        }
+        run_bundled_vc_redist(&app)
     }
 }
 

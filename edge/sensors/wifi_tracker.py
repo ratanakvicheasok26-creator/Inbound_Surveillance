@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,6 +96,8 @@ def parse_arp_table(text: str) -> list[dict[str, str]]:
 
 
 def read_proc_arp(path: Path | str = "/proc/net/arp") -> str:
+    if sys.platform == "win32":
+        return ""
     proc = Path(path)
     try:
         return proc.read_text(encoding="utf-8", errors="replace")

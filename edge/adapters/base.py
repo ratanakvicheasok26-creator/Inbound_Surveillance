@@ -104,6 +104,41 @@ def source_has_video_ext(text: str) -> bool:
     return path.endswith(_VIDEO_EXTS)
 
 
+def decode_file_uri(raw: str) -> str:
+    """Turn ``file://`` URIs into native filesystem paths.
+
+    Windows ``file:///C:/Users/clip.mp4`` must become ``C:\\Users\\clip.mp4``,
+    not ``/C:/Users/clip.mp4``. A naive ``text[7:]`` strip does the latter and
+    OpenCV cannot open the file.
+    """
+    text = str(raw or "").strip()
+    if not text.lower().startswith("file:"):
+        return text
+    normalized = text.replace("\\", "/")
+    # file://C:/Users/... is a common malformed form; force three slashes.
+    if re.match(r"file://[A-Za-z]:", normalized, re.IGNORECASE):
+        normalized = "file:///" + normalized[7:]
+    try:
+        parsed = urllib.parse.urlparse(normalized)
+    except Exception:
+        return text[5:].lstrip("/") if text.lower().startswith("file:") else text
+    path = urllib.parse.unquote(parsed.path or "")
+    netloc = parsed.netloc or ""
+    if sys.platform == "win32":
+        from urllib.request import url2pathname
+
+        if netloc and re.fullmatch(r"[A-Za-z]", netloc):
+            path = f"/{netloc}:{path}"
+        elif netloc and netloc.lower() not in ("localhost", "127.0.0.1"):
+            unc = "\\\\" + netloc + path.replace("/", "\\")
+            return unc
+        converted = url2pathname(path)
+        return converted or text
+    if netloc and netloc.lower() not in ("localhost", "127.0.0.1", ""):
+        return "/" + netloc + path
+    return path or text
+
+
 def unwrap_local_video_source(source: Any) -> str | None:
     """Return a filesystem path when ``source`` is a local video file.
 
@@ -114,8 +149,8 @@ def unwrap_local_video_source(source: Any) -> str | None:
     text = str(source or "").strip()
     if not text:
         return None
-    if text.lower().startswith("file://"):
-        text = text[7:]
+    if text.lower().startswith("file:"):
+        text = decode_file_uri(text)
     lower = text.lower()
     networked = lower.startswith(
         ("rtsp://", "http://", "https://", "tapo://", "onvif://", "whep://", "webrtc://", "whip://")
@@ -132,6 +167,10 @@ def unwrap_local_video_source(source: Any) -> str | None:
     path = urllib.parse.unquote(parsed.path or "")
     if not host or not path:
         return None
+    if len(host) == 1 and host.isalpha():
+        drive = f"{host.upper()}:{path.replace('/', '\\') if sys.platform == 'win32' else path}"
+        if source_has_video_ext(drive):
+            return drive
     candidate = "/" + host + path
     if not source_has_video_ext(candidate):
         return None

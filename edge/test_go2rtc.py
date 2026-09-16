@@ -85,6 +85,12 @@ def test_ffmpeg_candidates_skip_unix_paths_on_windows_shape() -> None:
     else:
         assert any(p.endswith("ffmpeg") for p in ff)
 
+    from media.go2rtc import yaml_quoted_path
+
+    quoted = yaml_quoted_path(r"C:\Program Files\ffmpeg\bin\ffmpeg.exe")
+    assert quoted == "C:/Program Files/ffmpeg/bin/ffmpeg.exe"
+    assert "\\b" not in f'bin: "{quoted}"'
+
 
 def test_create_adapter_gateway_routing() -> None:
     class FakeClient:

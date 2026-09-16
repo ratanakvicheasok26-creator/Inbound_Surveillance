@@ -31,15 +31,18 @@
 
   ${If} ${FileExists} "$1"
     DetailPrint "Installing Visual C++ Redistributable (required by the camera engine)..."
-    ; Quiet install. Do not Abort the app if this fails (no admin / already newer).
-    ; Exit 0 = success, 1638 = already present, 3010 = success reboot suggested.
+    ; Quiet install first. Exit 0 = success, 1638 = already present, 3010 = reboot suggested.
+    ; currentUser installers are not elevated, so quiet install often fails with
+    ; access denied. Fall back to runas so Windows can prompt for permission.
     ExecWait '"$1" /install /quiet /norestart' $0
     ${If} $0 == 0
     ${OrIf} $0 == 1638
     ${OrIf} $0 == 3010
       DetailPrint "Visual C++ Redistributable is ready"
     ${Else}
-      DetailPrint "Visual C++ Redistributable was not installed (code $0). The app can retry on first launch."
+      DetailPrint "Quiet install failed (code $0); requesting administrator permission..."
+      ExecShellWait "runas" "$1" "/install /passive /norestart"
+      DetailPrint "Visual C++ Redistributable install finished (or was skipped)"
     ${EndIf}
   ${Else}
     DetailPrint "Visual C++ Redistributable was not bundled in this installer"

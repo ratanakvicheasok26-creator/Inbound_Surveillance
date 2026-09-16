@@ -1245,7 +1245,9 @@ class LiveStreamEngine:
                     from adapters.video_file import resolve_video_path
                     vp = resolve_video_path(src)
                     if vp.is_file():
-                        url = f"ffmpeg:{vp.resolve()}#video=h264#loop"
+                        # Forward slashes so go2rtc does not treat `C:` as a
+                        # second scheme separator and YAML/URL parsers stay sane.
+                        url = f"ffmpeg:{vp.resolve().as_posix()}#video=h264#loop"
                     else:
                         continue
                 except Exception:

@@ -430,12 +430,18 @@ def main() -> None:
     BINARIES.mkdir(parents=True, exist_ok=True)
     dest = BINARIES / sidecar_name(target)
     shutil.copy2(built, dest)
-    dest.chmod(dest.stat().st_mode | 0o111)
+    try:
+        dest.chmod(dest.stat().st_mode | 0o111)
+    except OSError:
+        pass
     print(f"Sidecar installed: {dest}", flush=True)
 
     go2rtc_dest = BINARIES / go2rtc_sidecar_name(target)
     shutil.copy2(go2rtc_path, go2rtc_dest)
-    go2rtc_dest.chmod(go2rtc_dest.stat().st_mode | 0o111)
+    try:
+        go2rtc_dest.chmod(go2rtc_dest.stat().st_mode | 0o111)
+    except OSError:
+        pass
     print(f"go2rtc installed: {go2rtc_dest}", flush=True)
 
 

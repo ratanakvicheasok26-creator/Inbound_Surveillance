@@ -328,6 +328,11 @@ def find_ffmpeg_binary() -> str | None:
     return None
 
 
+def yaml_quoted_path(path: str | Path) -> str:
+    """Slash-normalize a filesystem path for YAML and go2rtc configs."""
+    return str(path).replace("\\", "/")
+
+
 _CONFIG_TEMPLATE = """\
 api:
   listen: "{host}:{api_port}"
@@ -443,7 +448,11 @@ class Go2RtcManager:
         config = work / "go2rtc.yaml"
         ffmpeg_bin = find_ffmpeg_binary()
         if ffmpeg_bin:
-            ffmpeg_section = f"ffmpeg:\n  bin: \"{ffmpeg_bin}\"\n"
+            # YAML double-quoted strings treat `\` as escape, so Windows
+            # `C:\ffmpeg\bin\ffmpeg.exe` would become garbage. Forward slashes
+            # are accepted by CreateProcess and go2rtc on Windows.
+            ffmpeg_yaml = yaml_quoted_path(ffmpeg_bin)
+            ffmpeg_section = f'ffmpeg:\n  bin: "{ffmpeg_yaml}"\n'
         else:
             ffmpeg_section = ""
         config.write_text(

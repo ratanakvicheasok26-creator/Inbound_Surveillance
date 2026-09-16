@@ -12,14 +12,13 @@ import numpy as np
 from adapters.base import (
     BaseCameraAdapter,
     FramePacket,
+    decode_file_uri,
     packet_from_bgr,
 )
 
 
 def resolve_video_path(raw_path: str | Path) -> Path:
-    raw = str(raw_path or "").strip()
-    if raw.lower().startswith("file://"):
-        raw = raw[7:]
+    raw = decode_file_uri(str(raw_path or "").strip())
 
     p = Path(raw)
     if p.is_file():

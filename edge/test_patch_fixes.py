@@ -116,7 +116,7 @@ class TestFrozenPathSplit(unittest.TestCase):
         self.assertEqual(VIDEOS_DIR, DATA_DIR / "videos")
         self.assertEqual(DATA_DIR, data_dir())
         self.assertEqual(ROOT, resource_dir())
-        self.assertEqual(INBOUND_APP_VERSION, "0.1.2")
+        self.assertEqual(INBOUND_APP_VERSION, "0.1.3")
         engine = init_global_engine()
         self.assertEqual(engine.ai_auditor.save_crops_dir, DATA_DIR / "proofs" / "ai_audits")
 
@@ -131,6 +131,15 @@ class TestFrozenPathSplit(unittest.TestCase):
         else:
             self.assertTrue(any(p.endswith("/ffmpeg") or p.endswith("ffmpeg") for p in paths))
             self.assertNotIn("ProgramFiles", blob)
+
+    def test_yaml_quoted_path_strips_windows_escapes(self):
+        from media.go2rtc import yaml_quoted_path
+
+        quoted = yaml_quoted_path(r"C:\ffmpeg\bin\ffmpeg.exe")
+        self.assertEqual(quoted, "C:/ffmpeg/bin/ffmpeg.exe")
+        section = f'ffmpeg:\n  bin: "{quoted}"\n'
+        self.assertNotIn("\\b", section)
+        self.assertIn("C:/ffmpeg/bin/ffmpeg.exe", section)
 
 
 if __name__ == "__main__":

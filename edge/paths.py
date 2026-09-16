@@ -7,7 +7,7 @@ import sys
 import traceback
 from pathlib import Path
 
-INBOUND_APP_VERSION = "0.1.2"
+INBOUND_APP_VERSION = "0.1.3"
 INBOUND_BUILD_ID = os.environ.get("INBOUND_BUILD_ID", "").strip() or INBOUND_APP_VERSION
 
 
