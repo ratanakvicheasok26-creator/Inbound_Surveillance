@@ -585,6 +585,31 @@ class VehicleCorroborationTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(vetoed, [])
 
+    def test_unverified_seated_box_inside_lifted_car_is_kept(self):
+        from occupancy import overhead_sitting_keypoints
+
+        kpts = overhead_sitting_keypoints()
+        det = Detection(200.0, 120.0, 340.0, 250.0, 0.75, kpts)
+        det.accepted = True
+        det.is_staff = False
+        det.identity = "Employee"
+        car = VehicleDetection(180.0, 80.0, 450.0, 280.0, 0.90, "car")
+        kept, vetoed = veto_vehicle_interior([det], [car], kpt_conf=0.35)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(vetoed, [])
+
+    def test_protected_track_inside_vehicle_is_not_vetoed(self):
+        kpts = engine_bay_keypoints()
+        det = Detection(200.0, 80.0, 280.0, 150.0, 0.75, kpts)
+        det.accepted = True
+        det.track_id = 4
+        car = VehicleDetection(100.0, 50.0, 450.0, 360.0, 0.90, "car")
+        kept, vetoed = veto_vehicle_interior(
+            [det], [car], kpt_conf=0.35, protected_ids={4}
+        )
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(vetoed, [])
+
 
 if __name__ == "__main__":
     unittest.main()

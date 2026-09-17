@@ -254,6 +254,21 @@ class TrackerIdentityTests(unittest.TestCase):
         self.assertEqual(crouch_out[0].track_id, track_id)
         self.assertEqual(crouch_out[0].identity, "George")
 
+    def test_stand_to_sit_keeps_track_id(self):
+        tracker = PersonTracker(max_age=30, min_hits=2, iou_threshold=0.3)
+        out = []
+        for _ in range(3):
+            out = tracker.update([_det(x1=80, y1=40, x2=160, y2=280, name="George", staff=True)])
+        track_id = out[0].track_id
+        seated = Detection(90, 150, 210, 280, 0.85, standing_person_keypoints())
+        seated.accepted = True
+        seated.identity = "Employee"
+        seated.is_staff = False
+        seated_out = tracker.update([seated])
+        self.assertEqual(len(seated_out), 1)
+        self.assertEqual(seated_out[0].track_id, track_id)
+        self.assertEqual(seated_out[0].identity, "George")
+
     def test_low_conf_preserves_existing_track(self):
         tracker = PersonTracker(max_age=10, min_hits=2, iou_threshold=0.3, low_iou_threshold=0.15)
         out = []

@@ -12,6 +12,7 @@ their hips sit outside it. A hallucination on the engine block does neither.
 
 from __future__ import annotations
 
+from occupancy import is_sitting_pose, is_under_vehicle_pose
 from person import L_ANKLE, L_HIP, R_ANKLE, R_HIP
 
 DEFAULT_CONTAINMENT = 0.75
@@ -58,9 +59,18 @@ def is_vehicle_interior_ghost(
     kpt_conf: float = 0.35,
     containment: float = DEFAULT_CONTAINMENT,
     floor_margin: float = DEFAULT_FLOOR_MARGIN,
+    protected_ids: set[int] | None = None,
 ) -> bool:
     """A pose box swallowed by a vehicle with nothing reaching the floor."""
     if getattr(det, "is_staff", False):
+        return False
+    tid = getattr(det, "track_id", None)
+    if protected_ids and tid is not None and int(tid) in protected_ids:
+        return False
+    kpts = getattr(det, "keypoints", None) or []
+    if is_sitting_pose(kpts, kpt_conf):
+        return False
+    if is_under_vehicle_pose(kpts, kpt_conf * 0.85):
         return False
     box = det.box()
     for veh in vehicles or []:
@@ -83,6 +93,7 @@ def veto_vehicle_interior(
     kpt_conf: float = 0.35,
     containment: float = DEFAULT_CONTAINMENT,
     floor_margin: float = DEFAULT_FLOOR_MARGIN,
+    protected_ids: set[int] | None = None,
 ) -> tuple[list, list]:
     """Split accepted detections into (kept, vetoed) using vehicle geometry."""
     if not accepted or not vehicles:
@@ -96,6 +107,7 @@ def veto_vehicle_interior(
             kpt_conf=kpt_conf,
             containment=containment,
             floor_margin=floor_margin,
+            protected_ids=protected_ids,
         ):
             det.accepted = False
             vetoed.append(det)

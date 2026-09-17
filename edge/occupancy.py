@@ -115,6 +115,28 @@ def box_center_in_roi(
     return rx1 <= cx <= rx2 and ry1 <= cy <= ry2
 
 
+def box_roi_iou(
+    box: tuple[float, float, float, float],
+    roi_px: tuple[int, int, int, int],
+) -> float:
+    ax1, ay1, ax2, ay2 = box
+    bx1, by1, bx2, by2 = roi_px
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(ax2 - ax1, 1e-6) * max(ay2 - ay1, 1e-6)
+    area_b = max(bx2 - bx1, 1e-6) * max(by2 - by1, 1e-6)
+    return float(inter / (area_a + area_b - inter))
+
+
+def _det_box(det) -> tuple[float, float, float, float]:
+    if hasattr(det, "box"):
+        return det.box()
+    return (det.x1, det.y1, det.x2, det.y2)
+
+
 def pixels_to_roi(
     x1: int,
     y1: int,
@@ -166,7 +188,9 @@ PRESENCE_GRACE_SECONDS = 8.0
 PHONE_THRESHOLD_SECONDS = 12.0
 SITTING_THRESHOLD_SECONDS = 15.0
 MAX_ACTIVITY_DT = 2.0
+ROI_OVERLAP_MIN = 0.15
 UNKNOWN_WORKER = "Employee"
+PROTECTED_BAY_STATES = ("WORKING", "UNDER_VEHICLE", "NOT_WORKING", "IDLE")
 
 # COCO-pose indices (Ultralytics YOLO-pose).
 NOSE = 0
@@ -384,7 +408,13 @@ def is_under_vehicle_pose(keypoints: list, kpt_conf: float = 0.35) -> bool:
     - Lower limbs (ankles/knees) visible while upper torso/head are occluded under chassis.
     - Horizontal body alignment: horizontal distance (dx) between joints significantly exceeds vertical (dy).
     - MUST NOT trigger on upright standing/walking postures.
+    - MUST NOT trigger on chair/stool sitting (upright torso + horizontal thighs).
     """
+    # Chair sitting is an upright torso. A creeper has a horizontal spine, so
+    # is_sitting_pose returns false there and this early-out does not fire.
+    if is_sitting_pose(keypoints, kpt_conf):
+        return False
+
     valid_pts = [
         (float(pt[0]), float(pt[1]))
         for pt in keypoints
@@ -513,6 +543,8 @@ def is_sitting_pose(keypoints: list, kpt_conf: float = 0.30) -> bool:
     Negative work cues:
     - Vertical distance between hips and knees is compressed (thighs roughly horizontal).
     - Torso is upright while thighs extend horizontally.
+    A creeper (shoulders and hips nearly collinear horizontally) is not sitting.
+    Legs-only under a chassis (no shoulders) is not sitting.
     """
     lh = _kpt(keypoints, L_HIP, kpt_conf)
     rh = _kpt(keypoints, R_HIP, kpt_conf)
@@ -524,8 +556,15 @@ def is_sitting_pose(keypoints: list, kpt_conf: float = 0.30) -> bool:
     shoulders = _mid(ls, rs)
     hips = _mid(lh, rh)
     knees = _mid(lk, rk)
+    if not shoulders or not hips:
+        return False
 
-    torso = max(1.0, abs(hips[1] - shoulders[1])) if (shoulders and hips) else 100.0
+    dx_sh = abs(shoulders[0] - hips[0])
+    dy_sh = abs(shoulders[1] - hips[1])
+    if dx_sh > 1.3 * max(dy_sh, 1.0):
+        return False
+
+    torso = max(1.0, dy_sh)
 
     for hip, knee in ((lh, lk), (rh, rk)):
         if hip and knee:
@@ -536,10 +575,9 @@ def is_sitting_pose(keypoints: list, kpt_conf: float = 0.30) -> bool:
             if dy < 0.26 * torso:
                 return True
 
-    if hips and knees and shoulders:
+    if hips and knees:
         dy_hk = abs(knees[1] - hips[1])
-        dy_sh = abs(hips[1] - shoulders[1])
-        if dy_hk < 0.38 * dy_sh:
+        if dy_hk < 0.38 * torso:
             return True
 
     return False
@@ -571,9 +609,33 @@ def detection_in_bay(
         if point_in_polygon(px, py, polygon):
             return True
     roi_px = roi_to_pixels(frame_w, frame_h, bay["roi"])
+    box = _det_box(det)
     if hasattr(det, "in_roi"):
-        return bool(det.in_roi(roi_px, kpt_conf))
-    return box_center_in_roi((det.x1, det.y1, det.x2, det.y2), roi_px)
+        if det.in_roi(roi_px, kpt_conf):
+            return True
+    elif box_center_in_roi(box, roi_px):
+        return True
+    if box_roi_iou(box, roi_px) >= ROI_OVERLAP_MIN:
+        return True
+    if polygon:
+        for x, y in ((box[0], box[1]), (box[2], box[1]), (box[0], box[3]), (box[2], box[3])):
+            if point_in_polygon(x / max(frame_w, 1), y / max(frame_h, 1), polygon):
+                return True
+    return False
+
+
+def detection_overlaps_bay(
+    det,
+    bay: dict,
+    frame_w: int,
+    frame_h: int,
+    kpt_conf: float = 0.4,
+    min_iou: float = ROI_OVERLAP_MIN,
+) -> bool:
+    if detection_in_bay(det, bay, frame_w, frame_h, kpt_conf):
+        return True
+    roi_px = roi_to_pixels(frame_w, frame_h, bay["roi"])
+    return box_roi_iou(_det_box(det), roi_px) >= min_iou
 
 
 def is_admissible_bay_occupant(
@@ -630,6 +692,8 @@ def is_admissible_bay_occupant(
             return False
 
     # 3. Tier 3: Dead pixel/joint energy is an engine block, not a still worker.
+    # A seated/crouched occupant of an already-open bay session is allowed to
+    # go still — that is rest, not a jack stand.
     liveness = getattr(det, "liveness", None)
     jitter = getattr(det, "jitter", None)
     motion = getattr(det, "motion", None)
@@ -639,7 +703,9 @@ def is_admissible_bay_occupant(
             and jitter <= DEAD_KEYPOINT_JITTER
             and motion <= 3.0
         ):
-            return False
+            open_session = bool(getattr(bay, "session_open", False))
+            if not (open_session and is_whitelisted):
+                return False
 
     return True
 
@@ -850,6 +916,7 @@ class _BayRuntime:
         self.timeline: list[tuple[float, str]] = []
         self.ai_verdict: dict | None = None
         self.active_track_ids: set[int] = set()
+        self.outside_since: float | None = None
 
     def log_event(self, now: float, description: str) -> None:
         time_str = time.strftime("%H:%M:%S", time.localtime(now))
@@ -914,6 +981,7 @@ class BayZoneManager:
         occupy_clear_seconds: float = 5.0,
         under_car_grace_seconds: float = UNDER_CAR_GRACE_SECONDS,
         break_timeout_seconds: float = BREAK_TIMEOUT_SECONDS,
+        presence_grace_seconds: float = PRESENCE_GRACE_SECONDS,
         departure_grace_seconds: float = 15.0,
         motion_px: float = 14.0,
         fallback_roi: list[float] | None = None,
@@ -926,6 +994,7 @@ class BayZoneManager:
         self.clear = occupy_clear_seconds
         self.under_car_grace_seconds = float(under_car_grace_seconds)
         self.break_timeout_seconds = float(break_timeout_seconds)
+        self.presence_grace_seconds = float(presence_grace_seconds)
         self.departure_grace_seconds = float(departure_grace_seconds)
         self.motion_px = motion_px
         self.auto_create_bays = not bool(bays) if auto_create_bays is None else bool(auto_create_bays)
@@ -953,6 +1022,7 @@ class BayZoneManager:
             runtime.roi = list(cfg["roi"])
             runtime.polygon = cfg.get("polygon")
             runtime.under_car_grace_seconds = self.under_car_grace_seconds
+            runtime.presence_grace_seconds = self.presence_grace_seconds
             if cfg.get("job_id"):
                 runtime.job_id = cfg["job_id"]
             rebuilt.append(runtime)
@@ -963,6 +1033,15 @@ class BayZoneManager:
 
     def snapshots(self) -> list[BaySnapshot]:
         return [b.snapshot() for b in self._bays]
+
+    def protected_track_ids(self) -> set[int]:
+        """Track ids occupancy already accepted — spare them from clutter/veto."""
+        ids: set[int] = set()
+        for bay in self._bays:
+            if bay.state in PROTECTED_BAY_STATES or bay.session_open:
+                ids.update(int(t) for t in bay.active_track_ids)
+                ids.update(int(t) for t in bay.locked_tracks)
+        return ids
 
     def telemetry(self) -> list[dict]:
         return [s.as_dict() for s in self.snapshots()]
@@ -1050,8 +1129,11 @@ class BayZoneManager:
     ) -> list[BaySnapshot]:
         ticks: list[tuple[str, str | None, bool, float, str, str | None]] = []
         for bay in self._bays:
+            # Geometric presence (center, keypoints, or box-ROI overlap) vs
+            # admitted occupants (passed the three-tier gate).
+            cfg = bay.as_config()
             raw_inside = [
-                det for det in detections if detection_in_bay(det, bay.as_config(), frame_w, frame_h, kpt_conf)
+                det for det in detections if detection_in_bay(det, cfg, frame_w, frame_h, kpt_conf)
             ]
             inside = [
                 det for det in raw_inside if is_admissible_bay_occupant(det, bay, frame_h, kpt_conf)
@@ -1062,24 +1144,42 @@ class BayZoneManager:
                 dt = max(0.0, min(now - bay.last_t, MAX_ACTIVITY_DT))
             bay.last_t = now
 
-            # Check if an occupant previously active in this bay has explicitly exited the bay polygon / ROI
-            explicit_exit = False
-            if not inside and bay.session_open:
-                for det in detections:
-                    tid = getattr(det, "track_id", None)
-                    name = getattr(det, "identity", None)
-                    was_in_bay = False
-                    if tid is not None and (tid in bay.locked_tracks or tid in getattr(bay, "active_track_ids", set())):
-                        was_in_bay = True
-                    elif name and name != UNKNOWN_WORKER and (name == bay.last_working_technician or name == bay.technician):
-                        was_in_bay = True
+            def _was_in_bay(det) -> bool:
+                tid = getattr(det, "track_id", None)
+                name = getattr(det, "identity", None)
+                if tid is not None and (tid in bay.locked_tracks or tid in getattr(bay, "active_track_ids", set())):
+                    return True
+                if name and name != UNKNOWN_WORKER and (
+                    name == bay.last_working_technician or name == bay.technician
+                ):
+                    return True
+                return False
 
-                    if was_in_bay and not detection_in_bay(det, bay.as_config(), frame_w, frame_h, kpt_conf):
-                        explicit_exit = True
-                        break
+            visible_outside = False
+            if bay.session_open:
+                for det in detections:
+                    if not _was_in_bay(det):
+                        continue
+                    if detection_overlaps_bay(det, cfg, frame_w, frame_h, kpt_conf):
+                        continue
+                    visible_outside = True
+                    break
+
+            if raw_inside:
+                bay.outside_since = None
+                visible_outside = False
+            elif not visible_outside:
+                bay.outside_since = None
+
+            explicit_exit = False
+            if not inside and not raw_inside and bay.session_open and visible_outside:
+                if bay.outside_since is None:
+                    bay.outside_since = now - dt
+                if (now - bay.outside_since) >= bay.presence_grace_seconds:
+                    explicit_exit = True
 
             if not inside and explicit_exit and bay.session_open:
-                # Explicit boundary exit short-circuits the 30-second dwell timer and closes the session immediately
+                # Sustained walk-out short-circuits the 30-second dwell timer.
                 bay.session_open = False
                 prev_state = bay.state
                 bay.state = "PARKED_WAITING" if bay.vehicle_present else "EMPTY"
@@ -1089,6 +1189,7 @@ class BayZoneManager:
                 bay.active_track_ids.clear()
                 bay.stationary_since = None
                 bay.last_anchor = None
+                bay.outside_since = None
                 bay.gate.occupied = False
                 bay.gate._hold = 0.0
                 bay.log_event(now, f"Technician exited bay polygon - session closed to {bay.state}")
@@ -1103,6 +1204,7 @@ class BayZoneManager:
             occluded_hold = (
                 not inside
                 and not explicit_exit
+                and not visible_outside
                 and bay.session_open
                 and bay.type == "vehicle_bay"
                 and bay.state in ("WORKING", "UNDER_VEHICLE")
@@ -1332,6 +1434,7 @@ class BayZoneManager:
                     bay.locked_tracks.clear()
                     bay.active_track_ids.clear()
                     bay.ai_verdict = None
+                    bay.outside_since = None
                     # Nobody ever claimed this time; it never becomes labour.
                     bay.unverified_seconds = 0.0
 
@@ -1378,9 +1481,15 @@ def _is_named_staff(det) -> bool:
 
 def _single_locked_staff(bay: _BayRuntime) -> str | None:
     name = bay.last_working_technician
-    if not name or name == UNKNOWN_WORKER or "," in name:
-        return None
-    return name
+    if name and name != UNKNOWN_WORKER and "," not in name:
+        return name
+    locked_names = [
+        n for n in bay.locked_tracks.values() if n and n != UNKNOWN_WORKER and "," not in n
+    ]
+    unique = list(dict.fromkeys(locked_names))
+    if len(unique) == 1:
+        return unique[0]
+    return None
 
 
 def _resolve_occupant_name(det, inside: list, bay: _BayRuntime) -> str:
@@ -1468,6 +1577,45 @@ def crouching_pose_keypoints() -> list[tuple[float, float, float]]:
     pts[12] = (125.0, 158.0, 0.85)
     pts[13] = (90.0, 168.0, 0.85)
     pts[14] = (128.0, 170.0, 0.85)
+    return pts
+
+
+def sitting_pose_keypoints() -> list[tuple[float, float, float]]:
+    """Synthetic: worker seated with thighs roughly horizontal."""
+    pts = [(0.0, 0.0, 0.0)] * 17
+    pts[0] = (100.0, 60.0, 0.9)
+    pts[5] = (80.0, 90.0, 0.9)
+    pts[6] = (120.0, 90.0, 0.9)
+    pts[11] = (85.0, 160.0, 0.9)
+    pts[12] = (115.0, 160.0, 0.9)
+    pts[13] = (135.0, 165.0, 0.9)
+    pts[14] = (155.0, 165.0, 0.9)
+    pts[15] = (135.0, 220.0, 0.8)
+    pts[16] = (155.0, 220.0, 0.8)
+    return pts
+
+
+def overhead_sitting_keypoints() -> list[tuple[float, float, float]]:
+    """High-angle sit: compact height, upright torso, thighs out horizontally.
+
+    From Camera 06 this used to trip is_under_vehicle_pose via hip–ankle dx.
+    """
+    pts = [(0.0, 0.0, 0.0)] * 17
+    pts[0] = (110.0, 90.0, 0.9)
+    pts[1] = (104.0, 84.0, 0.85)
+    pts[2] = (116.0, 84.0, 0.85)
+    pts[5] = (80.0, 110.0, 0.9)
+    pts[6] = (140.0, 110.0, 0.9)
+    pts[7] = (75.0, 145.0, 0.7)
+    pts[8] = (145.0, 145.0, 0.7)
+    pts[9] = (90.0, 165.0, 0.6)
+    pts[10] = (130.0, 165.0, 0.6)
+    pts[11] = (90.0, 150.0, 0.9)
+    pts[12] = (130.0, 150.0, 0.9)
+    pts[13] = (160.0, 155.0, 0.9)
+    pts[14] = (200.0, 155.0, 0.9)
+    pts[15] = (165.0, 190.0, 0.8)
+    pts[16] = (205.0, 190.0, 0.8)
     return pts
 
 

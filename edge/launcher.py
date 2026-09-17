@@ -2800,6 +2800,9 @@ class LiveStreamEngine:
 
             snapshots = self.bay_manager.snapshots()
             any_occupied = any(s.state != "EMPTY" for s in snapshots)
+            protected_ids = self.bay_manager.protected_track_ids()
+            if self.tracker is not None:
+                self.tracker.protected_ids = set(protected_ids)
 
             # Fast Motion Scanner (<0.05ms CPU on 160x120 grayscale)
             try:
@@ -2908,7 +2911,7 @@ class LiveStreamEngine:
                             occupancy_by_id=occupancy_hints(snapshots),
                         )
                     last_accepted, vetoed = veto_vehicle_interior(
-                        last_accepted, vehicles, kpt_conf=kpt_conf
+                        last_accepted, vehicles, kpt_conf=kpt_conf, protected_ids=protected_ids
                     )
                     last_rejected.extend(vetoed)
                     if self.tracker is not None:
@@ -2928,14 +2931,8 @@ class LiveStreamEngine:
                         last_accepted, w, h, now, kpt_conf=kpt_conf, frame=frame
                     )
                     if self.tracker is not None:
-                        # A worker wedged under a chassis is legitimately frozen;
-                        # spare them from next tick's inanimate sweep.
-                        under = {s.name for s in snapshots if s.state == "UNDER_VEHICLE"}
-                        self.tracker.protected_ids = {
-                            int(d.track_id)
-                            for d in last_accepted
-                            if d.track_id is not None and d.bay_name in under
-                        }
+                        # Spare still workers in an active bay from the inanimate sweep.
+                        self.tracker.protected_ids = self.bay_manager.protected_track_ids()
                     ghost.absent_seconds = float(cfg.get("absent_seconds") or 10)
                     ghost.cooldown_seconds = float(cfg.get("cooldown_seconds") or 30)
                     any_occupied = any(

@@ -41,6 +41,7 @@ from occupancy import (
     is_working_pose,
     next_available_bay_name,
     normalize_bays,
+    overhead_sitting_keypoints,
     partial_legs_pose_keypoints,
     point_in_polygon,
     point_in_roi,
@@ -238,6 +239,12 @@ class PoseAndRoiTests(unittest.TestCase):
         self.assertTrue(is_under_vehicle_pose(under_vehicle_pose_keypoints()))
         self.assertTrue(is_under_vehicle_pose(partial_legs_pose_keypoints()))
         self.assertFalse(is_under_vehicle_pose(idle_standing_keypoints()))
+        self.assertFalse(is_under_vehicle_pose(sitting_keypoints()))
+        self.assertFalse(is_under_vehicle_pose(overhead_sitting_keypoints()))
+        self.assertTrue(is_sitting_pose(sitting_keypoints()))
+        self.assertTrue(is_sitting_pose(overhead_sitting_keypoints()))
+        self.assertFalse(is_sitting_pose(under_vehicle_pose_keypoints()))
+        self.assertFalse(is_sitting_pose(partial_legs_pose_keypoints()))
 
     def test_under_vehicle_occlusion_and_dwell_grace_period(self):
         manager = BayZoneManager(
@@ -1558,6 +1565,7 @@ class GarageApiTests(unittest.TestCase):
             break_timeout_seconds=3600.0,
             occupy_confirm_seconds=0.01,
             occupy_clear_seconds=0.01,
+            presence_grace_seconds=0.01,
         )
         work_in_bay = _det(_shift_kpts(working_pose_keypoints(), 80, 280), name="Hour-Meng", staff=True, track_id=5)
         t0 = 100.0
@@ -1583,6 +1591,104 @@ class GarageApiTests(unittest.TestCase):
         self.assertEqual(snaps["bay_1"].state, "EMPTY")
         self.assertFalse(snaps["bay_1"].session_open)
         self.assertIsNone(snaps["bay_1"].mechanic_name)
+
+    def test_camera06_sit_down_stays_in_bay_not_under_vehicle(self):
+        manager = BayZoneManager(
+            DEFAULT_BAYS,
+            occupy_confirm_seconds=0.01,
+            occupy_clear_seconds=0.01,
+            presence_grace_seconds=8.0,
+        )
+        for b in manager._bays:
+            b.sitting_threshold_seconds = 1.0
+
+        t0 = 100.0
+        standing = _det(
+            _shift_kpts(working_pose_keypoints(), 80, 280),
+            name="Hour-Meng",
+            staff=True,
+            track_id=1,
+        )
+        manager.update([standing], 1000, 1000, t0, kpt_conf=0.4)
+        manager.update([standing], 1000, 1000, t0 + 2.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "WORKING")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+
+        sitting = _det(
+            _shift_kpts(overhead_sitting_keypoints(), 80, 280),
+            x1=180, y1=400, x2=320, y2=620,
+            name="Employee",
+            staff=False,
+            track_id=99,
+        )
+        manager.update([sitting], 1000, 1000, t0 + 2.5, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertNotEqual(snaps["bay_1"].state, "UNDER_VEHICLE")
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+        self.assertTrue(snaps["bay_1"].session_open)
+
+        manager.update([sitting], 1000, 1000, t0 + 4.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "NOT_WORKING")
+        self.assertEqual(snaps["bay_1"].not_working_reason, "SITTING")
+        self.assertTrue(snaps["bay_1"].session_open)
+        self.assertEqual(snaps["bay_1"].mechanic_name, "Hour-Meng")
+
+        edge = _det(
+            _shift_kpts(overhead_sitting_keypoints(), -90, 200),
+            x1=0, y1=250, x2=199, y2=780,
+            name="Employee",
+            staff=False,
+            track_id=99,
+        )
+        manager.update([edge], 1000, 1000, t0 + 6.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertTrue(snaps["bay_1"].session_open)
+        self.assertNotEqual(snaps["bay_1"].state, "EMPTY")
+
+        still = _det(
+            _shift_kpts(overhead_sitting_keypoints(), 80, 280),
+            x1=180, y1=400, x2=320, y2=620,
+            name="Employee",
+            staff=False,
+            track_id=99,
+            liveness=0.0,
+            jitter=0.0,
+            motion=0.0,
+        )
+        manager.update([still], 1000, 1000, t0 + 7.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertTrue(snaps["bay_1"].session_open)
+        self.assertEqual(snaps["bay_1"].state, "NOT_WORKING")
+
+    def test_walk_out_after_presence_grace_closes_session(self):
+        manager = BayZoneManager(
+            DEFAULT_BAYS,
+            occupy_confirm_seconds=0.01,
+            occupy_clear_seconds=0.01,
+            presence_grace_seconds=0.01,
+        )
+        work = _det(
+            _shift_kpts(working_pose_keypoints(), 80, 280),
+            name="Hour-Meng",
+            staff=True,
+            track_id=5,
+        )
+        t0 = 100.0
+        manager.update([work], 1000, 1000, t0, kpt_conf=0.4)
+        manager.update([work], 1000, 1000, t0 + 2.0, kpt_conf=0.4)
+        outside = _det(
+            _shift_kpts(working_pose_keypoints(), 600, 280),
+            x1=700, y1=220, x2=850, y2=620,
+            name="Hour-Meng",
+            staff=True,
+            track_id=5,
+        )
+        manager.update([outside], 1000, 1000, t0 + 3.0, kpt_conf=0.4)
+        snaps = {s.bay_id: s for s in manager.snapshots()}
+        self.assertEqual(snaps["bay_1"].state, "EMPTY")
+        self.assertFalse(snaps["bay_1"].session_open)
 
 
 if __name__ == "__main__":

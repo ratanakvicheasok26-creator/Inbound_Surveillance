@@ -194,6 +194,7 @@ def exe_name() -> str:
 REQUIRED_PYZ_MODULES = (
     "ai_auditor",
     "occupancy",
+    "corroborate",
     "telegram_link",
     "vehicle",
     "paths",
@@ -315,6 +316,7 @@ def verify_dry_run() -> bool:
         "tracker",
         "reid",
         "occupancy",
+        "corroborate",
         "ai_auditor",
         "person",
         "tinypose",
