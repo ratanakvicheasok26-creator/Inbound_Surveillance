@@ -31,6 +31,14 @@ edge/bin/*
 edge/go2rtc.log
 edge/go2rtc.pid
 edge/go2rtc.yaml
+edge/session.json
+
+# Root-level runtime artifacts / secrets
+proofs/
+*.db
+*.db-*
+IMG_1*.MOV
+IMG_1*.mov
 
 .cursor/
 

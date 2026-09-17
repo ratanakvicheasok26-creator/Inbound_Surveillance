@@ -126,9 +126,93 @@ class TelegramOut:
         if not response.ok:
             print(f"[telegram] sendMediaGroup failed: {response.text}")
             return False
-        if len(paths) > 10:
-            extra = len(paths) - 10
-            self.send_message(
-                f"{extra} more proof stills remain on disk (Telegram album max 10)."
+    def send_voice(self, path: Path, caption: str = "") -> bool:
+        if not self.enabled:
+            print(f"[telegram] skipped sendVoice (kept local): {path}")
+            return False
+        if not path.exists():
+            print(f"[telegram] sendVoice file not found: {path}")
+            return False
+        with path.open("rb") as handle:
+            response = requests.post(
+                self._url("sendVoice"),
+                data={"chat_id": self.chat_id, "caption": caption[:1024]},
+                files={"voice": handle},
+                timeout=60,
             )
+        if not response.ok:
+            # Try sendAudio fallback if Telegram rejects codec as voice
+            return self.send_audio(path, caption)
         return True
+
+    def send_audio(self, path: Path, caption: str = "") -> bool:
+        if not self.enabled:
+            print(f"[telegram] skipped sendAudio (kept local): {path}")
+            return False
+        if not path.exists():
+            print(f"[telegram] sendAudio file not found: {path}")
+            return False
+        with path.open("rb") as handle:
+            response = requests.post(
+                self._url("sendAudio"),
+                data={"chat_id": self.chat_id, "caption": caption[:1024]},
+                files={"audio": handle},
+                timeout=60,
+            )
+        if not response.ok:
+            print(f"[telegram] sendAudio failed: {response.text}")
+            return False
+        return True
+
+    def send_complaint_alert(
+        self,
+        complaint: dict,
+        audio_path: Path | None = None,
+        photo_path: Path | None = None,
+    ) -> bool:
+        """Send complete 3-part complaint evidence to the linked Telegram chat:
+        1. Text Report (Khmer + English transcripts, severity, category)
+        2. Customer Original Voice Recording
+        3. Camera Frame Screenshot at complaint moment
+        """
+        if not self.enabled:
+            print("[telegram] skipped send_complaint_alert (Telegram not linked)")
+            return False
+
+        cid = complaint.get("complaint_id", "CMP-UNKNOWN")
+        cat = str(complaint.get("category", "General")).replace("_", " ").title()
+        sev = str(complaint.get("severity", "Medium")).upper()
+        km = complaint.get("khmer_transcript", "")
+        en = complaint.get("english_transcript", "")
+        summary = complaint.get("summary", "")
+        ts = complaint.get("timestamp", "")
+        customer = complaint.get("customer_id") or "Customer"
+
+        sev_emoji = "🔴" if sev in ("HIGH", "CRITICAL") else "🟡" if sev == "MEDIUM" else "🔵"
+
+        msg = (
+            f"🚨 *CUSTOMER COMPLAINT DETECTED*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📋 *ID:* `{cid}`\n"
+            f"👤 *Person:* {customer}\n"
+            f"🏷️ *Category:* {cat}\n"
+            f"{sev_emoji} *Severity:* {sev}\n"
+            f"⏰ *Time:* `{ts}`\n\n"
+            f"🇰🇭 *Khmer Transcript:*\n_{km}_\n\n"
+            f"🇬🇧 *English Translation:*\n_{en}_\n\n"
+            f"📝 *AI Summary:*\n{summary}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🎤 Original audio & 📸 Camera frame attached below:"
+        )
+
+        ok_text = self.send_message(msg)
+
+        ok_audio = True
+        if audio_path and audio_path.exists():
+            ok_audio = self.send_voice(audio_path, caption=f"🎤 Original Customer Voice [{cid}]")
+
+        ok_photo = True
+        if photo_path and photo_path.exists():
+            ok_photo = self.send_photo(photo_path, caption=f"📸 Camera Frame at Complaint Moment [{cid}]")
+
+        return ok_text or ok_audio or ok_photo

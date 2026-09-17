@@ -116,6 +116,26 @@ face_match_threshold: 0.60
 telegram_bot_token: "8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU"
 telegram_chat_id: ""
 
+# Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.
+# audio_source_type: laptop | usb | camera | video
+# video_loop: false = play an uploaded test clip once (avoid alert flooding).
+# stt_model_size: fine-tuned Khmer model id or legacy size ("base" -> sengtha/whisper-base-khmer).
+complaint_monitoring:
+  enabled: true
+  audio_source_type: laptop
+  device_index: null
+  vad_threshold: 0.35
+  vad_min_speech_duration_ms: 400
+  vad_max_speech_duration_s: 30.0
+  stt_model_size: sengtha/whisper-base-khmer
+  stt_language: km
+  ollama_model: qwen2.5:3b
+  ollama_host: http://localhost:11434
+  telegram_alert_enabled: true
+  telegram_min_severity: low
+  video_loop: false
+  dedup_window_seconds: 60
+
 # Tier 2 AI Auditor (Fireworks VLM)
 fireworks_api_key: ""
 fireworks_model: "accounts/fireworks/models/deepseek-v4-flash-vision-exp"

@@ -156,7 +156,31 @@ def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connect
         ON customer_visits (started_at)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS customer_complaints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            complaint_id TEXT UNIQUE NOT NULL,
+            customer_id TEXT,
+            camera_id TEXT,
+            audio_source TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            audio_path TEXT NOT NULL,
+            screenshot_path TEXT,
+            khmer_transcript TEXT NOT NULL,
+            english_transcript TEXT NOT NULL,
+            is_complaint INTEGER NOT NULL DEFAULT 1,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            telegram_sent INTEGER NOT NULL DEFAULT 0,
+            telegram_error TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     return conn
+
 
 
 def insert_event(
@@ -953,3 +977,110 @@ def customer_visit_counts(
         "week_visits": int(week_visits["n"] if week_visits else 0),
         "recent": [dict(r) for r in recent],
     }
+
+
+def insert_customer_complaint(
+    conn: sqlite3.Connection | None,
+    complaint_id: str,
+    audio_path: str,
+    khmer_transcript: str,
+    english_transcript: str,
+    category: str,
+    severity: str,
+    summary: str,
+    customer_id: str | None = None,
+    camera_id: str | None = None,
+    audio_source: str = "laptop_microphone",
+    screenshot_path: str | None = None,
+    timestamp: str | None = None,
+    is_complaint: bool = True,
+    telegram_sent: bool = False,
+    telegram_error: str | None = None,
+) -> bool:
+    """Insert a customer complaint record into SQLite database."""
+    if conn is None:
+        return False
+    if timestamp is None:
+        timestamp = datetime.now().isoformat()
+    now_str = datetime.now().isoformat()
+    try:
+        conn.execute(
+            """
+            INSERT INTO customer_complaints (
+                complaint_id, customer_id, camera_id, audio_source,
+                timestamp, audio_path, screenshot_path,
+                khmer_transcript, english_transcript,
+                is_complaint, category, severity, summary,
+                telegram_sent, telegram_error, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                complaint_id,
+                customer_id,
+                camera_id,
+                audio_source,
+                timestamp,
+                audio_path,
+                screenshot_path,
+                khmer_transcript,
+                english_transcript,
+                1 if is_complaint else 0,
+                category,
+                severity,
+                summary,
+                1 if telegram_sent else 0,
+                telegram_error,
+                now_str,
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        print(f"[db] insert_customer_complaint error: {exc}")
+        return False
+
+
+def get_recent_complaints(
+    conn: sqlite3.Connection | None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Retrieve recent customer complaints from SQLite database."""
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM customer_complaints
+            ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        print(f"[db] get_recent_complaints error: {exc}")
+        return []
+
+
+def update_complaint_telegram_status(
+    conn: sqlite3.Connection | None,
+    complaint_id: str,
+    sent: bool,
+    error: str | None = None,
+) -> bool:
+    """Update Telegram dispatch status on an existing complaint."""
+    if conn is None or not complaint_id:
+        return False
+    try:
+        conn.execute(
+            """
+            UPDATE customer_complaints
+            SET telegram_sent = ?, telegram_error = ?
+            WHERE complaint_id = ?
+            """,
+            (1 if sent else 0, error, complaint_id),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        print(f"[db] update_complaint_telegram_status error: {exc}")
+        return False

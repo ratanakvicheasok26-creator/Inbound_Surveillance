@@ -216,21 +216,25 @@ try:
         close_empty_bays,
         complete_vehicle_job,
         connect,
+        customer_visit_counts,
         get_daily_garage_summary,
         get_or_create_vehicle_job,
         get_recent_ai_audits,
+        get_recent_complaints,
         get_vehicle_job_history,
         has_opened_today,
+        insert_customer_complaint,
         insert_event,
         list_vehicle_jobs,
-        customer_visit_counts,
         record_ai_audit_verdict,
         record_face_clock_in,
         record_face_clock_out,
+        update_complaint_telegram_status,
         update_technician_activity,
         update_vehicle_job_activity,
         upsert_minute,
     )
+    from complaint_service import ComplaintMonitoringService
     from face_id import (
         create_identity,
         delete_identity,
@@ -304,6 +308,30 @@ def find_free_port(default_port: int = 8765) -> int:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# Map legacy Whisper size strings -> local fine-tuned Khmer model ids.
+_KHMER_STT_MODEL_BY_SIZE = {
+    "base": "sengtha/whisper-base-khmer",
+    "sengtha/whisper-base-khmer": "sengtha/whisper-base-khmer",
+}
+
+
+def resolve_khmer_stt_model(value: str) -> str:
+    """Resolve a config STT model value to a loadable model identifier.
+
+    Accepts a full HuggingFace model id (pass-through) or a legacy size
+    ("base", "small", ...) that is mapped to the fine-tuned Khmer model.
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return "sengtha/whisper-base-khmer"
+    if text in _KHMER_STT_MODEL_BY_SIZE:
+        return _KHMER_STT_MODEL_BY_SIZE[text]
+    for key in ("base", "small", "medium", "large"):
+        if text == key or text == f"whisper-{key}":
+            return f"sengtha/whisper-{key}-khmer"
+    return str(value).strip()
 
 
 def get_config_path() -> Path:
@@ -1108,6 +1136,38 @@ class LiveStreamEngine:
         )
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
+        cmp_cfg = self.cfg.get("complaint_monitoring") or {}
+        active_source = str(self.cfg.get("source") or "")
+        active_proto = str(self.cfg.get("protocol") or "")
+        is_video_source = (
+            active_proto == "video"
+            or ingest_kind(active_source, active_proto) == "video"
+            or str(cmp_cfg.get("audio_source_type", "")).lower() == "video"
+        )
+        audio_src_type = "video" if is_video_source and active_source else str(cmp_cfg.get("audio_source_type", "laptop"))
+
+        self.complaint_service = ComplaintMonitoringService(
+            db_conn=connect(DATA_DIR / "events.db", check_same_thread=False),
+            telegram_out=self.bot,
+            get_camera_frame_fn=lambda: self.current_frame_bgr,
+            audio_source_type=audio_src_type,
+            video_path=active_source if is_video_source else None,
+            video_loop=bool(cmp_cfg.get("video_loop", False)),
+            device_index=cmp_cfg.get("device_index"),
+            whisper_model=resolve_khmer_stt_model(
+                str(cmp_cfg.get("stt_model_size") or self.cfg.get("whisper_model") or "sengtha/whisper-base-khmer")
+            ),
+            ollama_model=str(cmp_cfg.get("ollama_model") or self.cfg.get("ollama_model") or "qwen2.5:3b"),
+            ollama_host=str(cmp_cfg.get("ollama_host") or "http://localhost:11434"),
+            vad_threshold=float(cmp_cfg.get("vad_threshold", 0.35)),
+            vad_min_speech_duration_ms=int(cmp_cfg.get("vad_min_speech_duration_ms", 400)),
+            vad_max_speech_duration_s=float(cmp_cfg.get("vad_max_speech_duration_s", 30.0)),
+            dedup_window_seconds=float(cmp_cfg.get("dedup_window_seconds", 60.0)),
+            telegram_min_severity=str(cmp_cfg.get("telegram_min_severity", "low")).lower(),
+            telegram_alert_enabled=bool(cmp_cfg.get("telegram_alert_enabled", True)),
+            enabled=bool(cmp_cfg.get("enabled", self.cfg.get("complaint_monitoring_enabled", True))),
+        )
+
 
     @property
     def grabber(self) -> AsyncFrameGrabber:
@@ -1211,6 +1271,10 @@ class LiveStreamEngine:
             if self.is_streaming:
                 self.camera_pool.sync_cameras(list(self.cfg.get("cameras") or []))
             self.wifi.start()
+            try:
+                self.complaint_service.start()
+            except Exception as exc:
+                print(f"[complaint_service] start failed: {exc}", flush=True)
             self.thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.thread.start()
 
@@ -1236,9 +1300,14 @@ class LiveStreamEngine:
         self._fallback_grabber.stop()
         self.camera_pool.stop()
         try:
+            self.complaint_service.stop()
+        except Exception:
+            pass
+        try:
             self.wifi.stop()
         except Exception:
             pass
+
         try:
             self.media.stop()
         except Exception:
@@ -1557,6 +1626,32 @@ class LiveStreamEngine:
                 main_source=main_source,
             )
             self.grabber.switch_source(adapter)
+
+        # Dynamic Audio Source Synchronization
+        if self.complaint_service is not None:
+            try:
+                if kind == "video" or protocol == "video":
+                    from audio_source import VideoFileAudioSource
+                    cmp_cfg = self.cfg.get("complaint_monitoring") or {}
+                    self.complaint_service.set_audio_source(
+                        VideoFileAudioSource(
+                            video_path=source,
+                            sample_rate=16000,
+                            loop=bool(cmp_cfg.get("video_loop", False)),
+                        )
+                    )
+                else:
+                    cmp_cfg = self.cfg.get("complaint_monitoring") or {}
+                    src_type = str(cmp_cfg.get("audio_source_type", "laptop")).lower()
+                    if src_type == "usb":
+                        from audio_source import USBMicrophoneSource
+                        self.complaint_service.set_audio_source(USBMicrophoneSource(device_index=cmp_cfg.get("device_index")))
+                    else:
+                        from audio_source import LaptopMicrophoneSource
+                        self.complaint_service.set_audio_source(LaptopMicrophoneSource(device_index=cmp_cfg.get("device_index")))
+            except Exception as audio_sw_err:
+                print(f"[ComplaintService] Audio source switch notice: {audio_sw_err}", flush=True)
+
         media = self.media.status(stream_id) if stream_id else {"ready": self.media.is_ready()}
         connected = worker_live and self.connection_state == "CONNECTED"
         return {
@@ -4032,6 +4127,58 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
 
+        elif parsed.path == "/api/complaints":
+            limit = 50
+            if parsed.query:
+                q = dict(urllib.parse.parse_qsl(parsed.query))
+                try:
+                    limit = int(q.get("limit", 50))
+                except Exception:
+                    limit = 50
+            complaints = []
+            try:
+                conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+                try:
+                    complaints = get_recent_complaints(conn, limit=limit)
+                    for c in complaints:
+                        if c.get("audio_path"):
+                            c["audio_url"] = f"/api/complaints/audio/{Path(c['audio_path']).name}"
+                        if c.get("screenshot_path"):
+                            c["screenshot_url"] = f"/api/complaints/stills/{Path(c['screenshot_path']).name}"
+                finally:
+                    conn.close()
+            except Exception as e:
+                print(f"[API /api/complaints error] {e}", flush=True)
+            self._send_json({"complaints": complaints})
+
+        elif parsed.path.startswith("/api/complaints/audio/"):
+            rel_name = parsed.path[len("/api/complaints/audio/"):].lstrip("/")
+            safe_name = Path(rel_name).name
+            audio_file = Path(__file__).parent / "proofs" / "complaints" / "audio" / safe_name
+            if audio_file.exists() and audio_file.is_file():
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(audio_file.read_bytes())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        elif parsed.path.startswith("/api/complaints/stills/"):
+            rel_name = parsed.path[len("/api/complaints/stills/"):].lstrip("/")
+            safe_name = Path(rel_name).name
+            still_file = Path(__file__).parent / "proofs" / "complaints" / "stills" / safe_name
+            if still_file.exists() and still_file.is_file():
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(still_file.read_bytes())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
         elif self._handle_identities_get(
             [urllib.parse.unquote(p) for p in parsed.path.split("/") if p]
         ):
@@ -4040,6 +4187,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -4087,6 +4235,106 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"success": False, "message": "Frame not available or AI auditor not active"}, 400)
             return
+
+        if parsed.path == "/api/complaints/test-trigger":
+            khmer_text = str(payload.get("khmer_text") or "ខ្ញុំមិនពេញចិត្តនឹងការជួសជុលឡាននេះទេ សំឡេងហ្វ្រាំងនៅតែលាន់ដដែល").strip()
+            customer_id = str(payload.get("customer_id") or "Customer").strip()
+            camera_id = str(payload.get("camera_id") or "cam-1").strip()
+            
+            if GLOBAL_ENGINE.complaint_service is not None:
+                english_text = GLOBAL_ENGINE.complaint_service.translator.translate_km_to_en(khmer_text)
+                analysis = GLOBAL_ENGINE.complaint_service.auditor.analyze(khmer_text, english_text)
+                
+                now = datetime.now()
+                stamp_str = now.strftime("%Y-%m-%d_%H%M%S")
+                uid = f"CMP-{int(time.time()*1000)%1000000:06d}"
+                audio_filename = f"complaint_{stamp_str}_{uid}.wav"
+                audio_path = Path(__file__).parent / "proofs" / "complaints" / "audio" / audio_filename
+                audio_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write sample audio WAV
+                sample_rate = 16000
+                fake_audio = np.zeros(int(sample_rate * 2.0), dtype=np.float32)
+                import soundfile as sf
+                sf.write(str(audio_path), fake_audio, sample_rate, subtype="PCM_16")
+                
+                screenshot_filename = f"complaint_{stamp_str}_{uid}.jpg"
+                screenshot_dest = Path(__file__).parent / "proofs" / "complaints" / "stills" / screenshot_filename
+                screenshot_dest.parent.mkdir(parents=True, exist_ok=True)
+                
+                with GLOBAL_ENGINE.lock:
+                    frame = GLOBAL_ENGINE.current_frame_bgr
+                if frame is None:
+                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                annotated = frame.copy()
+                h, w = annotated.shape[:2]
+                banner_text = f"CUSTOMER COMPLAINT [{uid}] - {analysis.category.upper()} ({analysis.severity.upper()})"
+                time_text = now.strftime("%Y-%m-%d %H:%M:%S")
+                cv2.rectangle(annotated, (0, 0), (w, 54), (0, 0, 180), -1)
+                cv2.putText(annotated, banner_text, (16, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(annotated, time_text, (16, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+                cv2.imwrite(str(screenshot_dest), annotated)
+                screenshot_path = str(screenshot_dest)
+                
+                from complaint_service import ComplaintRecord
+                record = ComplaintRecord(
+                    complaint_id=uid,
+                    customer_id=customer_id,
+                    camera_id=camera_id,
+                    audio_source="test_trigger",
+                    timestamp=now.isoformat(),
+                    audio_path=str(audio_path),
+                    screenshot_path=screenshot_path,
+                    khmer_transcript=khmer_text,
+                    english_transcript=english_text,
+                    is_complaint=analysis.is_complaint,
+                    category=analysis.category,
+                    severity=analysis.severity,
+                    summary=analysis.summary,
+                    telegram_sent=False,
+                )
+                
+                conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+                try:
+                    insert_customer_complaint(
+                        conn=conn,
+                        complaint_id=record.complaint_id,
+                        audio_path=record.audio_path,
+                        screenshot_path=record.screenshot_path,
+                        khmer_transcript=record.khmer_transcript,
+                        english_transcript=record.english_transcript,
+                        category=record.category,
+                        severity=record.severity,
+                        summary=record.summary,
+                        customer_id=record.customer_id,
+                        camera_id=record.camera_id,
+                        audio_source=record.audio_source,
+                        timestamp=record.timestamp,
+                        is_complaint=record.is_complaint,
+                        telegram_sent=False,
+                    )
+                finally:
+                    conn.close()
+                    
+                if record.is_complaint and GLOBAL_ENGINE.bot.enabled:
+                    tg_ok = GLOBAL_ENGINE.bot.send_complaint_alert(
+                        complaint=record.as_dict(),
+                        audio_path=audio_path,
+                        photo_path=screenshot_dest,
+                    )
+                    record.telegram_sent = tg_ok
+                    conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+                    try:
+                        update_complaint_telegram_status(conn, record.complaint_id, sent=tg_ok)
+                    finally:
+                        conn.close()
+                        
+                self._send_json({"ok": True, "complaint": record.as_dict()})
+                return
+            else:
+                self._send_json({"ok": False, "error": "Complaint service not initialized"}, 500)
+                return
+
 
         if parsed.path in ("/api/connect-stream", "/api/save"):
             result = GLOBAL_ENGINE.connect_camera(payload)
