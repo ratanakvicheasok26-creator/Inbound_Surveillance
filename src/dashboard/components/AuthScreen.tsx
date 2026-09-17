@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useAccount } from "../auth";
 import { supabase, supabaseConfigured } from "../../lib/supabase";
+import { WORKPLACES, parseWorkplaceId, type WorkplaceId } from "../../workplaces";
 
 type AuthMode = "signin" | "signup" | "forgot" | "code" | "confirm";
 
@@ -22,6 +23,7 @@ export function AuthScreen() {
   const [mode, setMode] = useState<AuthMode>(modeFromUrl);
   const [displayName, setDisplayName] = useState("");
   const [venueName, setVenueName] = useState("");
+  const [workplaceType, setWorkplaceType] = useState<WorkplaceId>("garage");
   const [email, setEmail] = useState(() => localStorage.getItem("hub_remembered_email") || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -54,7 +56,7 @@ export function AuthScreen() {
           ? "Enter the 6-digit code from your email, then choose a new password. Type the code yourself — inbox scanners often burn one-click reset links."
           : view === "forgot"
             ? "We email a 6-digit code instead of a magic link. Codes survive email security scanners; one-click links often do not."
-            : "Each account keeps profile, crew identities, ROI, camera protocol, and stream URLs private. Other operators cannot read them.";
+            : "Each account keeps profile, workplace type, crew identities, ROI, camera protocol, and stream URLs private. Other operators cannot read them.";
 
   const redirectTo = useMemo(() => `${window.location.origin}/dashboard.html?mode=reset`, []);
 
@@ -121,6 +123,7 @@ export function AuthScreen() {
             data: {
               display_name: displayName.trim(),
               venue_name: venueName.trim(),
+              workplace_type: workplaceType,
             },
           },
         });
@@ -266,6 +269,29 @@ export function AuthScreen() {
                 autoComplete="organization"
               />
             </label>
+            <fieldset className="field workplace-picker">
+              <legend>Workplace</legend>
+              <div className="workplace-picker__grid">
+                {(["garage", "massage"] as WorkplaceId[]).map((id) => {
+                  const profile = WORKPLACES[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={workplaceType === id ? "is-on" : ""}
+                      onClick={() => setWorkplaceType(id)}
+                    >
+                      <strong>{profile.label}</strong>
+                      <span>
+                        {id === "garage"
+                          ? "Track employees, bays, and wrench time."
+                          : "Track anonymous customer visits by day and week."}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
           </>
         ) : null}
 
@@ -276,7 +302,7 @@ export function AuthScreen() {
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@garage.com"
+              placeholder={WORKPLACES[parseWorkplaceId(workplaceType)].emailPlaceholder}
               autoComplete="email"
               required
               readOnly={view === "code" || view === "confirm"}

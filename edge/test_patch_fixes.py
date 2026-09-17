@@ -15,6 +15,7 @@ from launcher import (
     transform_bay_geometry,
     LiveStreamEngine,
     CameraStreamPool,
+    resolve_static_asset,
 )
 
 
@@ -140,6 +141,16 @@ class TestFrozenPathSplit(unittest.TestCase):
         section = f'ffmpeg:\n  bin: "{quoted}"\n'
         self.assertNotIn("\\b", section)
         self.assertIn("C:/ffmpeg/bin/ffmpeg.exe", section)
+
+    def test_static_pipeline_graph_resolves_and_blocks_traversal(self):
+        asset = resolve_static_asset("/static/pipeline-graph.js")
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset.name, "pipeline-graph.js")
+        self.assertTrue(asset.is_file())
+        self.assertIsNone(resolve_static_asset("/static/../hub.html"))
+        escaped = resolve_static_asset("/static/..\\..\\launcher.py")
+        if escaped is not None:
+            self.assertEqual(escaped.parent.name, "static")
 
 
 if __name__ == "__main__":

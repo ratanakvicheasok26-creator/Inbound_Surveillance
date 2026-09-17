@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +126,34 @@ def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connect
             explanation TEXT,
             crop_path TEXT
         )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS anonymous_subjects (
+            id TEXT PRIMARY KEY,
+            local_track_key TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS customer_visits (
+            id TEXT PRIMARY KEY,
+            subject_id TEXT NOT NULL,
+            zone_id TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            source TEXT NOT NULL DEFAULT 'edge'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS customer_visits_started_idx
+        ON customer_visits (started_at)
         """
     )
     return conn
@@ -811,3 +839,117 @@ def get_recent_ai_audits(conn: sqlite3.Connection | None, bay_id: str | None = N
     params.append(limit)
     rows = conn.execute(query, tuple(params)).fetchall()
     return [dict(r) for r in rows]
+
+
+def _as_datetime(value: float | datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromtimestamp(float(value))
+
+
+def upsert_anonymous_subject(
+    conn: sqlite3.Connection | None,
+    subject_id: str,
+    timestamp: float | datetime,
+) -> None:
+    if conn is None or not subject_id:
+        return
+    stamp = _iso(_as_datetime(timestamp))
+    row = conn.execute("SELECT id FROM anonymous_subjects WHERE id = ?", (subject_id,)).fetchone()
+    if row is None:
+        conn.execute(
+            """
+            INSERT INTO anonymous_subjects (id, local_track_key, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (subject_id, subject_id, stamp, stamp),
+        )
+    else:
+        conn.execute(
+            "UPDATE anonymous_subjects SET last_seen_at = ? WHERE id = ?",
+            (stamp, subject_id),
+        )
+    conn.commit()
+
+
+def start_customer_visit(
+    conn: sqlite3.Connection | None,
+    visit_id: str,
+    subject_id: str,
+    zone_id: str,
+    timestamp: float | datetime,
+) -> None:
+    if conn is None or not visit_id:
+        return
+    stamp = _iso(_as_datetime(timestamp))
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO customer_visits (id, subject_id, zone_id, started_at, source)
+        VALUES (?, ?, ?, ?, 'edge')
+        """,
+        (visit_id, subject_id, zone_id, stamp),
+    )
+    conn.commit()
+
+
+def end_customer_visit(
+    conn: sqlite3.Connection | None,
+    visit_id: str,
+    timestamp: float | datetime,
+) -> None:
+    if conn is None or not visit_id:
+        return
+    conn.execute(
+        "UPDATE customer_visits SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+        (_iso(_as_datetime(timestamp)), visit_id),
+    )
+    conn.commit()
+
+
+def customer_visit_counts(
+    conn: sqlite3.Connection | None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    empty = {
+        "today_unique": 0,
+        "today_visits": 0,
+        "week_unique": 0,
+        "week_visits": 0,
+        "recent": [],
+    }
+    if conn is None:
+        return empty
+    stamp = now or datetime.now()
+    today = stamp.date().isoformat()
+    week_start = (stamp - timedelta(days=7)).isoformat(timespec="seconds")
+    today_visits = conn.execute(
+        "SELECT COUNT(*) AS n FROM customer_visits WHERE started_at LIKE ?",
+        (f"{today}%",),
+    ).fetchone()
+    today_unique = conn.execute(
+        "SELECT COUNT(DISTINCT subject_id) AS n FROM customer_visits WHERE started_at LIKE ?",
+        (f"{today}%",),
+    ).fetchone()
+    week_visits = conn.execute(
+        "SELECT COUNT(*) AS n FROM customer_visits WHERE started_at >= ?",
+        (week_start,),
+    ).fetchone()
+    week_unique = conn.execute(
+        "SELECT COUNT(DISTINCT subject_id) AS n FROM customer_visits WHERE started_at >= ?",
+        (week_start,),
+    ).fetchone()
+    recent = conn.execute(
+        """
+        SELECT id, subject_id, zone_id, started_at, ended_at
+        FROM customer_visits
+        ORDER BY started_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+    return {
+        "today_unique": int(today_unique["n"] if today_unique else 0),
+        "today_visits": int(today_visits["n"] if today_visits else 0),
+        "week_unique": int(week_unique["n"] if week_unique else 0),
+        "week_visits": int(week_visits["n"] if week_visits else 0),
+        "recent": [dict(r) for r in recent],
+    }

@@ -4,34 +4,31 @@ import { useAccount } from "./auth";
 import { AccountSetup } from "./components/AccountSetup";
 import { AlertsView } from "./components/AlertsView";
 import { CasesView } from "./components/CasesView";
+import { ComplaintsView } from "./components/ComplaintsView";
 import { LiveView } from "./components/LiveView";
+import { PipelineView } from "./components/PipelineView";
 import { ProfileChip } from "./components/ProfileChip";
 import { RulesView } from "./components/RulesView";
 import { ScanAndGoView } from "./components/ScanAndGoView";
 import { TelegramPanel } from "./components/TelegramPanel";
+import { VisitsView } from "./components/VisitsView";
 import { useOps } from "./store";
 import type { ViewId } from "./types";
-
-const tabs: { id: ViewId; label: string }[] = [
-  { id: "live", label: "Live" },
-  { id: "rules", label: "Rules" },
-  { id: "cases", label: "Cases" },
-  { id: "alerts", label: "Alerts" },
-  { id: "scan-and-go", label: "Scan & Go" },
-  { id: "bot", label: "Telegram" },
-];
+import { workplaceOf } from "../workplaces";
 
 function PipelineStrip() {
   const { state } = useOps();
+  const { snapshot } = useAccount();
+  const workplace = workplaceOf(snapshot?.profile.workplace_type);
   const recentDetect = state.detections.some((item) => Date.now() - item.ts < 60_000);
   const recentDispatch = state.alerts.some((item) => !item.dismissed && item.telegramState === "sent");
 
   const steps = [
-    { n: "01", title: "Ingest", note: `${state.cameras.length} RTSP streams`, live: true, scan: false },
+    { n: "01", title: "Ingest", note: `${state.cameras.length} streams`, live: true, scan: false },
     {
       n: "02",
       title: "Infer",
-      note: state.scanning ? "Sampling frames…" : recentDetect ? "YOLO detections" : "Idle",
+      note: state.scanning ? "Sampling frames…" : recentDetect ? workplace.pipelineIdle : "Idle",
       live: recentDetect || state.scanning,
       scan: state.scanning,
     },
@@ -64,11 +61,13 @@ function PipelineStrip() {
 function Shell() {
   const { state, hydrateAccount } = useOps();
   const { snapshot } = useAccount();
+  const workplace = workplaceOf(snapshot?.profile.workplace_type);
   const [view, setView] = useState<ViewId>("live");
   const [setupOpen, setSetupOpen] = useState(false);
   const hydrateRef = useRef(hydrateAccount);
   hydrateRef.current = hydrateAccount;
   const mainView = view === "bot" ? "live" : view;
+  const tabs = workplace.tabs;
 
   useEffect(() => {
     if (!snapshot) return;
@@ -79,11 +78,18 @@ function Shell() {
     if (!snapshot.profile.setup_completed) setSetupOpen(true);
   }, [snapshot]);
 
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.id === view)) setView("live");
+  }, [tabs, view]);
+
   return (
     <div className={`ops${view === "bot" ? " is-bot" : ""}`}>
       <header className="ops__top">
         <ProfileChip onOpenSetup={() => setSetupOpen(true)} />
-        <p className="venue">{snapshot?.profile.venue_name || state.venue}</p>
+        <p className="venue">
+          {snapshot?.profile.venue_name || state.venue}
+          <span className="venue-type"> · {workplace.label}</span>
+        </p>
       </header>
       <PipelineStrip />
       <div className="ops__body">
@@ -104,6 +110,9 @@ function Shell() {
           {mainView === "rules" && <RulesView />}
           {mainView === "cases" && <CasesView />}
           {mainView === "alerts" && <AlertsView />}
+          {mainView === "visits" && <VisitsView />}
+          {mainView === "complaints" && <ComplaintsView />}
+          {mainView === "pipeline" && <PipelineView />}
           {mainView === "scan-and-go" && <ScanAndGoView />}
         </div>
         <TelegramPanel />

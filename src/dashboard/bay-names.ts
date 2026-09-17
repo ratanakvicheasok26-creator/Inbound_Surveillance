@@ -1,7 +1,9 @@
+import { parseWorkplaceId, parseZoneKind, type WorkplaceId, type ZoneKind } from "../workplaces";
+
 export type StationBay = {
   id: string;
   name: string;
-  type: string;
+  type: ZoneKind | string;
   roi: number[];
 };
 
@@ -16,14 +18,19 @@ export function nextAvailableBayName(bays: { name?: string }[]): string {
   return `Bay ${num}`;
 }
 
-export function engineBayToStation(row: Record<string, unknown>): StationBay | null {
+export function engineBayToStation(
+  row: Record<string, unknown>,
+  workplace: WorkplaceId | string = "garage",
+): StationBay | null {
   const id = String(row.bay_id || row.id || "").trim();
   if (!id) return null;
   const roiRaw = Array.isArray(row.roi) ? row.roi.map(Number) : [0.3, 0.2, 0.2, 0.3];
+  const workplaceId = parseWorkplaceId(String(workplace));
+  const rawType = String(row.type || row.zone_kind || "");
   return {
     id,
     name: String(row.name || id),
-    type: row.type === "tool_area" ? "tool_area" : "vehicle_bay",
+    type: parseZoneKind(rawType, workplaceId),
     roi: roiRaw.length === 4 ? roiRaw : [0.3, 0.2, 0.2, 0.3],
   };
 }

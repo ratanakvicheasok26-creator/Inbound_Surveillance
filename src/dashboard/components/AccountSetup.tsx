@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PROTOCOLS, hostFromUrl, initials, type CameraInput, type CrewWithPhoto, type RoiInput } from "../account";
 import { useAccount } from "../auth";
 import type { CameraProtocol } from "../types";
+import { parseWorkplaceId, parseZoneKind, workplaceOf, type ZoneKind } from "../../workplaces";
 
-const STEPS = [
+const ALL_STEPS = [
   { id: "profile", label: "Profile" },
   { id: "crew", label: "Crew" },
   { id: "cameras", label: "Cameras" },
   { id: "roi", label: "ROI" },
 ] as const;
 
-type StepId = (typeof STEPS)[number]["id"];
+type StepId = (typeof ALL_STEPS)[number]["id"];
 
 function asProtocol(value: string): CameraProtocol {
   return (PROTOCOLS as string[]).includes(value) ? (value as CameraProtocol) : "rtsp";
@@ -34,14 +35,19 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
   const [camUser, setCamUser] = useState("");
   const [camPass, setCamPass] = useState("");
   const [roiName, setRoiName] = useState("");
-  const [roiType, setRoiType] = useState<"vehicle_bay" | "tool_area">("vehicle_bay");
+  const [roiType, setRoiType] = useState<ZoneKind>("vehicle_bay");
   const [roiCamera, setRoiCamera] = useState("");
   const [roiX, setRoiX] = useState("0.10");
   const [roiY, setRoiY] = useState("0.20");
   const [roiW, setRoiW] = useState("0.35");
   const [roiH, setRoiH] = useState("0.60");
 
-  const stepIndex = STEPS.findIndex((item) => item.id === step);
+  const workplace = workplaceOf(snapshot?.profile.workplace_type);
+  const STEPS = useMemo(
+    () => ALL_STEPS.filter((item) => (item.id === "crew" ? workplace.includeCrewSetup : true)),
+    [workplace.includeCrewSetup],
+  );
+  const stepIndex = Math.max(0, STEPS.findIndex((item) => item.id === step));
   const crews = snapshot?.crews || [];
   const cameras = snapshot?.cameras || [];
   const rois = snapshot?.rois || [];
@@ -52,6 +58,7 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
         id: row.id,
         name: row.name,
         bay_type: row.bay_type,
+        zone_kind: row.zone_kind || row.bay_type,
         roi: row.roi,
         camera_id: row.camera_id,
         external_id: row.external_id,
@@ -68,7 +75,8 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
 
   useEffect(() => {
     if (open) setStep("profile");
-  }, [open]);
+    if (open && snapshot) setRoiType(workplace.defaultZoneKind);
+  }, [open, snapshot, workplace.defaultZoneKind]);
 
   if (!open || !snapshot) return null;
   const account = snapshot;
@@ -132,6 +140,7 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
         {
           name: roiName.trim(),
           bay_type: roiType,
+          zone_kind: roiType,
           roi,
           camera_id: roiCamera || null,
           sort_order: roiDrafts.length,
@@ -205,6 +214,10 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
               <span>Venue</span>
               <input value={venueName} onChange={(event) => setVenueName(event.target.value)} />
             </label>
+            <label className="field">
+              <span>Workplace</span>
+              <input value={workplace.label} readOnly />
+            </label>
             <button className="btn btn--primary" type="submit" disabled={busy}>
               Save profile
             </button>
@@ -245,7 +258,7 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
             <form className="form" onSubmit={(event) => void addCamera(event)}>
               <label className="field">
                 <span>Camera name</span>
-                <input value={camName} onChange={(event) => setCamName(event.target.value)} placeholder="Lift Bay 1" required />
+                <input value={camName} onChange={(event) => setCamName(event.target.value)} placeholder={workplace.cameraPlaceholder} required />
               </label>
               <label className="field">
                 <span>Zone</span>
@@ -310,14 +323,20 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
           <div className="setup-grid">
             <form className="form" onSubmit={(event) => void addRoi(event)}>
               <label className="field">
-                <span>Bay name</span>
-                <input value={roiName} onChange={(event) => setRoiName(event.target.value)} placeholder="Lift Bay 1" required />
+                <span>{workplace.roiNameLabel}</span>
+                <input value={roiName} onChange={(event) => setRoiName(event.target.value)} placeholder={workplace.roiPlaceholder} required />
               </label>
               <label className="field">
                 <span>Type</span>
-                <select value={roiType} onChange={(event) => setRoiType(event.target.value === "tool_area" ? "tool_area" : "vehicle_bay")}>
-                  <option value="vehicle_bay">Vehicle bay</option>
-                  <option value="tool_area">Tool area</option>
+                <select
+                  value={roiType}
+                  onChange={(event) => setRoiType(parseZoneKind(event.target.value, parseWorkplaceId(workplace.id)))}
+                >
+                  {workplace.zoneKinds.map((kind) => (
+                    <option key={kind.id} value={kind.id}>
+                      {kind.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="field">
@@ -360,7 +379,7 @@ export function AccountSetup({ open, onClose }: { open: boolean; onClose: () => 
                     <div>
                       <h3>{bay.name}</h3>
                       <p className="mono">
-                        {bay.bay_type} · [{bay.roi.map((n) => n.toFixed(2)).join(", ")}]
+                        {bay.zone_kind || bay.bay_type} · [{bay.roi.map((n) => n.toFixed(2)).join(", ")}]
                       </p>
                     </div>
                     <button

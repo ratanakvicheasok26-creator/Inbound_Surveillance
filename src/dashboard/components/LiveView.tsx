@@ -7,6 +7,7 @@ import { PROTOCOLS } from "../account";
 import { useAccount } from "../auth";
 import { useOps } from "../store";
 import type { CameraProtocol, Detection, EngineTelemetry } from "../types";
+import { workplaceOf, parseZoneKind } from "../../workplaces";
 import { BayContextMenu } from "./BayContextMenu";
 import { DiscoveryModal } from "./DiscoveryModal";
 
@@ -70,7 +71,8 @@ function asProtocol(value: string): CameraProtocol {
 
 export function LiveView() {
   const { state } = useOps();
-  const { saveCamera, saveRois } = useAccount();
+  const { saveCamera, saveRois, snapshot } = useAccount();
+  const workplace = workplaceOf(snapshot?.profile.workplace_type);
   const [engineLive, setEngineLive] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [telemetry, setTelemetry] = useState<EngineTelemetry | null>(null);
@@ -87,11 +89,11 @@ export function LiveView() {
     }
   });
   const bays = useMemo(() => {
-    const rows = telemetry?.bays || [];
+    const rows = telemetry?.zones || telemetry?.bays || [];
     return rows
-      .map((row) => engineBayToStation(row as Record<string, unknown>))
+      .map((row) => engineBayToStation(row as Record<string, unknown>, workplace.id))
       .filter((row): row is StationBay => row != null);
-  }, [telemetry]);
+  }, [telemetry, workplace.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,7 +183,7 @@ export function LiveView() {
 
   async function persistBays(next: StationBay[]) {
     try {
-      const res = await fetch(`${engine}/api/garage/bays`, {
+      const res = await fetch(`${engine}/api/workplace/zones`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bays: next }),
@@ -199,7 +201,8 @@ export function LiveView() {
     await saveRois(
       next.map((bay, index) => ({
         name: bay.name,
-        bay_type: bay.type === "tool_area" ? "tool_area" : "vehicle_bay",
+        bay_type: parseZoneKind(String(bay.type), workplace.id),
+        zone_kind: parseZoneKind(String(bay.type), workplace.id),
         roi: bay.roi,
         external_id: bay.id,
         sort_order: index,
@@ -221,7 +224,7 @@ export function LiveView() {
     setMenu(null);
     const bay = bays.find((item) => item.id === selectedBayId);
     if (!bay) return;
-    const label = window.prompt("Rename bay", bay.name);
+    const label = window.prompt(`Rename ${workplace.zoneNoun}`, bay.name);
     if (label == null) return;
     const nextName = label.trim();
     if (!nextName) return;
@@ -238,12 +241,11 @@ export function LiveView() {
     setMenu(null);
     const bay = bays.find((item) => item.id === selectedBayId);
     if (!bay) return;
+    const kinds = workplace.zoneKinds.map((item) => item.id);
+    const current = kinds.indexOf(bay.type as (typeof kinds)[number]);
+    const nextKind = kinds[(current + 1 + kinds.length) % kinds.length] || workplace.defaultZoneKind;
     void persistBays(
-      bays.map((item) =>
-        item.id === bay.id
-          ? { ...item, type: item.type === "tool_area" ? "vehicle_bay" : "tool_area" }
-          : item,
-      ),
+      bays.map((item) => (item.id === bay.id ? { ...item, type: nextKind } : item)),
     );
   }
 
@@ -359,6 +361,8 @@ export function LiveView() {
         open={Boolean(menu)}
         x={menu?.x || 0}
         y={menu?.y || 0}
+        zoneNoun={workplace.zoneNoun}
+        toggleLabel={workplace.zoneKinds.map((item) => item.label).join(" / ")}
         onRename={renameBay}
         onToggleType={toggleBayType}
         onDelete={() => void deleteBay(selectedBayId)}

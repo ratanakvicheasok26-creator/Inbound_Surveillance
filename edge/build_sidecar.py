@@ -204,6 +204,10 @@ REQUIRED_PYZ_MODULES = (
     "rtmpose",
     "one_euro",
     "adapters.video_file",
+    "workplaces",
+    "workplaces.customer_visits",
+    "graph",
+    "graph.compile",
 )
 
 

@@ -23,7 +23,16 @@ export type TelegramDirection = "in" | "out";
 
 export type TelegramMethod = "sendMessage" | "getUpdates" | "getMe" | "ticket" | "status";
 
-export type ViewId = "live" | "rules" | "cases" | "alerts" | "bot" | "scan-and-go";
+export type ViewId =
+  | "live"
+  | "rules"
+  | "cases"
+  | "alerts"
+  | "visits"
+  | "complaints"
+  | "pipeline"
+  | "bot"
+  | "scan-and-go";
 
 export type CameraProtocol = "webcam" | "rtsp" | "phone" | "onvif" | "tapo" | "webrtc";
 
@@ -70,8 +79,22 @@ export type EngineBay = {
   id?: string;
   name?: string;
   type?: string;
+  zone_kind?: string;
   roi?: number[];
   state?: string;
+};
+
+export type VisitCounts = {
+  today_unique: number;
+  today_visits: number;
+  week_unique: number;
+  week_visits: number;
+  open_sessions?: Array<{
+    subject_id: string;
+    zone_id: string;
+    zone_name?: string;
+    started_at?: string;
+  }>;
 };
 
 export type EngineTelemetry = {
@@ -87,6 +110,9 @@ export type EngineTelemetry = {
   width?: number;
   height?: number;
   bays?: EngineBay[];
+  zones?: EngineBay[];
+  workplace_type?: string;
+  visits?: VisitCounts;
 };
 
 export type Detection = {

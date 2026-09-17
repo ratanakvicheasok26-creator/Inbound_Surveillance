@@ -56,6 +56,33 @@ DATA_DIR = data_dir()
 VIDEOS_DIR = DATA_DIR / "videos"
 log_boot_banner()
 
+
+def resolve_static_asset(url_path: str) -> Path | None:
+    """Resolve ``/static/...`` to a bundled file. Drops ``..`` so Windows
+    mixed separators cannot walk out of the static folder.
+    """
+    if not url_path.startswith("/static/"):
+        return None
+    rel = urllib.parse.unquote(url_path[len("/static/") :]).replace("\\", "/")
+    parts = [part for part in rel.split("/") if part and part not in (".", "..")]
+    if not parts:
+        return None
+    candidates = [
+        get_resource_path(str(Path("static", *parts))),
+        DATA_DIR.joinpath("static", *parts),
+    ]
+    if not is_frozen():
+        candidates.append(ROOT.parent.joinpath("static", *parts))
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except OSError:
+            continue
+        if resolved.is_file():
+            return resolved
+    return None
+
+
 try:
     import cv2
     import numpy as np
@@ -196,6 +223,7 @@ try:
         has_opened_today,
         insert_event,
         list_vehicle_jobs,
+        customer_visit_counts,
         record_ai_audit_verdict,
         record_face_clock_in,
         record_face_clock_out,
@@ -225,6 +253,8 @@ try:
         normalize_bays,
         roi_to_pixels,
     )
+    from workplaces import normalize_workplace_zones, parse_workplace_id
+    from workplaces.customer_visits import CustomerVisitMonitor
     from bay_zoom import occupancy_hints, zoom_empty_bays
     from corroborate import veto_vehicle_interior
     from liveness import LivenessProbe
@@ -303,7 +333,8 @@ def read_config() -> dict[str, Any]:
     data["telegram_bot_configured"] = bool(data["telegram_bot_token"])
     data["telegram_bot_username"] = str(data.get("telegram_bot_username") or "")
 
-    data["cameras"] = _normalize_cameras(data.get("cameras"))
+    data["workplace_type"] = parse_workplace_id(data.get("workplace_type"))
+    data["cameras"] = _normalize_cameras(data.get("cameras"), workplace=data["workplace_type"])
     data["active_camera_id"] = str(data.get("active_camera_id") or "")
     data["garage_name"] = str(data.get("garage_name") or data.get("venue") or "Demo Garage")
     data["venue"] = str(data.get("venue") or data["garage_name"])
@@ -314,7 +345,11 @@ def read_config() -> dict[str, Any]:
         data["bays"] = active_cam["bays"]
     else:
         fallback_roi = parse_roi(active_cam.get("roi")) if active_cam else parse_roi(data.get("roi"))
-        data["bays"] = normalize_bays(data.get("bays"), fallback_roi=fallback_roi)
+        data["bays"] = parse_bays(
+            data.get("bays"),
+            fallback_roi=fallback_roi,
+            workplace=data["workplace_type"],
+        )
         if active_cam and not active_cam.get("bays"):
             active_cam["bays"] = data["bays"]
     data["wifi_devices"] = normalize_wifi_devices(data.get("wifi_devices"))
@@ -339,6 +374,7 @@ _SETTINGS_KEYS = (
     "telegram_chat_id",
     "venue",
     "garage_name",
+    "workplace_type",
     "open_time",
     "close_time",
     "absent_seconds",
@@ -367,7 +403,10 @@ def save_config(updates: dict[str, Any]) -> dict[str, Any]:
 
     current.update(updates)
     if "cameras" in current:
-        current["cameras"] = _normalize_cameras(current.get("cameras"))
+        current["cameras"] = _normalize_cameras(
+            current.get("cameras"),
+            workplace=current.get("workplace_type"),
+        )
     with target.open("w", encoding="utf-8") as f:
         yaml.safe_dump(current, f, sort_keys=False)
     return current
@@ -387,7 +426,7 @@ def _normalize_xaddrs(value: Any) -> list[str]:
     return out
 
 
-def _normalize_cameras(raw: Any) -> list[dict[str, Any]]:
+def _normalize_cameras(raw: Any, workplace: Any = None) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
     out: list[dict[str, Any]] = []
@@ -409,7 +448,12 @@ def _normalize_cameras(raw: Any) -> list[dict[str, Any]]:
         cam_roi = parse_roi(item.get("roi")) or [0.30, 0.20, 0.40, 0.60]
         raw_bays = item.get("bays")
         if raw_bays and isinstance(raw_bays, list):
-            cam_bays = parse_bays(raw_bays, fallback_roi=cam_roi, seed_if_empty=False)
+            cam_bays = parse_bays(
+                raw_bays,
+                fallback_roi=cam_roi,
+                seed_if_empty=False,
+                workplace=workplace,
+            )
         else:
             cam_bays = []
         out.append(
@@ -434,7 +478,7 @@ def _normalize_cameras(raw: Any) -> list[dict[str, Any]]:
 
 
 def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
-    cameras = _normalize_cameras(cfg.get("cameras"))
+    cameras = _normalize_cameras(cfg.get("cameras"), workplace=cfg.get("workplace_type"))
     cid = str(fields.get("id") or "").strip() or f"cam-{int(time.time() * 1000)}"
     name = str(fields.get("name") or "").strip() or "Untitled camera"
     existing: dict[str, Any] = {}
@@ -656,7 +700,12 @@ def parse_bays(
     fallback_roi: list[float] | None = None,
     *,
     seed_if_empty: bool = True,
+    workplace: Any = None,
 ) -> list[dict[str, Any]]:
+    if workplace is not None and parse_workplace_id(workplace) != "garage":
+        return normalize_workplace_zones(
+            workplace, value, fallback_roi=fallback_roi, seed_if_empty=seed_if_empty
+        )
     return normalize_bays(value, fallback_roi=fallback_roi, seed_if_empty=seed_if_empty)
 
 
@@ -1052,6 +1101,11 @@ class LiveStreamEngine:
             ai_auditor=self.ai_auditor,
             under_car_grace_seconds=resolve_under_car_grace_seconds(self.cfg),
         )
+        self.visit_monitor = CustomerVisitMonitor(
+            self.cfg.get("bays"),
+            confirm_seconds=float(self.cfg.get("occupy_confirm_seconds") or 1.0),
+            clear_seconds=float(self.cfg.get("occupy_clear_seconds") or 4.0),
+        )
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
 
@@ -1097,6 +1151,11 @@ class LiveStreamEngine:
             self._send_ai_distraction_telegram(verdict)
 
     def _send_ai_distraction_telegram(self, verdict: AIAuditVerdict) -> None:
+        from graph.compile import pipeline_runtime_flags
+
+        flags = pipeline_runtime_flags(self.cfg)
+        if not flags["telegram"] or not flags["alerts"]:
+            return
         now = time.time()
         if not hasattr(self, "_last_ai_tg_alerts"):
             self._last_ai_tg_alerts = {}
@@ -1697,7 +1756,7 @@ class LiveStreamEngine:
         if not cid:
             return {"success": False, "error": "Camera id is required."}
         with self.lock:
-            cameras = [c for c in _normalize_cameras(self.cfg.get("cameras")) if c["id"] != cid]
+            cameras = [c for c in _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type")) if c["id"] != cid]
             self.cfg["cameras"] = cameras
             if str(self.cfg.get("active_camera_id") or "") == cid:
                 self.cfg["active_camera_id"] = cameras[0]["id"] if cameras else ""
@@ -1722,7 +1781,7 @@ class LiveStreamEngine:
         if not cid:
             return {"success": False, "error": "Camera id is required."}
         with self.lock:
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             target = None
             for cam in cameras:
                 if cam["id"] == cid:
@@ -1766,7 +1825,7 @@ class LiveStreamEngine:
         if not cid:
             return {"success": False, "error": "Camera id is required."}
         with self.lock:
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             target = None
             for cam in cameras:
                 if cam["id"] == cid:
@@ -1804,7 +1863,7 @@ class LiveStreamEngine:
             if bays:
                 bays[0] = {**bays[0], "roi": parsed}
             self.cfg["bays"] = bays
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             active = str(self.cfg.get("active_camera_id") or "")
             for cam in cameras:
                 if cam["id"] == active:
@@ -1823,6 +1882,7 @@ class LiveStreamEngine:
             bays_value,
             fallback_roi=parse_roi(self.cfg.get("roi")),
             seed_if_empty=False,
+            workplace=self.cfg.get("workplace_type"),
         )
         with self.lock:
             previous = parse_bays(self.cfg.get("bays"), seed_if_empty=False)
@@ -1832,7 +1892,7 @@ class LiveStreamEngine:
             self.cfg["bays"] = parsed
             if parsed:
                 self.cfg["roi"] = list(parsed[0]["roi"])
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             active = str(self.cfg.get("active_camera_id") or "")
             for cam in cameras:
                 if cam["id"] == active:
@@ -1841,6 +1901,7 @@ class LiveStreamEngine:
                     break
             self.cfg["cameras"] = cameras
             self.bay_manager.set_bays(parsed)
+            self.visit_monitor.set_zones(parsed)
             self.bay_telemetry = self.bay_manager.telemetry()
             cfg_to_save = dict(self.cfg)
             roi = list(self.cfg.get("roi") or [0.30, 0.20, 0.40, 0.60])
@@ -1879,7 +1940,7 @@ class LiveStreamEngine:
         if not src_id:
             return {"success": False, "error": "Source camera id is required."}
         with self.lock:
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             tgt_id = str(target_camera_id or self.cfg.get("active_camera_id") or "").strip()
             if not tgt_id:
                 return {"success": False, "error": "Target camera id is required."}
@@ -2358,6 +2419,110 @@ class LiveStreamEngine:
             "latest_camera_event": latest_event,
         }
 
+    def workplace_telemetry(self) -> dict[str, Any]:
+        data = self.garage_telemetry()
+        workplace = parse_workplace_id(self.cfg.get("workplace_type"))
+        data["workplace_type"] = workplace
+        data["zones"] = list(data.get("bays") or [])
+        if workplace == "massage":
+            data["bays"] = self.visit_monitor.telemetry()
+            data["zones"] = data["bays"]
+            counts = customer_visit_counts(self.conn)
+            counts["open_sessions"] = self.visit_monitor.open_sessions()
+            data["visits"] = counts
+        return data
+
+    def _vehicle_weights_path(self) -> Path:
+        path = get_resource_path("yolo11n_improved.pt")
+        if not path.exists():
+            path = DATA_DIR / "yolo11n_improved.pt"
+        if not path.exists():
+            path = get_resource_path("yolo11n.pt")
+        if not path.exists():
+            path = DATA_DIR / "yolo11n.pt"
+        return path
+
+    def _sync_pipeline_models(self) -> None:
+        from graph.compile import pipeline_runtime_flags
+
+        flags = pipeline_runtime_flags(self.cfg)
+        if flags["vehicle_detect"]:
+            if getattr(self, "vehicle_model", None) is None:
+                try:
+                    from ultralytics import YOLO
+
+                    path = self._vehicle_weights_path()
+                    self.vehicle_model = YOLO(str(path) if path.exists() else "yolo11n.pt", task="detect")
+                    print("[Pipeline] Vehicle YOLO loaded", flush=True)
+                except Exception as exc:
+                    print(f"[Pipeline] Vehicle YOLO not loaded: {exc}", flush=True)
+                    self.vehicle_model = None
+            return
+        if getattr(self, "vehicle_model", None) is not None:
+            print("[Pipeline] Vehicle YOLO unloaded (no VehicleDetect node)", flush=True)
+        self.vehicle_model = None
+        self.cached_vehicles = []
+
+    def apply_pipeline(self, graph: Any) -> dict[str, Any]:
+        from graph.compile import compile_to_config, validate_graph
+
+        errors = validate_graph(graph if isinstance(graph, dict) else None)
+        if errors:
+            return {"ok": False, "errors": errors, "pipeline_valid": False}
+        try:
+            patch = compile_to_config(graph)
+        except ValueError as exc:
+            return {"ok": False, "errors": [str(exc)], "pipeline_valid": False}
+
+        existing_bays = [b for b in (self.cfg.get("bays") or []) if isinstance(b, dict)]
+        existing_by_id = {str(b.get("id")): b for b in existing_bays}
+        existing_by_name = {str(b.get("name")): b for b in existing_bays}
+        compiled_bays = patch.get("bays")
+        if isinstance(compiled_bays, list):
+            merged: list[dict[str, Any]] = []
+            for zone in compiled_bays:
+                if not isinstance(zone, dict):
+                    continue
+                prev = existing_by_id.get(str(zone.get("id"))) or existing_by_name.get(str(zone.get("name")))
+                if prev:
+                    compiled_roi = list(zone.get("roi") or [])
+                    if compiled_roi == [0.2, 0.2, 0.3, 0.4] and prev.get("roi"):
+                        zone = {**zone, "roi": list(prev["roi"])}
+                    if prev.get("polygon") and not zone.get("polygon"):
+                        zone = {**zone, "polygon": prev.get("polygon")}
+                merged.append(zone)
+            patch["bays"] = merged
+
+        with self.lock:
+            self.cfg.update(patch)
+            self.cfg["pipeline_graph"] = graph
+            parsed = parse_bays(
+                self.cfg.get("bays"),
+                fallback_roi=parse_roi(self.cfg.get("roi")),
+                seed_if_empty=False,
+                workplace=patch.get("workplace_type"),
+            )
+            if parsed:
+                self.cfg["bays"] = parsed
+                self.bay_manager.set_bays(parsed)
+                self.visit_monitor.set_zones(parsed)
+            cfg_to_save = dict(self.cfg)
+        self._sync_pipeline_models()
+        save_config(cfg_to_save)
+        return {
+            "ok": True,
+            "pipeline_valid": True,
+            "config": {
+                "workplace_type": patch.get("workplace_type"),
+                "person_detect": patch.get("person_detect"),
+                "vehicle_detect": patch.get("vehicle_detect"),
+                "face_id_enabled": patch.get("face_id_enabled"),
+                "reid_enabled": patch.get("reid_enabled"),
+                "employee_labor": patch.get("employee_labor"),
+                "customer_visits": patch.get("customer_visits"),
+            },
+        }
+
     def garage_scorecard(self) -> dict[str, Any]:
         cfg = dict(self.cfg)
         day = datetime.now().date()
@@ -2548,7 +2713,7 @@ class LiveStreamEngine:
                     self.bay_manager.set_bays(self.cfg["bays"])
                     self.bay_telemetry = self.bay_manager.telemetry()
 
-            cameras = _normalize_cameras(self.cfg.get("cameras"))
+            cameras = _normalize_cameras(self.cfg.get("cameras"), workplace=self.cfg.get("workplace_type"))
             active = str(self.cfg.get("active_camera_id") or "")
             for cam in cameras:
                 if cam["id"] == active:
@@ -2615,6 +2780,7 @@ class LiveStreamEngine:
 
         print("[LiveStreamEngine] Loading person pose model...")
         self.conn = connect(DATA_DIR / "events.db")
+        self.visit_monitor.conn = self.conn
         self.runtime_profile = resolve_runtime(self.cfg)
         weights_path = resolve_weights_file(self.cfg, get_resource_path, DATA_DIR)
         veh_weights_path = get_resource_path("yolo11n_improved.pt")
@@ -2645,10 +2811,17 @@ class LiveStreamEngine:
                 )
                 weights_path = fallback
                 self.model = YOLO(str(weights_path), task="pose")
-            self.vehicle_model = YOLO(
-                str(veh_weights_path) if veh_weights_path.exists() else "yolo11n.pt",
-                task="detect",
-            )
+            from graph.compile import pipeline_runtime_flags
+
+            boot_flags = pipeline_runtime_flags(self.cfg)
+            if boot_flags["vehicle_detect"]:
+                self.vehicle_model = YOLO(
+                    str(veh_weights_path) if veh_weights_path.exists() else "yolo11n.pt",
+                    task="detect",
+                )
+            else:
+                self.vehicle_model = None
+                print("[LiveStreamEngine] Vehicle YOLO skipped (pipeline has no VehicleDetect)", flush=True)
             self.cached_vehicles: list = []
             self.last_vehicle_infer: float = 0.0
             self.vehicle_infer_interval: float = float(self.cfg.get("vehicle_infer_interval", 1.0))
@@ -2829,8 +3002,15 @@ class LiveStreamEngine:
 
             active_cam_cfg = next((c for c in (self.cfg.get("cameras") or []) if c.get("id") == active_cid), {})
             active_ml_enabled = bool(active_cam_cfg.get("ml_enabled", True))
+            from graph.compile import pipeline_runtime_flags
 
-            if not active_ml_enabled:
+            flags = pipeline_runtime_flags(self.cfg)
+
+            if not flags["valid"]:
+                self.status_text = "PIPELINE INVALID"
+                last_accepted = []
+                last_rejected = []
+            elif not active_ml_enabled:
                 self.status_text = "AI DISABLED"
                 last_accepted = []
                 last_rejected = []
@@ -2839,18 +3019,21 @@ class LiveStreamEngine:
                 self.force_infer = False
                 try:
                     t_pred = time.perf_counter()
+                    result = None
                     with self.infer_lock:
-                        result = self.model.predict(
-                            frame,
-                            imgsz=imgsz,
-                            conf=person_conf,
-                            device=self.runtime_profile.yolo_device if self.runtime_profile else None,
-                            verbose=False,
-                        )[0]
+                        if flags["person_detect"]:
+                            result = self.model.predict(
+                                frame,
+                                imgsz=imgsz,
+                                conf=person_conf,
+                                device=self.runtime_profile.yolo_device if self.runtime_profile else None,
+                                verbose=False,
+                            )[0]
                         vehicles = getattr(self, "cached_vehicles", [])
                         vehicle_interval = getattr(self, "vehicle_infer_interval", 1.0)
                         should_infer_vehicle = (
-                            getattr(self, "vehicle_model", None) is not None
+                            bool(flags["vehicle_detect"])
+                            and getattr(self, "vehicle_model", None) is not None
                             and (self.force_infer or not vehicles or (now - getattr(self, "last_vehicle_infer", 0.0)) >= vehicle_interval)
                         )
                         if should_infer_vehicle:
@@ -2868,6 +3051,9 @@ class LiveStreamEngine:
                                 self.last_vehicle_infer = now
                             except Exception as ex:
                                 print(f"[VehicleInfer] Prediction error: {ex}")
+                        elif not flags["vehicle_detect"]:
+                            vehicles = []
+                            self.cached_vehicles = []
 
                     auto_create = bool(self.cfg.get("auto_create_bays", False))
                     departed_bays = self.bay_manager.sync_auto_vehicles(
@@ -2885,88 +3071,117 @@ class LiveStreamEngine:
                                     except Exception as ex:
                                         print(f"[Vehicle Departure] Error completing/evaluating job {bay_cfg.get('job_id')}: {ex}")
                     track_low_thresh = float(self.cfg.get("track_low_thresh", 0.10))
-                    last_accepted, last_rejected, low_dets = person_detections_split(
-                        result,
-                        h,
-                        conf_min=person_conf,
-                        track_low_thresh=track_low_thresh,
-                        min_height_frac=min_person_height,
-                        min_aspect=min_aspect,
-                        min_keypoints=min_keypoints,
-                        kpt_conf=kpt_conf,
-                    )
-                    zoom_bays = self.bay_manager.configs() or (cfg.get("bays") or [])
-                    with self.infer_lock:
-                        last_accepted, last_rejected = self._apply_bay_zoom(
-                            frame,
-                            zoom_bays,
-                            last_accepted,
-                            last_rejected,
-                            imgsz=imgsz,
-                            person_conf=person_conf,
-                            min_person_height=min_person_height,
+                    if flags["person_detect"] and result is not None:
+                        last_accepted, last_rejected, low_dets = person_detections_split(
+                            result,
+                            h,
+                            conf_min=person_conf,
+                            track_low_thresh=track_low_thresh,
+                            min_height_frac=min_person_height,
                             min_aspect=min_aspect,
                             min_keypoints=min_keypoints,
                             kpt_conf=kpt_conf,
-                            occupancy_by_id=occupancy_hints(snapshots),
                         )
-                    last_accepted, vetoed = veto_vehicle_interior(
-                        last_accepted, vehicles, kpt_conf=kpt_conf, protected_ids=protected_ids
-                    )
-                    last_rejected.extend(vetoed)
+                        zoom_bays = self.bay_manager.configs() or (cfg.get("bays") or [])
+                        with self.infer_lock:
+                            last_accepted, last_rejected = self._apply_bay_zoom(
+                                frame,
+                                zoom_bays,
+                                last_accepted,
+                                last_rejected,
+                                imgsz=imgsz,
+                                person_conf=person_conf,
+                                min_person_height=min_person_height,
+                                min_aspect=min_aspect,
+                                min_keypoints=min_keypoints,
+                                kpt_conf=kpt_conf,
+                                occupancy_by_id=occupancy_hints(snapshots),
+                            )
+                        last_accepted, vetoed = veto_vehicle_interior(
+                            last_accepted, vehicles, kpt_conf=kpt_conf, protected_ids=protected_ids
+                        )
+                        last_rejected.extend(vetoed)
+                    else:
+                        last_accepted, last_rejected, low_dets = [], [], []
                     if self.tracker is not None:
                         last_accepted = run_identity_pipeline(
                             frame,
                             last_accepted,
                             self.tracker,
-                            face_rec=self.face_rec,
-                            reid=self.reid,
+                            face_rec=self.face_rec if flags["face_id"] else None,
+                            reid=self.reid if flags["reid"] else None,
                             probe=self.liveness_probe,
                             low_detections=low_dets,
                         )
                         self._bank_hard_negatives(frame, self.tracker.clutter_events)
-                    elif self.face_rec is not None:
+                    elif flags["face_id"] and self.face_rec is not None:
                         self.face_rec.annotate_detections(frame, last_accepted)
-                    snapshots = self.bay_manager.update(
-                        last_accepted, w, h, now, kpt_conf=kpt_conf, frame=frame
-                    )
-                    if self.tracker is not None:
-                        # Spare still workers in an active bay from the inanimate sweep.
-                        self.tracker.protected_ids = self.bay_manager.protected_track_ids()
-                    ghost.absent_seconds = float(cfg.get("absent_seconds") or 10)
-                    ghost.cooldown_seconds = float(cfg.get("cooldown_seconds") or 30)
-                    any_occupied = any(
-                        getattr(s, "person_present", False)
-                        or s.state in ("WORKING", "UNDER_VEHICLE", "IDLE", "NOT_WORKING")
-                        for s in snapshots
-                    )
-                    last_state = ghost.update(any_occupied, now)
-                    stamp = datetime.now()
-                    self._record_garage_tick(last_accepted, snapshots, last_state, stamp, now, clock_out_grace)
-
-                    self.is_occupied = last_state.occupied
-                    self.empty_elapsed = last_state.empty_elapsed
-                    self.person_count = len(last_accepted)
-                    self.staff_names = [
-                        det.identity for det in last_accepted if det.is_staff and det.identity
-                    ]
-                    self.identities = [det.identity or "person" for det in last_accepted]
-                    working = [s for s in snapshots if s.state == "WORKING"]
-                    if working:
-                        names = ", ".join(s.mechanic_name or s.name for s in working)
-                        self.status_text = f"WRENCH TIME [{names}]"
-                    elif any_occupied:
-                        self.status_text = till_status_label(
-                            True,
-                            last_accepted,
-                            self.empty_elapsed,
-                            absent,
-                            face_id_enabled=self.face_rec is not None,
+                    if flags["customer_visits"]:
+                        prev_conn = self.visit_monitor.conn
+                        if not flags["persist"]:
+                            self.visit_monitor.conn = None
+                        try:
+                            visit_snaps = self.visit_monitor.update(last_accepted, w, h, now)
+                        finally:
+                            self.visit_monitor.conn = prev_conn
+                        self.person_count = len(last_accepted)
+                        self.identities = [det.identity or "Visitor" for det in last_accepted]
+                        self.staff_names = []
+                        occupied_zones = [s for s in visit_snaps if s.occupied]
+                        self.status_text = (
+                            f"VISITORS [{len(occupied_zones)} zones]"
+                            if occupied_zones
+                            else "FLOOR EMPTY"
                         )
-                    else:
-                        self.status_text = "SHOP FLOOR EMPTY"
-                    with self.lock:
-                        self.bay_telemetry = [s.as_dict() for s in snapshots]
+                        self.is_occupied = bool(occupied_zones)
+                        self.empty_elapsed = 0.0 if occupied_zones else self.empty_elapsed
+                        with self.lock:
+                            self.bay_telemetry = [s.as_dict() for s in visit_snaps]
+                        last_state = GhostState(self.is_occupied, self.empty_elapsed, False)
+                    if flags["employee_labor"]:
+                        snapshots = self.bay_manager.update(
+                            last_accepted, w, h, now, kpt_conf=kpt_conf, frame=frame
+                        )
+                        if self.tracker is not None:
+                            # Spare still workers in an active bay from the inanimate sweep.
+                            self.tracker.protected_ids = self.bay_manager.protected_track_ids()
+                        ghost.absent_seconds = float(cfg.get("absent_seconds") or 10)
+                        ghost.cooldown_seconds = float(cfg.get("cooldown_seconds") or 30)
+                        any_occupied = any(
+                            getattr(s, "person_present", False)
+                            or s.state in ("WORKING", "UNDER_VEHICLE", "IDLE", "NOT_WORKING")
+                            for s in snapshots
+                        )
+                        last_state = ghost.update(any_occupied, now)
+                        stamp = datetime.now()
+                        if flags["persist"]:
+                            self._record_garage_tick(last_accepted, snapshots, last_state, stamp, now, clock_out_grace)
+
+                        self.is_occupied = last_state.occupied
+                        self.empty_elapsed = last_state.empty_elapsed
+                        self.person_count = len(last_accepted)
+                        self.staff_names = [
+                            det.identity for det in last_accepted if det.is_staff and det.identity
+                        ]
+                        self.identities = [det.identity or "person" for det in last_accepted]
+                        working = [s for s in snapshots if s.state == "WORKING"]
+                        if working:
+                            names = ", ".join(s.mechanic_name or s.name for s in working)
+                            self.status_text = f"WRENCH TIME [{names}]"
+                        elif any_occupied:
+                            self.status_text = till_status_label(
+                                True,
+                                last_accepted,
+                                self.empty_elapsed,
+                                absent,
+                                face_id_enabled=flags["face_id"] and self.face_rec is not None,
+                            )
+                        else:
+                            self.status_text = "SHOP FLOOR EMPTY"
+                        with self.lock:
+                            self.bay_telemetry = [s.as_dict() for s in snapshots]
+                    elif not flags["customer_visits"]:
+                        self.status_text = "PIPELINE IDLE"
 
                     # Multi-Camera Concurrent ROI Tracking
                     if self.active_roi_cameras:
@@ -3080,13 +3295,14 @@ class LiveStreamEngine:
                         )
                         print(f"[LiveStreamEngine Alert] Out of ROI alert: {path}")
                         try:
-                            if not self.bot.enabled:
-                                print(f"[LiveStreamEngine Alert] Telegram bot not configured (token={bool(self.bot.token)}, chat_id={bool(self.bot.chat_id)})")
-                            sent = self.bot.send_photo(path, caption)
-                            if sent:
-                                print(f"[LiveStreamEngine Alert] Successfully sent photo to Telegram")
-                            else:
-                                print(f"[LiveStreamEngine Alert] Failed to send photo to Telegram")
+                            if flags["telegram"] and flags["alerts"]:
+                                if not self.bot.enabled:
+                                    print(f"[LiveStreamEngine Alert] Telegram bot not configured (token={bool(self.bot.token)}, chat_id={bool(self.bot.chat_id)})")
+                                sent = self.bot.send_photo(path, caption)
+                                if sent:
+                                    print(f"[LiveStreamEngine Alert] Successfully sent photo to Telegram")
+                                else:
+                                    print(f"[LiveStreamEngine Alert] Failed to send photo to Telegram")
                         except Exception as bot_err:
                             print(f"[LiveStreamEngine Alert] Error sending Telegram photo: {bot_err}")
                 except Exception as exc:
@@ -3476,23 +3692,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
 
         elif parsed.path.startswith("/static/"):
-            rel_path = parsed.path.lstrip("/")
-            candidates = [
-                ROOT / rel_path,
-                DATA_DIR / rel_path,
-            ]
-            if not is_frozen():
-                candidates.append(ROOT.parent / rel_path)
+            asset = resolve_static_asset(parsed.path)
             content = None
-            for cand in candidates:
-                if cand.exists() and cand.is_file():
-                    try:
-                        content = cand.read_bytes()
-                        break
-                    except Exception:
-                        pass
-            if content:
-                content_type = "application/javascript" if rel_path.endswith(".js") else "application/octet-stream"
+            if asset is not None:
+                try:
+                    content = asset.read_bytes()
+                except OSError:
+                    content = None
+            if content is not None and asset is not None:
+                suffix = asset.suffix.lower()
+                content_type = "application/javascript" if suffix == ".js" else "application/octet-stream"
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Cache-Control", "public, max-age=86400")
@@ -3565,13 +3774,17 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/config":
             self._send_json(GLOBAL_ENGINE.redacted_config())
 
+        elif parsed.path == "/api/pipeline":
+            graph = (GLOBAL_ENGINE.cfg or {}).get("pipeline_graph")
+            self._send_json({"ok": True, "graph": graph})
+
         elif parsed.path == "/api/telemetry":
             grabber = GLOBAL_ENGINE.grabber
             connection = grabber.connection_state
             if connection == "STANDBY":
                 connection = GLOBAL_ENGINE.connection_state
             sid = GLOBAL_ENGINE._gateway_stream_id
-            garage = GLOBAL_ENGINE.garage_telemetry()
+            garage = GLOBAL_ENGINE.workplace_telemetry()
             protocol = str(
                 GLOBAL_ENGINE.cfg.get("protocol")
                 or protocol_from_source(GLOBAL_ENGINE.cfg.get("source"))
@@ -3610,8 +3823,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(data).encode("utf-8"))
 
-        elif parsed.path == "/api/garage/telemetry":
-            data = GLOBAL_ENGINE.garage_telemetry()
+        elif parsed.path in ("/api/garage/telemetry", "/api/workplace/telemetry"):
+            data = GLOBAL_ENGINE.workplace_telemetry()
             grabber = GLOBAL_ENGINE.grabber
             data.update(
                 {
@@ -3636,6 +3849,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/api/garage/scorecard":
             self._send_json(GLOBAL_ENGINE.garage_scorecard())
+
+        elif parsed.path == "/api/workplace/visits":
+            data = GLOBAL_ENGINE.workplace_telemetry().get("visits") or customer_visit_counts(
+                GLOBAL_ENGINE.conn
+            )
+            self._send_json(data)
 
         elif parsed.path == "/api/telegram/status":
             qs = urllib.parse.parse_qs(parsed.query or "")
@@ -3921,6 +4140,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             GLOBAL_ENGINE.acknowledge_event(payload.get("event_id"))
             self._send_json({"success": True})
 
+        elif parsed.path == "/api/pipeline":
+            graph = raw_json if isinstance(raw_json, dict) and "nodes" in raw_json else payload.get("graph") or payload
+            result = GLOBAL_ENGINE.apply_pipeline(graph)
+            self._send_json(result, status=200 if result.get("ok") else 400)
+
         elif parsed.path == "/api/orient":
             result = GLOBAL_ENGINE.set_orient(
                 payload.get("rotate"),
@@ -3937,7 +4161,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             result = GLOBAL_ENGINE.set_roi(payload.get("roi"))
             self._send_json(result)
 
-        elif parsed.path == "/api/garage/bays":
+        elif parsed.path in ("/api/garage/bays", "/api/workplace/zones"):
             bays_payload = raw_json if isinstance(raw_json, list) else (
                 payload.get("bays") if "bays" in payload else payload
             )

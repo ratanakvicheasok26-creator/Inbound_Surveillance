@@ -11,6 +11,7 @@
 
 venue: Demo Garage
 garage_name: Demo Garage
+workplace_type: garage
 source: 0
 
 # Named cameras added in the hub. Empty until the operator saves one.
@@ -99,6 +100,11 @@ close_time: "18:00"
 operating_hours:
   open: "08:00"
   close: "18:00"
+
+# Pipeline graph IR from the dashboard editor. When present, node kinds gate
+# person/vehicle/face/re-ID, monitors, persist, and Telegram dispatch.
+# Invalid graphs do not start inference.
+# pipeline_graph: {}
 
 # Local face ID (YuNet + SFace). Put staff photos in faces/<Name>/*.jpg
 # (several angles help). Unknown people overlay as Customer.

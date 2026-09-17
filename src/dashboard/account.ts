@@ -1,6 +1,8 @@
 import type { User } from "@supabase/supabase-js";
 import { ACCOUNT_BUCKET, supabase } from "../lib/supabase";
-import type { Database } from "../lib/database.types";
+import type { Database, Json } from "../lib/database.types";
+import { templateFor } from "../pipeline/templates";
+import { parseWorkplaceId, parseZoneKind, type WorkplaceId, type ZoneKind } from "../workplaces";
 import type { Camera, CameraProtocol } from "./types";
 
 export const PROTOCOLS: CameraProtocol[] = ["rtsp", "onvif", "tapo", "phone", "webcam", "webrtc"];
@@ -9,6 +11,9 @@ export type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 export type CameraRow = Database["public"]["Tables"]["cameras"]["Row"];
 export type RoiRow = Database["public"]["Tables"]["roi_bays"]["Row"];
 export type CrewRow = Database["public"]["Tables"]["crew_identities"]["Row"];
+export type ComplaintRow = Database["public"]["Tables"]["complaints"]["Row"];
+export type PipelineGraphRow = Database["public"]["Tables"]["pipeline_graphs"]["Row"];
+export type CustomerVisitRow = Database["public"]["Tables"]["customer_visits"]["Row"];
 
 export type CrewWithPhoto = CrewRow & { photoUrl: string | null };
 
@@ -17,6 +22,9 @@ export type AccountSnapshot = {
   cameras: CameraRow[];
   rois: RoiRow[];
   crews: CrewWithPhoto[];
+  complaints: ComplaintRow[];
+  visits: CustomerVisitRow[];
+  pipelineGraph: PipelineGraphRow | null;
   avatarUrl: string | null;
 };
 
@@ -130,12 +138,16 @@ export async function ensureProfile(user: User): Promise<ProfileRow> {
     "Operator";
   const fallbackVenue =
     (typeof user.user_metadata?.venue_name === "string" && user.user_metadata.venue_name) || "";
+  const fallbackWorkplace = parseWorkplaceId(
+    typeof user.user_metadata?.workplace_type === "string" ? user.user_metadata.workplace_type : "garage",
+  );
   const inserted = await supabase
     .from("profiles")
     .upsert({
       id: user.id,
       display_name: fallbackName,
       venue_name: fallbackVenue,
+      workplace_type: fallbackWorkplace,
     })
     .select("*")
     .single();
@@ -145,15 +157,29 @@ export async function ensureProfile(user: User): Promise<ProfileRow> {
 
 export async function loadAccount(user: User): Promise<AccountSnapshot> {
   const profile = await ensureProfile(user);
-  const [camerasRes, roisRes, crewsRes, avatarUrl] = await Promise.all([
+  const [camerasRes, roisRes, crewsRes, complaintsRes, visitsRes, graphRes, avatarUrl] = await Promise.all([
     supabase.from("cameras").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
     supabase.from("roi_bays").select("*").eq("user_id", user.id).order("sort_order", { ascending: true }),
     supabase.from("crew_identities").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
+    supabase.from("complaints").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("customer_visits").select("*").eq("user_id", user.id).order("started_at", { ascending: false }).limit(200),
+    supabase.from("pipeline_graphs").select("*").eq("user_id", user.id).eq("is_active", true).maybeSingle(),
     signedPath(profile.avatar_path),
   ]);
   throwIf(camerasRes.error);
   throwIf(roisRes.error);
   throwIf(crewsRes.error);
+  throwIf(complaintsRes.error);
+  throwIf(visitsRes.error);
+  if (graphRes.error && graphRes.error.code !== "PGRST116") throwIf(graphRes.error);
+  let pipelineGraph = graphRes.data || null;
+  if (!pipelineGraph) {
+    pipelineGraph = await savePipelineGraph(
+      user.id,
+      parseWorkplaceId(profile.workplace_type),
+      templateFor(profile.workplace_type) as unknown as Json,
+    );
+  }
   const crews = await Promise.all(
     (crewsRes.data || []).map(async (crew) => ({
       ...crew,
@@ -165,13 +191,19 @@ export async function loadAccount(user: User): Promise<AccountSnapshot> {
     cameras: camerasRes.data || [],
     rois: roisRes.data || [],
     crews,
+    complaints: complaintsRes.data || [],
+    visits: visitsRes.data || [],
+    pipelineGraph,
     avatarUrl,
   };
 }
 
 export async function updateProfile(
   userId: string,
-  patch: Pick<ProfileRow, "display_name" | "venue_name"> & { setup_completed?: boolean },
+  patch: Pick<ProfileRow, "display_name" | "venue_name"> & {
+    setup_completed?: boolean;
+    workplace_type?: WorkplaceId;
+  },
 ) {
   const { data, error } = await supabase.from("profiles").update(patch).eq("id", userId).select("*").single();
   return must(data, error, "Could not update profile.");
@@ -234,28 +266,33 @@ export type RoiInput = {
   id?: string;
   name: string;
   bay_type?: RoiRow["bay_type"];
+  zone_kind?: ZoneKind;
   roi: number[];
   camera_id?: string | null;
   external_id?: string | null;
   sort_order?: number;
 };
 
-export async function replaceRois(userId: string, bays: RoiInput[]) {
+export async function replaceRois(userId: string, bays: RoiInput[], workplace: WorkplaceId = "garage") {
   const { error: delError } = await supabase.from("roi_bays").delete().eq("user_id", userId);
   throwIf(delError);
   if (!bays.length) return [] as RoiRow[];
   const { data, error } = await supabase
     .from("roi_bays")
     .insert(
-      bays.map((bay, index) => ({
-        user_id: userId,
-        name: bay.name.trim(),
-        bay_type: bay.bay_type === "tool_area" ? "tool_area" : "vehicle_bay",
-        roi: bay.roi.slice(0, 4),
-        camera_id: bay.camera_id || null,
-        external_id: bay.external_id || null,
-        sort_order: bay.sort_order ?? index,
-      })),
+      bays.map((bay, index) => {
+        const kind = parseZoneKind(bay.zone_kind || bay.bay_type, workplace);
+        return {
+          user_id: userId,
+          name: bay.name.trim(),
+          bay_type: kind,
+          zone_kind: kind,
+          roi: bay.roi.slice(0, 4),
+          camera_id: bay.camera_id || null,
+          external_id: bay.external_id || null,
+          sort_order: bay.sort_order ?? index,
+        };
+      }),
     )
     .select("*");
   throwIf(error);
@@ -293,4 +330,70 @@ export async function deleteCrew(userId: string, crew: CrewRow) {
   }
   const { error } = await supabase.from("crew_identities").delete().eq("id", crew.id).eq("user_id", userId);
   throwIf(error);
+}
+
+export async function listComplaints(userId: string) {
+  const { data, error } = await supabase
+    .from("complaints")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  throwIf(error);
+  return data || [];
+}
+
+export async function importComplaint(
+  userId: string,
+  input: {
+    body?: string;
+    channel?: ComplaintRow["channel"];
+    status?: ComplaintRow["status"];
+    external_ref?: string | null;
+    payload?: Json;
+  },
+) {
+  const { data, error } = await supabase
+    .from("complaints")
+    .insert({
+      user_id: userId,
+      body: (input.body || "").trim(),
+      channel: input.channel || "import",
+      status: input.status || "open",
+      external_ref: input.external_ref || null,
+      payload: input.payload ?? {},
+    })
+    .select("*")
+    .single();
+  return must(data, error, "Could not import complaint.");
+}
+
+export async function savePipelineGraph(userId: string, workplace: WorkplaceId, graph: Json) {
+  const existing = await supabase
+    .from("pipeline_graphs")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle();
+  throwIf(existing.error);
+  if (existing.data?.id) {
+    const { data, error } = await supabase
+      .from("pipeline_graphs")
+      .update({ graph, workplace_type: workplace, is_active: true })
+      .eq("id", existing.data.id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+    return must(data, error, "Could not save pipeline.");
+  }
+  const { data, error } = await supabase
+    .from("pipeline_graphs")
+    .insert({
+      user_id: userId,
+      workplace_type: workplace,
+      graph,
+      is_active: true,
+    })
+    .select("*")
+    .single();
+  return must(data, error, "Could not save pipeline.");
 }

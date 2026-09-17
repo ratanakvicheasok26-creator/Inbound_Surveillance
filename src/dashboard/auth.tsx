@@ -13,8 +13,10 @@ import { supabase, supabaseConfigured } from "../lib/supabase";
 import {
   deleteCamera as deleteCameraRow,
   deleteCrew as deleteCrewRow,
+  importComplaint as importComplaintRow,
   loadAccount,
   replaceRois as replaceRoiRows,
+  savePipelineGraph as savePipelineGraphRow,
   updateProfile as updateProfileRow,
   uploadAvatar as uploadAvatarFile,
   uploadCrewPhoto as uploadCrewPhotoFile,
@@ -22,10 +24,14 @@ import {
   upsertCrew as upsertCrewRow,
   type AccountSnapshot,
   type CameraInput,
+  type ComplaintRow,
   type CrewRow,
+  type PipelineGraphRow,
   type ProfileRow,
   type RoiInput,
 } from "./account";
+import type { Json } from "../lib/database.types";
+import { parseWorkplaceId, type WorkplaceId } from "../workplaces";
 
 type AuthStatus = "loading" | "ready";
 
@@ -41,13 +47,26 @@ type AccountApi = {
   signOut: () => Promise<void>;
   beginPasswordRecovery: () => void;
   finishPasswordRecovery: () => void;
-  updateProfile: (patch: Pick<ProfileRow, "display_name" | "venue_name"> & { setup_completed?: boolean }) => Promise<void>;
+  updateProfile: (
+    patch: Pick<ProfileRow, "display_name" | "venue_name"> & {
+      setup_completed?: boolean;
+      workplace_type?: WorkplaceId;
+    },
+  ) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   saveCamera: (input: CameraInput) => Promise<void>;
   removeCamera: (id: string) => Promise<void>;
   saveRois: (bays: RoiInput[]) => Promise<void>;
   saveCrew: (input: { id?: string; display_name: string; role?: string; photo?: File | null }) => Promise<void>;
   removeCrew: (crew: CrewRow) => Promise<void>;
+  importComplaint: (input: {
+    body?: string;
+    channel?: ComplaintRow["channel"];
+    status?: ComplaintRow["status"];
+    external_ref?: string | null;
+    payload?: Json;
+  }) => Promise<void>;
+  savePipelineGraph: (graph: Json) => Promise<PipelineGraphRow | void>;
 };
 
 const AccountContext = createContext<AccountApi | null>(null);
@@ -139,7 +158,8 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       },
       saveRois: async (bays) => {
         if (!user) return;
-        const rois = await replaceRoiRows(user.id, bays);
+        const workplace = parseWorkplaceId(snapshot?.profile.workplace_type);
+        const rois = await replaceRoiRows(user.id, bays, workplace);
         setSnapshot((prev) => (prev ? { ...prev, rois } : prev));
       },
       saveCrew: async (input) => {
@@ -152,6 +172,18 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         if (!user) return;
         await deleteCrewRow(user.id, crew);
         await refresh();
+      },
+      importComplaint: async (input) => {
+        if (!user) return;
+        const row = await importComplaintRow(user.id, input);
+        setSnapshot((prev) => (prev ? { ...prev, complaints: [row, ...prev.complaints] } : prev));
+      },
+      savePipelineGraph: async (graph) => {
+        if (!user) return;
+        const workplace = parseWorkplaceId(snapshot?.profile.workplace_type);
+        const row = await savePipelineGraphRow(user.id, workplace, graph);
+        setSnapshot((prev) => (prev ? { ...prev, pipelineGraph: row } : prev));
+        return row;
       },
     };
   }, [error, passwordRecovery, refresh, session, snapshot, status]);
