@@ -118,7 +118,7 @@ telegram_chat_id: ""
 
 # Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.
 # audio_source_type: laptop | usb | camera | video
-# video_loop: false = play an uploaded test clip once (avoid alert flooding).
+# video_loop: true = keep monitoring an uploaded clip's audio (loops).
 # stt_model_size: fine-tuned Khmer model id or legacy size ("base" -> sengtha/whisper-base-khmer).
 complaint_monitoring:
   enabled: true
@@ -133,7 +133,7 @@ complaint_monitoring:
   ollama_host: http://localhost:11434
   telegram_alert_enabled: true
   telegram_min_severity: low
-  video_loop: false
+  video_loop: true
   dedup_window_seconds: 60
 
 # Tier 2 AI Auditor (Fireworks VLM)

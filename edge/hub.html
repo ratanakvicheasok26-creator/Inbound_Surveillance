@@ -1,20 +1,15 @@
 <!DOCTYPE html>
 <html class="dark" lang="en">
-
 <head>
-  <meta charset="utf-8" />
-  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
   <title>Inbound Surveillance</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
-    rel="stylesheet" />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
-    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
   <script src="/static/supabase.js"></script>
   <script>
     if (!window.supabase) {
@@ -90,33 +85,11 @@
     }
   </script>
   <style>
-    html,
-    body {
-      overflow-x: clip;
-    }
-
-    body {
-      background-color: #000000;
-      color: #FAFAFA;
-    }
-
-    .sidebar {
-      background-color: #0c0c0c;
-      border-right: 1px solid #1c1c1c;
-    }
-
-    .cam-selected {
-      box-shadow: 0 0 16px rgba(0, 255, 102, 0.4);
-      border-color: #00FF66 !important;
-    }
-
-    .glass-panel {
-      background: rgba(18, 18, 18, 0.82);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(11, 131, 58, 0.3);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
-    }
-
+    html, body { overflow-x: clip; }
+    body { background-color: #000000; color: #FAFAFA; }
+    .sidebar { background-color: #0c0c0c; border-right: 1px solid #1c1c1c; }
+    .cam-selected { box-shadow: 0 0 16px rgba(0, 255, 102, 0.4); border-color: #00FF66 !important; }
+    .glass-panel { background: rgba(18, 18, 18, 0.82); backdrop-filter: blur(12px); border: 1px solid rgba(11, 131, 58, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7); }
     .grid-cam-tile {
       position: relative;
       background: #000000;
@@ -126,30 +99,21 @@
       cursor: pointer;
       transition: all 0.2s ease-in-out;
     }
-
     .grid-cam-tile:hover {
       border-color: #00FF66;
       box-shadow: 0 0 16px rgba(0, 255, 102, 0.25);
     }
-
     .grid-cam-tile.active-focus {
       border-color: #00FF66 !important;
       box-shadow: 0 0 20px rgba(0, 255, 102, 0.4);
     }
-
-    .grid-cam-tile img,
-    .grid-cam-tile video {
+    .grid-cam-tile img, .grid-cam-tile video {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
-
-    .video-stage {
-      min-height: 180px;
-      height: 100%;
-    }
-
+    .video-stage { min-height: 180px; height: 100%; }
     #workspace {
       display: flex;
       flex-direction: column;
@@ -160,115 +124,73 @@
       overflow-y: auto;
       overscroll-behavior: contain;
     }
-
     #workspace.hidden,
     #identity-workspace.hidden,
     #scorecard-workspace.hidden,
-    #pipeline-workspace.hidden,
-    #complaints-workspace.hidden { display: none !important; }
+    #pipeline-workspace.hidden { display: none !important; }
     #feed-column { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; min-height: 0; min-width: 0; }
     #config-panel { max-height: 42vh; }
-      min-height: 0;
-      min-width: 0;
-    }
-
-    #config-panel {
-      max-height: 42vh;
-    }
-
->>>>>>> 6bad85f (feat(edge): customer complaint audio monitoring (VAD + Khmer STT + Ollama audit + Telegram))
     /* Live feed keeps the stream aspect ratio but never grows past the
        visible workspace. Connection Settings stay below for scrolling. */
     #workspace.is-native-feed #feed-column {
       flex: 0 0 auto;
       min-height: 0;
     }
-
     #workspace.is-native-feed #video-viewport {
       flex: none;
       height: auto;
       min-height: 180px;
       max-height: calc(100dvh - 10rem);
     }
-
     #workspace.is-native-feed #video-stage {
       max-width: 100%;
       max-height: 100%;
     }
-
     #workspace.is-native-feed #config-panel {
       width: 100%;
       max-height: none;
       height: auto;
       flex: 0 0 auto;
     }
-
     /* Multi-camera grid expands viewport to maximum screen space, keeping
        connection settings scrollable below or collapsible. */
     #workspace.is-grid-mode #feed-column {
       flex: 1 0 auto;
       min-height: 0;
     }
-
     #workspace.is-grid-mode #video-viewport {
       flex: 1 0 auto;
       width: 100%;
       min-height: max(560px, calc(100dvh - 12rem));
       height: calc(100dvh - 12rem);
     }
-
     #workspace.is-grid-mode #multi-cam-grid {
       width: 100%;
       height: 100%;
     }
-
     #workspace.is-grid-mode #config-panel {
       width: 100%;
       max-height: none;
       height: auto;
       flex: 0 0 auto;
     }
-
     #workspace.is-grid-mode.is-maximized #video-viewport {
       min-height: max(680px, calc(100dvh - 7.5rem));
       height: calc(100dvh - 7.5rem);
     }
-
     #video-stage {
       position: relative;
       max-width: 100%;
       max-height: 100%;
       background: #000000;
     }
-
-    #live-camera-feed,
-    #live-webrtc {
-      display: block;
-      width: 100%;
-      height: 100%;
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-      background: #000000;
+    #live-camera-feed, #live-webrtc {
+      display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%;
+      object-fit: contain; background: #000000;
     }
-
-    #live-webrtc {
-      display: none;
-    }
-
-    .glass-panel {
-      background: rgba(18, 18, 18, 0.85);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(11, 131, 58, 0.25);
-    }
-
-    .roi-overlay {
-      position: absolute;
-      z-index: 8;
-      user-select: none;
-      touch-action: none;
-    }
-
+    #live-webrtc { display: none; }
+    .glass-panel { background: rgba(18, 18, 18, 0.85); backdrop-filter: blur(8px); border: 1px solid rgba(11, 131, 58, 0.25); }
+    .roi-overlay { position: absolute; z-index: 8; user-select: none; touch-action: none; }
     .bay-chip {
       position: absolute;
       font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -288,111 +210,42 @@
       z-index: 25;
       transition: top 0.05s ease, left 0.05s ease;
     }
-
-    .roi-box {
-      position: absolute;
-      box-sizing: border-box;
-    }
-
-    .roi-box.selected {
-      z-index: 10;
-    }
-
+    .roi-box { position: absolute; box-sizing: border-box; }
+    .roi-box.selected { z-index: 10; }
     .roi-box .bay-chip {
-      position: absolute;
-      top: -22px;
-      left: 0;
+      position: absolute; top: -22px; left: 0;
       font-family: "JetBrains Mono", ui-monospace, monospace;
-      font-size: 10px;
-      line-height: 16px;
-      padding: 1px 6px;
-      color: #000000;
-      background: #00FF66;
-      font-weight: 700;
-      white-space: nowrap;
-      max-width: min(480px, 90vw);
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 10px; line-height: 16px; padding: 1px 6px;
+      color: #000000; background: #00FF66; font-weight: 700; white-space: nowrap; max-width: min(480px, 90vw);
+      overflow: hidden; text-overflow: ellipsis;
       border-radius: 2px;
       pointer-events: auto;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     }
-
     .roi-box.chip-inside-top .bay-chip {
       top: 2px;
     }
-
     .roi-box.chip-align-right .bay-chip {
       left: auto;
       right: 0;
     }
-
     .roi-handle {
-      position: absolute;
-      width: 8px;
-      height: 8px;
-      background: #00FF66;
-      z-index: 9;
+      position: absolute; width: 8px; height: 8px;
+      background: #00FF66; z-index: 9;
     }
-
-    .roi-handle.nw {
-      left: -4px;
-      top: -4px;
-      cursor: nwse-resize;
-    }
-
-    .roi-handle.n {
-      left: 50%;
-      top: -4px;
-      transform: translateX(-50%);
-      cursor: ns-resize;
-    }
-
-    .roi-handle.ne {
-      right: -4px;
-      top: -4px;
-      cursor: nesw-resize;
-    }
-
-    .roi-handle.e {
-      right: -4px;
-      top: 50%;
-      transform: translateY(-50%);
-      cursor: ew-resize;
-    }
-
-    .roi-handle.se {
-      right: -4px;
-      bottom: -4px;
-      cursor: nwse-resize;
-    }
-
-    .roi-handle.s {
-      left: 50%;
-      bottom: -4px;
-      transform: translateX(-50%);
-      cursor: ns-resize;
-    }
-
-    .roi-handle.sw {
-      left: -4px;
-      bottom: -4px;
-      cursor: nesw-resize;
-    }
-
-    .roi-handle.w {
-      left: -4px;
-      top: 50%;
-      transform: translateY(-50%);
-      cursor: ew-resize;
-    }
-
+    .roi-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
+    .roi-handle.n  { left: 50%; top: -4px; transform: translateX(-50%); cursor: ns-resize; }
+    .roi-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
+    .roi-handle.e  { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .roi-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+    .roi-handle.s  { left: 50%; bottom: -4px; transform: translateX(-50%); cursor: ns-resize; }
+    .roi-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+    .roi-handle.w  { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
     .roi-svg-poly {
       cursor: move;
       transition: fill 0.15s ease, stroke-width 0.15s ease;
       pointer-events: auto;
     }
-
     #roi-svg {
       position: absolute !important;
       top: 0 !important;
@@ -403,7 +256,6 @@
       overflow: visible !important;
       z-index: 10 !important;
     }
-
     .roi-corner-handle {
       position: absolute;
       width: 14px;
@@ -418,62 +270,24 @@
       pointer-events: auto;
       transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background 0.1s ease;
     }
-
     .roi-corner-handle:hover {
       transform: translate(-50%, -50%) scale(1.4);
       background: #ffffff;
       border-color: #00FF66;
     }
-
     .roi-corner-handle.corner-active {
       transform: translate(-50%, -50%) scale(1.5);
       background: #ffcc00;
       border-color: #000000;
     }
-
-    #bay-context-menu {
-      min-width: 220px;
-    }
-
-    #bay-context-menu button {
-      background: transparent;
-      border: 0;
-      color: inherit;
-      cursor: pointer;
-    }
-
-    input[type=range] {
-      accent-color: #00FF66;
-    }
-
-    .orient-on {
-      background: #00FF66;
-      color: #000000;
-      border-color: #00FF66;
-      font-weight: 700;
-    }
-
-    .tab-on {
-      color: #00FF66;
-      border-bottom: 2px solid #00FF66;
-    }
-
-    .tab-off {
-      color: #8E9297;
-      border-bottom: 2px solid transparent;
-    }
-
-    .nav-on {
-      color: #00FF66;
-      background: rgba(0, 255, 102, 0.12);
-      border-left: 2px solid #00FF66;
-    }
-
-    .nav-off {
-      color: #8E9297;
-      border-left: 2px solid transparent;
-    }
-
+    #bay-context-menu { min-width: 220px; }
+    #bay-context-menu button { background: transparent; border: 0; color: inherit; cursor: pointer; }
+    input[type=range] { accent-color: #00FF66; }
+    .orient-on { background: #00FF66; color: #000000; border-color: #00FF66; font-weight: 700; }
+    .tab-on { color: #00FF66; border-bottom: 2px solid #00FF66; }
+    .tab-off { color: #8E9297; border-bottom: 2px solid transparent; }
+    .nav-on { color: #00FF66; background: rgba(0, 255, 102, 0.12); border-left: 2px solid #00FF66; }
+    .nav-off { color: #8E9297; border-left: 2px solid transparent; }
     #identity-workspace {
       display: flex;
       flex-direction: column;
@@ -485,49 +299,17 @@
       overscroll-behavior: contain;
       padding-bottom: 2rem;
     }
-
-    .identity-card {
-      transition: border-color 0.15s ease, background 0.15s ease;
-    }
-
-    .identity-card:hover {
-      border-color: #00FF66;
-      background: #1C1C1C;
-      box-shadow: 0 0 12px rgba(11, 131, 58, 0.35);
-    }
-
-    .identity-thumb,
-    .identity-photo img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-
-    .identity-photo {
-      position: relative;
-      aspect-ratio: 1;
-      overflow: hidden;
-    }
-
+    .identity-card { transition: border-color 0.15s ease, background 0.15s ease; }
+    .identity-card:hover { border-color: #00FF66; background: #1C1C1C; box-shadow: 0 0 12px rgba(11, 131, 58, 0.35); }
+    .identity-thumb, .identity-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .identity-photo { position: relative; aspect-ratio: 1; overflow: hidden; }
     .identity-photo button {
-      position: absolute;
-      top: 6px;
-      right: 6px;
-      width: 28px;
-      height: 28px;
-      border-radius: 9999px;
-      background: rgba(18, 18, 18, 0.85);
-      color: #ffb4ab;
-      display: none;
-      align-items: center;
-      justify-content: center;
+      position: absolute; top: 6px; right: 6px;
+      width: 28px; height: 28px; border-radius: 9999px;
+      background: rgba(18, 18, 18, 0.85); color: #ffb4ab;
+      display: none; align-items: center; justify-content: center;
     }
-
-    .identity-photo:hover button {
-      display: flex;
-    }
-
+    .identity-photo:hover button { display: flex; }
     #scorecard-workspace {
       display: flex;
       flex-direction: column;
@@ -677,126 +459,152 @@
       position: absolute;
       left: 0;
       top: 0;
-      width: 4000px;
-      height: 3000px;
+      width: 3600px;
+      height: 2400px;
       transform-origin: 0 0;
+      z-index: 0;
     }
     #pipe-wires {
       position: absolute;
       inset: 0;
-      width: 100%;
-      height: 100%;
+      width: 3600px;
+      height: 2400px;
       pointer-events: none;
       overflow: visible;
     }
-    #pipe-wires path {
-      fill: none;
-      stroke-width: 2.2px;
-      stroke-linecap: round;
-      filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
-    }
-    #pipe-wires path.wire-selected { stroke-width: 3.2px; filter: drop-shadow(0 0 6px rgba(0, 255, 102, 0.6)); }
     #pipe-nodes { position: absolute; inset: 0; }
     .pipe-node {
       position: absolute;
-      width: 168px;
+      background: #121212;
+      border: 1px solid #333;
       border-radius: 10px;
-      background: #151515;
-      border: 1px solid #2c2c2c;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      color: #FAFAFA;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
       user-select: none;
-      font-size: 12px;
     }
-    .pipe-node.is-selected { border-color: #00FF66; box-shadow: 0 0 0 1px #00FF66, 0 8px 24px rgba(0, 255, 102, 0.2); }
-    .pipe-node-hdr {
+    .pipe-node.is-selected { box-shadow: 0 0 0 1px #00FF66, 0 8px 24px rgba(0, 0, 0, 0.35); }
+    .pipe-node header {
+      padding: 7px 10px 6px;
+      font-size: 11px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border-radius: 9px 9px 0 0;
+      cursor: grab;
+    }
+    .pipe-node__sub {
+      margin: 0;
+      padding: 6px 10px 4px;
+      font-size: 11px;
+      color: #8E9297;
+    }
+    .pipe-node__io {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px 8px;
+      padding: 4px 8px 10px;
+    }
+    .pipe-socket {
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 8px;
-      border-bottom: 1px solid #222;
-      font-weight: 600;
-      font-size: 11px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: #FAFAFA;
-      border-top-left-radius: 9px;
-      border-top-right-radius: 9px;
-    }
-    .pipe-node-hdr .pipe-badge {
-      font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 999px;
-      background: #262626;
-      color: #A5A5A5;
-      margin-left: auto;
-    }
-    .pipe-node-title {
-      padding: 6px 8px 4px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #FAFAFA;
-    }
-    .pipe-ports {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4px;
-      padding: 4px 6px 8px;
-    }
-    .pipe-in-ports, .pipe-out-ports { display: flex; flex-direction: column; gap: 4px; }
-    .pipe-out-ports { align-items: flex-end; }
-    .pipe-port {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
       font-size: 10px;
-      color: #8E9297;
-      cursor: crosshair;
+      min-height: 22px;
     }
+    .pipe-socket--out { justify-content: flex-end; }
     .pipe-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      border: 1px solid #111;
-      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      border: 2px solid #050505;
+      padding: 0;
+      cursor: crosshair;
+      flex-shrink: 0;
     }
-    .pipe-port:hover .pipe-dot { transform: scale(1.3); }
-    .pipe-color-video { background: #38bdf8; }
-    .pipe-color-detections { background: #00FF66; }
-    .pipe-color-tracks { background: #a855f7; }
-    .pipe-color-events { background: #f97316; }
-    .pipe-color-metrics { background: #eab308; }
-    .pipe-color-any { background: #e5e5e5; }
     @media (max-width: 980px) {
       .pipe-bench { grid-template-columns: 1fr; }
       #pipe-stage { min-height: 52vh; }
     }
-    .wrench-bar {
-      height: 8px;
-      background: #222222;
-      border-radius: 9999px;
-      overflow: hidden;
-    }
-
-    .wrench-bar>span {
-      display: block;
-      height: 100%;
-      background: #00FF66;
-    }
-
-    #discovery-results {
-      max-height: 11rem;
-      overflow-y: auto;
-    }
-
-    #discover-cred-modal.hidden {
+    .wrench-bar { height: 8px; background: #222222; border-radius: 9999px; overflow: hidden; }
+    .wrench-bar > span { display: block; height: 100%; background: #00FF66; }
+    #discovery-results { max-height: 11rem; overflow-y: auto; }
+    #discover-cred-modal.hidden { display: none; }
+    body.auth-locked > nav,
+    body.auth-locked > main { display: none !important; }
+    #auth-gate {
       display: none;
+      place-items: center;
+      background: #000000;
     }
-
-    body.auth-locked>nav,
-    body.auth-locked>main {
-      display: none !important;
+    body.auth-locked #auth-gate { display: grid; }
+    .auth-card {
+      width: min(420px, calc(100vw - 32px));
+      background: #121212;
+      border: 1px solid #222222;
+      border-radius: 14px;
+      padding: 22px;
+      display: grid;
+      gap: 12px;
     }
-
+    .auth-card input:not([type="checkbox"]):not([type="radio"]) {
+      width: 100%;
+      background: #000000;
+      border: 1px solid #2b2b2b;
+      color: #FAFAFA;
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .auth-card input:not([type="checkbox"]):not([type="radio"]):focus {
+      border-color: #00FF66;
+      box-shadow: 0 0 0 1px rgba(0, 255, 102, 0.3);
+    }
+    .auth-card label:not(.checkbox-row) > span {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .auth-checkbox {
+      width: 16px !important;
+      height: 16px !important;
+      min-width: 16px !important;
+      min-height: 16px !important;
+      max-width: 16px !important;
+      max-height: 16px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      cursor: pointer;
+      accent-color: #00FF66;
+      border-radius: 4px;
+      background-color: #1a1a1a !important;
+      border: 1px solid #333333 !important;
+    }
+    .checkbox-row {
+      display: inline-flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      gap: 8px !important;
+      margin: 0 !important;
+      cursor: pointer !important;
+      user-select: none !important;
+    }
+    .checkbox-text {
+      display: inline !important;
+      margin: 0 !important;
+      font-size: 12px !important;
+      font-weight: 400 !important;
+      line-height: 1.2 !important;
+      white-space: nowrap !important;
+      color: #A5A5A5;
+      transition: color 0.15s ease;
+    }
+    .checkbox-row:hover .checkbox-text {
+      color: #FAFAFA;
+    }
     .auth-forgot {
       background: none;
       border: none;
@@ -814,101 +622,21 @@
       font-size: 1.05rem;
     }
     #auth-message:empty { display: none; }
-    #auth-gate {
-      display: none;
-      place-items: center;
-      background: #000000;
-    }
-
-    body.auth-locked #auth-gate {
-      display: grid;
-    }
-
-    .auth-card {
-      width: min(420px, calc(100vw - 32px));
-      background: #121212;
-      border: 1px solid #222222;
-      border-radius: 14px;
-      padding: 22px;
-      display: grid;
-      gap: 12px;
-    }
-
-    .auth-card input:not([type="checkbox"]):not([type="radio"]) {
-      width: 100%;
-      background: #000000;
-      border: 1px solid #2b2b2b;
-      color: #FAFAFA;
-      border-radius: 10px;
-      padding: 10px 12px;
-      outline: none;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .auth-card input:not([type="checkbox"]):not([type="radio"]):focus {
-      border-color: #00FF66;
-      box-shadow: 0 0 0 1px rgba(0, 255, 102, 0.3);
-    }
-
-    .auth-card label:not(.checkbox-row)>span {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
-
-    .auth-checkbox {
-      width: 16px !important;
-      height: 16px !important;
-      min-width: 16px !important;
-      min-height: 16px !important;
-      max-width: 16px !important;
-      max-height: 16px !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      cursor: pointer;
-      accent-color: #00FF66;
-      border-radius: 4px;
-      background-color: #1a1a1a !important;
-      border: 1px solid #333333 !important;
-    }
-
-    .checkbox-row {
-      display: inline-flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      gap: 8px !important;
-      margin: 0 !important;
-      cursor: pointer !important;
-      user-select: none !important;
-    }
-
-    .checkbox-text {
-      display: inline !important;
-      margin: 0 !important;
-      font-size: 12px !important;
-      font-weight: 400 !important;
-      line-height: 1.2 !important;
-      white-space: nowrap !important;
-      color: #A5A5A5;
-      transition: color 0.15s ease;
-    }
-
     @media (prefers-reduced-motion: reduce) {
-      .animate-pulse {
-        animation: none;
-      }
+      .animate-pulse { animation: none; }
     }
   </style>
 </head>
-
 <body class="auth-locked font-body-md text-body-md antialiased h-screen flex bg-[#000000] text-[#FAFAFA]">
   <div id="auth-gate" class="fixed inset-0 z-[200]">
     <form id="auth-form" class="auth-card" data-mode="signin" onsubmit="return submitHubAuth(event)">
       <div class="flex items-center gap-3">
-        <img src="/inb_surveillance.png" alt="Inbound Surveillance"
+        <img
+          src="/inb_surveillance.png"
+          alt="Inbound Surveillance"
           class="w-9 h-9 rounded-full object-cover border border-primary bg-black shrink-0"
-          onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
+          onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }"
+        />
         <div>
           <p class="font-bold">Inbound Surveillance</p>
           <p class="text-on-surface-variant text-xs">Private operator console</p>
@@ -945,7 +673,12 @@
       </label>
       <div id="auth-remember-row" class="flex items-center justify-between py-1">
         <label class="checkbox-row group">
-          <input type="checkbox" id="auth-remember" checked class="auth-checkbox shrink-0" />
+          <input
+            type="checkbox"
+            id="auth-remember"
+            checked
+            class="auth-checkbox shrink-0"
+          />
           <span class="checkbox-text">Keep me signed in</span>
         </label>
         <button id="auth-forgot" type="button" class="auth-forgot" onclick="setHubAuthMode('forgot')">Forgot password?</button>
@@ -955,14 +688,9 @@
       <button id="auth-toggle" type="button" class="w-full border border-outline-variant py-2.5 rounded-lg text-sm hover:border-primary hover:text-primary" onclick="toggleHubAuthMode()">Create account</button>
     </form>
   </div>
-  <nav
-    class="sidebar fixed left-0 top-0 h-full w-[288px] flex flex-col py-edge-margin border-r border-outline-variant z-20 max-lg:static max-lg:w-full max-lg:h-auto max-lg:relative">
-    <div
-      class="px-container-padding mb-6 flex items-center gap-3 cursor-pointer hover:bg-surface-container-high/60 p-2 rounded-xl transition-all"
-      onclick="showConfigTab('profile')" title="Open Profile Settings">
-      <img id="profile-avatar" src="/inb_surveillance.png" alt=""
-        class="w-10 h-10 rounded-full object-cover border-2 border-primary shrink-0 shadow-[0_0_12px_rgba(0,255,102,0.4)] bg-black"
-        onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
+  <nav class="sidebar fixed left-0 top-0 h-full w-[288px] flex flex-col py-edge-margin border-r border-outline-variant z-20 max-lg:static max-lg:w-full max-lg:h-auto max-lg:relative">
+    <div class="px-container-padding mb-6 flex items-center gap-3 cursor-pointer hover:bg-surface-container-high/60 p-2 rounded-xl transition-all" onclick="showConfigTab('profile')" title="Open Profile Settings">
+      <img id="profile-avatar" src="/inb_surveillance.png" alt="" class="w-10 h-10 rounded-full object-cover border-2 border-primary shrink-0 shadow-[0_0_12px_rgba(0,255,102,0.4)] bg-black" onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
       <div class="min-w-0">
         <p id="greeting" class="text-on-surface font-bold text-base leading-snug truncate">Operator</p>
         <p id="profile-venue" class="text-on-surface-variant text-xs truncate">Private operator</p>
@@ -970,24 +698,19 @@
     </div>
     <ul class="flex-1 overflow-y-auto px-4 space-y-1">
       <li>
-        <button type="button" class="nav-on w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left"
-          data-nav="live" onclick="setNav('live')">
+        <button type="button" class="nav-on w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left" data-nav="live" onclick="setNav('live')">
           <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">videocam</span>
           <span>Live View</span>
         </button>
       </li>
       <li>
-        <button type="button"
-          class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left"
-          data-nav="identity" onclick="setNav('identity')">
+        <button type="button" class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left" data-nav="identity" onclick="setNav('identity')">
           <span class="material-symbols-outlined">badge</span>
           <span>Identity</span>
         </button>
       </li>
       <li>
-        <button type="button"
-          class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left"
-          data-nav="scorecards" onclick="setNav('scorecards')">
+        <button type="button" class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left" data-nav="scorecards" onclick="setNav('scorecards')">
           <span class="material-symbols-outlined">monitoring</span>
           <span>Mechanics</span>
         </button>
@@ -999,23 +722,13 @@
         </button>
       </li>
       <li>
-        <button type="button"
-          class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left"
-          data-nav="complaints" onclick="setNav('complaints')">
-          <span class="material-symbols-outlined">record_voice_over</span>
-          <span>Complaints</span>
-        </button>
-      </li>
-      <li>
         <button type="button" class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left" data-nav="cameras" onclick="setNav('cameras')">
           <span class="material-symbols-outlined">photo_camera</span>
           <span>Cameras</span>
         </button>
       </li>
       <li>
-        <button type="button"
-          class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left"
-          data-nav="settings" onclick="setNav('settings')">
+        <button type="button" class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left" data-nav="settings" onclick="setNav('settings')">
           <span class="material-symbols-outlined">settings</span>
           <span>Settings</span>
         </button>
@@ -1025,20 +738,16 @@
       </li>
       <li>
         <div id="camera-list" class="space-y-1"></div>
-        <p id="camera-list-empty" class="px-3 py-4 text-xs text-on-surface-variant">No cameras yet. Add a location to
-          get started.</p>
+        <p id="camera-list-empty" class="px-3 py-4 text-xs text-on-surface-variant">No cameras yet. Add a location to get started.</p>
       </li>
     </ul>
     <div class="px-4 mt-auto pt-4 border-t border-outline-variant space-y-4">
-      <button type="button"
-        class="w-full bg-primary-container text-on-primary py-2.5 rounded-lg font-medium hover:bg-primary transition-colors flex items-center justify-center gap-2"
-        onclick="startAddCamera()">
+      <button type="button" class="w-full bg-primary-container text-on-primary py-2.5 rounded-lg font-medium hover:bg-primary transition-colors flex items-center justify-center gap-2" onclick="startAddCamera()">
         <span class="material-symbols-outlined text-sm">add</span>
         Add Camera
       </button>
       <div class="flex justify-between px-2 font-mono-data text-mono-data text-on-surface-variant">
-        <button type="button" class="flex items-center gap-1 hover:text-on-surface"
-          onclick="showConfigTab('integrations')">
+        <button type="button" class="flex items-center gap-1 hover:text-on-surface" onclick="showConfigTab('integrations')">
           <span class="material-symbols-outlined text-xs">help</span> Support
         </button>
         <button type="button" class="flex items-center gap-1 hover:text-on-surface" onclick="loadInitialConfig()">
@@ -1049,15 +758,10 @@
   </nav>
 
   <main class="ml-[288px] flex-1 flex flex-col h-full bg-black relative min-w-0 max-lg:ml-0">
-    <header
-      class="flex justify-between items-center w-full px-edge-margin h-16 bg-surface-dim border-b border-outline-variant shrink-0 gap-4">
-      <div class="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-85 transition-opacity"
-        onclick="showConfigTab('profile')" title="Open Profile Settings">
-        <img id="header-avatar" src="/inb_surveillance.png" alt=""
-          class="w-8 h-8 rounded-full object-cover border border-primary shrink-0 bg-black"
-          onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
-        <h1 id="header-operator" class="font-headline-lg text-headline-lg font-semibold text-on-surface truncate">
-          Operator</h1>
+    <header class="flex justify-between items-center w-full px-edge-margin h-16 bg-surface-dim border-b border-outline-variant shrink-0 gap-4">
+      <div class="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-85 transition-opacity" onclick="showConfigTab('profile')" title="Open Profile Settings">
+        <img id="header-avatar" src="/inb_surveillance.png" alt="" class="w-8 h-8 rounded-full object-cover border border-primary shrink-0 bg-black" onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
+        <h1 id="header-operator" class="font-headline-lg text-headline-lg font-semibold text-on-surface truncate">Operator</h1>
         <div class="flex items-center gap-2 text-sm text-on-surface-variant shrink-0 max-sm:hidden">
           <span class="text-outline">/</span>
           <span class="text-primary border-b border-primary pb-0.5" id="crumb-venue">Garage</span>
@@ -1066,32 +770,25 @@
         </div>
       </div>
       <div class="flex items-center gap-3 shrink-0">
-        <button id="btn-audio-alert" type="button"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container border border-primary text-primary hover:bg-primary/10 transition-colors"
-          title="Vehicle Audio Chimes" onclick="toggleAudioAlerts()">
+        <button id="btn-audio-alert" type="button" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container border border-primary text-primary hover:bg-primary/10 transition-colors" title="Vehicle Audio Chimes" onclick="toggleAudioAlerts()">
           <span id="audio-alert-icon" class="material-symbols-outlined text-[16px]">volume_up</span>
           <span id="audio-alert-label" class="font-mono-data text-[11px] font-semibold">SOUND ON</span>
         </button>
-        <div id="shop-status-pill"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
+        <div id="shop-status-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
           <span id="shop-status-dot" class="w-2 h-2 rounded-full bg-outline"></span>
           <span id="shop-status-label" class="font-label-upper text-label-upper text-on-surface-variant">SHOP</span>
         </div>
-        <div
-          class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
+        <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
           <span class="material-symbols-outlined text-[16px] text-primary">garage</span>
           <span id="header-bay-count" class="font-mono-data text-mono-data text-on-surface">0 / 0 bays</span>
         </div>
-        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors p-1" title="Alerts"
-          onclick="showConfigTab('alerts')">
+        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors p-1" title="Alerts" onclick="showConfigTab('alerts')">
           <span class="material-symbols-outlined">notifications</span>
         </button>
-        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors p-1" title="Settings"
-          onclick="showConfigTab('source')">
+        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors p-1" title="Settings" onclick="showConfigTab('source')">
           <span class="material-symbols-outlined">settings</span>
         </button>
-        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors px-2 py-1 text-xs"
-          title="Sign out" onclick="signOutAccount()">
+        <button type="button" class="text-on-surface-variant hover:text-primary transition-colors px-2 py-1 text-xs" title="Sign out" onclick="signOutAccount()">
           Sign out
         </button>
       </div>
@@ -1102,112 +799,80 @@
         <div class="flex items-center justify-between gap-3 mb-1">
           <div class="flex items-center gap-3">
             <h2 class="font-headline-md text-headline-md text-on-surface">Shop Floor Feed</h2>
-            <div id="live-badge"
-              class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant">
+            <div id="live-badge" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant">
               <span id="live-dot" class="w-2 h-2 rounded-full bg-outline"></span>
               <span id="live-label" class="font-label-upper text-label-upper text-on-surface-variant">STANDBY</span>
             </div>
-            <span id="live-protocol-pill"
-              class="hidden font-label-upper text-label-upper px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant text-primary"></span>
+            <span id="live-protocol-pill" class="hidden font-label-upper text-label-upper px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant text-primary"></span>
           </div>
           <div class="flex items-center gap-1 bg-surface-container-high p-1 rounded-lg border border-outline-variant">
-            <button id="btn-layout-single" type="button"
-              class="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 bg-primary text-black transition-colors"
-              title="Full Single View (100% Screen)" onclick="setLayoutMode('single')">
+            <button id="btn-layout-single" type="button" class="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 bg-primary text-black transition-colors" title="Full Single View (100% Screen)" onclick="setLayoutMode('single')">
               <span class="material-symbols-outlined text-[15px]">crop_square</span>
               <span>1x1 Full</span>
             </button>
-            <button id="btn-layout-grid" type="button"
-              class="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors"
-              title="Auto Edge-to-Edge Grid Split" onclick="setLayoutMode('grid')">
+            <button id="btn-layout-grid" type="button" class="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors" title="Auto Edge-to-Edge Grid Split" onclick="setLayoutMode('grid')">
               <span class="material-symbols-outlined text-[15px]">grid_view</span>
               <span id="btn-grid-label">Split Grid</span>
             </button>
-            <select id="grid-size-select"
-              class="bg-surface-container-highest border-transparent text-on-surface text-xs rounded px-2 py-1 font-medium transition-colors"
-              onchange="setGridDimension(this.value)" title="Choose grid layout dimensions">
+            <select id="grid-size-select" class="bg-surface-container-highest border-transparent text-on-surface text-xs rounded px-2 py-1 font-medium transition-colors" onchange="setGridDimension(this.value)" title="Choose grid layout dimensions">
               <option value="auto">Auto Grid</option>
               <option value="2x2">2x2 (4-Cam)</option>
               <option value="3x3">3x3 (9-Cam)</option>
               <option value="4x4">4x4 (16-Cam)</option>
             </select>
-            <button id="btn-grid-fit" type="button"
-              class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors"
-              title="Toggle aspect ratio: Fit (100% view) vs Stretch (fill box)" onclick="toggleGridFit()">
+            <button id="btn-grid-fit" type="button" class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors" title="Toggle aspect ratio: Fit (100% view) vs Stretch (fill box)" onclick="toggleGridFit()">
               <span class="material-symbols-outlined text-[15px]">fit_screen</span>
               <span id="label-grid-fit">Fit</span>
             </button>
-            <button id="btn-toggle-config" type="button"
-              class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors"
-              title="Collapse / Expand Settings Panel for maximum grid size" onclick="toggleConfigPanel()">
+            <button id="btn-toggle-config" type="button" class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors" title="Collapse / Expand Settings Panel for maximum grid size" onclick="toggleConfigPanel()">
               <span class="material-symbols-outlined text-[15px]" id="icon-toggle-config">expand_more</span>
               <span id="label-toggle-config">Hide Settings</span>
             </button>
-            <button id="btn-toggle-roi" type="button"
-              class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors"
-              title="Toggle ROI Overlay Visibility (does not affect background inference or alerts)"
-              onclick="toggleRoiVisibility()">
+            <button id="btn-toggle-roi" type="button" class="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 text-on-surface-variant hover:text-on-surface transition-colors" title="Toggle ROI Overlay Visibility (does not affect background inference or alerts)" onclick="toggleRoiVisibility()">
               <span class="material-symbols-outlined text-[15px]" id="icon-toggle-roi">layers</span>
               <span id="label-toggle-roi">ROI: ON</span>
             </button>
           </div>
         </div>
 
-        <div
-          class="video-stage w-full flex-1 min-h-0 bg-black rounded-xl border border-outline-variant relative overflow-hidden shadow-2xl flex items-center justify-center"
-          id="video-viewport">
+        <div class="video-stage w-full flex-1 min-h-0 bg-black rounded-xl border border-outline-variant relative overflow-hidden shadow-2xl flex items-center justify-center" id="video-viewport">
           <!-- Auto Switch Alert Banner with Countdown -->
-          <div id="auto-switch-banner"
-            class="absolute top-4 inset-x-4 z-40 flex items-center justify-between px-4 py-2.5 rounded-xl border border-amber-500/50 bg-surface-container-highest/95 backdrop-blur-md shadow-2xl transition-all hidden">
+          <div id="auto-switch-banner" class="absolute top-4 inset-x-4 z-40 flex items-center justify-between px-4 py-2.5 rounded-xl border border-amber-500/50 bg-surface-container-highest/95 backdrop-blur-md shadow-2xl transition-all hidden">
             <div class="flex items-center gap-3">
-              <div
-                class="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <div class="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
                 <span class="material-symbols-outlined text-[20px] animate-pulse">notifications_active</span>
               </div>
               <div>
-                <p class="text-xs font-bold text-on-surface" id="auto-switch-msg">Auto-switched to Camera: Activity
-                  detected</p>
-                <p class="text-[11px] text-on-surface-variant">Returning to <span id="auto-switch-prev-name"
-                    class="font-semibold text-on-surface">Previous Camera</span> in <span id="auto-switch-countdown"
-                    class="font-mono text-amber-400 font-bold">12s</span></p>
+                <p class="text-xs font-bold text-on-surface" id="auto-switch-msg">Auto-switched to Camera: Activity detected</p>
+                <p class="text-[11px] text-on-surface-variant">Returning to <span id="auto-switch-prev-name" class="font-semibold text-on-surface">Previous Camera</span> in <span id="auto-switch-countdown" class="font-mono text-amber-400 font-bold">12s</span></p>
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button"
-                class="px-3 py-1.5 rounded-lg bg-surface-bright hover:bg-amber-500/20 text-on-surface hover:text-amber-300 text-xs font-semibold border border-outline-variant transition-colors"
-                onclick="cancelAutoSwitchReturn()">Stay Here</button>
-              <button type="button"
-                class="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition-colors flex items-center gap-1 shadow-md"
-                onclick="revertAutoSwitchImmediately()">
+              <button type="button" class="px-3 py-1.5 rounded-lg bg-surface-bright hover:bg-amber-500/20 text-on-surface hover:text-amber-300 text-xs font-semibold border border-outline-variant transition-colors" onclick="cancelAutoSwitchReturn()">Stay Here</button>
+              <button type="button" class="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition-colors flex items-center gap-1 shadow-md" onclick="revertAutoSwitchImmediately()">
                 <span class="material-symbols-outlined text-[15px]">undo</span> Return Now
               </button>
             </div>
           </div>
 
-          <div class="absolute inset-0 flex flex-col items-center justify-center bg-surface-container-lowest z-20"
-            id="stream-placeholder">
+          <div class="absolute inset-0 flex flex-col items-center justify-center bg-surface-container-lowest z-20" id="stream-placeholder">
             <span class="material-symbols-outlined text-5xl text-on-surface-variant mb-4">videocam_off</span>
             <h3 class="text-on-surface font-medium mb-1">No camera connected</h3>
-            <p class="text-body-sm text-on-surface-variant text-center max-w-sm px-4">Select a source in Source
-              Configuration to begin monitoring.</p>
+            <p class="text-body-sm text-on-surface-variant text-center max-w-sm px-4">Select a source in Source Configuration to begin monitoring.</p>
           </div>
 
           <div id="multi-cam-grid" class="w-full h-full p-1.5 gap-2" style="display: none;"></div>
 
           <div id="video-stage" style="display: none;">
             <video id="live-webrtc" autoplay playsinline muted></video>
-            <img id="live-camera-feed" alt="Live camera feed" onerror="handleStreamError()" />
-            <div id="roi-overlay" class="roi-overlay" onmousedown="onRoiDown(event)"
-              oncontextmenu="onBayContextMenu(event)"></div>
-            <div
-              class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full z-20 pointer-events-none text-label-upper font-label-upper text-on-surface">
+            <img id="live-camera-feed" alt="Live camera feed" onerror="handleStreamError()"/>
+            <div id="roi-overlay" class="roi-overlay" onmousedown="onRoiDown(event)" oncontextmenu="onBayContextMenu(event)"></div>
+            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full z-20 pointer-events-none text-label-upper font-label-upper text-on-surface">
               Drag corners to stretch bay angles · Drag inside to move · Right-click for options
             </div>
           </div>
 
-          <div
-            class="absolute top-4 left-4 glass-panel px-3 py-2 rounded-lg z-20 pointer-events-none flex flex-col gap-1.5 min-w-[210px]"
-            id="overlay-clock-panel">
+          <div class="absolute top-4 left-4 glass-panel px-3 py-2 rounded-lg z-20 pointer-events-none flex flex-col gap-1.5 min-w-[210px]" id="overlay-clock-panel">
             <div class="flex items-center justify-between gap-3">
               <span class="font-mono-data text-mono-data text-on-surface" id="overlay-clock">—</span>
               <span class="w-2 h-2 rounded-full bg-green-400"></span>
@@ -1219,8 +884,7 @@
           <div class="absolute bottom-4 left-4 glass-panel px-3 py-1.5 rounded-lg z-20 pointer-events-none">
             <span class="font-body-sm text-body-sm font-semibold text-on-surface" id="overlay-cam">—</span>
           </div>
-          <div
-            class="absolute bottom-4 right-4 glass-panel px-3 py-1.5 rounded-lg z-20 pointer-events-none flex flex-col items-end gap-0.5">
+          <div class="absolute bottom-4 right-4 glass-panel px-3 py-1.5 rounded-lg z-20 pointer-events-none flex flex-col items-end gap-0.5">
             <span class="font-mono-data text-mono-data text-primary" id="overlay-protocol">—</span>
             <span class="font-mono-data text-mono-data text-green-400" id="overlay-quality">—</span>
             <span class="font-mono-data text-mono-data text-on-surface-variant" id="overlay-ingest">—</span>
@@ -1230,51 +894,35 @@
         </div>
       </div>
 
-      <div
-        class="bg-surface-container-low rounded-xl border border-outline-variant flex flex-col shrink-0 overflow-y-auto"
-        id="config-panel">
+      <div class="bg-surface-container-low rounded-xl border border-outline-variant flex flex-col shrink-0 overflow-y-auto" id="config-panel">
         <div class="flex border-b border-outline-variant px-4 overflow-x-auto">
-          <button type="button" id="tab-source" class="tab-on px-4 py-3 font-medium text-sm whitespace-nowrap"
-            onclick="showConfigTab('source')">Source Configuration</button>
-          <button type="button" id="tab-alerts" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap"
-            onclick="showConfigTab('alerts')">Alert Rules</button>
-          <button type="button" id="tab-integrations" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap"
-            onclick="showConfigTab('integrations')">Integrations</button>
-          <button type="button" id="tab-profile" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap"
-            onclick="showConfigTab('profile')">Profile</button>
+          <button type="button" id="tab-source" class="tab-on px-4 py-3 font-medium text-sm whitespace-nowrap" onclick="showConfigTab('source')">Source Configuration</button>
+          <button type="button" id="tab-alerts" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap" onclick="showConfigTab('alerts')">Alert Rules</button>
+          <button type="button" id="tab-integrations" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap" onclick="showConfigTab('integrations')">Integrations</button>
+          <button type="button" id="tab-profile" class="tab-off px-4 py-3 font-medium text-sm whitespace-nowrap" onclick="showConfigTab('profile')">Profile</button>
         </div>
 
         <div id="panel-source" class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="space-y-4">
             <div class="flex items-center justify-between gap-3">
               <h3 class="text-sm font-semibold text-on-surface">Connection Settings</h3>
-              <button type="button" id="btn-scan-network"
-                class="bg-secondary-container hover:bg-surface-bright text-on-surface py-1.5 px-3 rounded-lg font-medium transition-colors text-xs border border-outline-variant disabled:opacity-60 flex items-center gap-1.5"
-                onclick="scanNetwork()">
+              <button type="button" id="btn-scan-network" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-1.5 px-3 rounded-lg font-medium transition-colors text-xs border border-outline-variant disabled:opacity-60 flex items-center gap-1.5" onclick="scanNetwork()">
                 <span class="material-symbols-outlined text-[16px]">wifi_find</span>
                 Scan Network
               </button>
             </div>
-            <div id="discovery-panel"
-              class="rounded-lg border border-outline-variant bg-surface-container p-3 space-y-2">
-              <p id="discovery-status" class="text-xs text-on-surface-variant">Scan the LAN for ONVIF, RTSP, and local
-                webcams.</p>
+            <div id="discovery-panel" class="rounded-lg border border-outline-variant bg-surface-container p-3 space-y-2">
+              <p id="discovery-status" class="text-xs text-on-surface-variant">Scan the LAN for ONVIF, RTSP, and local webcams.</p>
               <div id="discovery-results" class="space-y-1"></div>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="camera-name-input">Camera
-                location</label>
-              <input id="camera-name-input"
-                class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                type="text" value="" placeholder="e.g. Front Entrance" autocomplete="off" />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="camera-name-input">Camera location</label>
+              <input id="camera-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="" placeholder="e.g. Front Entrance" autocomplete="off"/>
             </div>
             <div class="grid grid-cols-2 gap-4">
               <div class="flex flex-col gap-1.5">
-                <label class="font-label-upper text-label-upper text-on-surface-variant"
-                  for="protocol-input">Protocol</label>
-                <select id="protocol-input"
-                  class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                  onchange="onProtocolChange()">
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="protocol-input">Protocol</label>
+                <select id="protocol-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" onchange="onProtocolChange()">
                   <option value="webcam">Webcam</option>
                   <option value="rtsp">RTSP</option>
                   <option value="phone">Phone HTTP</option>
@@ -1285,11 +933,8 @@
                 </select>
               </div>
               <div class="flex flex-col gap-1.5">
-                <label class="font-label-upper text-label-upper text-on-surface-variant" for="vendor-input">Vendor
-                  Template</label>
-                <select id="vendor-input"
-                  class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                  onchange="applyVendorTemplate()">
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="vendor-input">Vendor Template</label>
+                <select id="vendor-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" onchange="applyVendorTemplate()">
                   <option value="dahua">Dahua Main Stream</option>
                   <option value="hikvision">Hikvision Main Stream</option>
                   <option value="generic">Generic RTSP</option>
@@ -1298,82 +943,58 @@
               </div>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="source-input">Stream
-                URL</label>
-              <input id="source-input"
-                class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                type="text" value="0" placeholder="0, rtsp://…, or http://PHONE_IP:8080/video" />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="source-input">Stream URL</label>
+              <input id="source-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="0" placeholder="0, rtsp://…, or http://PHONE_IP:8080/video"/>
               <p id="source-hint" class="text-xs text-on-surface-variant leading-relaxed"></p>
             </div>
-            <div id="video-upload-wrap"
-              class="flex flex-col gap-2 p-3 rounded-lg border border-outline-variant bg-surface-container hidden">
+            <div id="video-upload-wrap" class="flex flex-col gap-2 p-3 rounded-lg border border-outline-variant bg-surface-container hidden">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-on-surface flex items-center gap-1.5">
                   <span class="material-symbols-outlined text-[16px] text-primary">upload_file</span>
                   Video File for ML / YOLO Garage Analysis
                 </span>
-                <button type="button" class="text-xs text-primary hover:underline flex items-center gap-1"
-                  onclick="refreshUploadedVideos()">
+                <button type="button" class="text-xs text-primary hover:underline flex items-center gap-1" onclick="refreshUploadedVideos()">
                   <span class="material-symbols-outlined text-[14px]">refresh</span> Refresh
                 </button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <input type="file" id="video-file-picker" class="hidden"
-                  accept="video/mp4,video/mkv,video/avi,video/mov,video/webm,video/*"
-                  onchange="handleVideoUpload(event)" />
-                <button type="button" id="btn-pick-video"
-                  class="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 text-xs py-1.5 px-3 rounded font-medium flex items-center gap-1.5 transition-colors"
-                  onclick="document.getElementById('video-file-picker').click()">
+                <input type="file" id="video-file-picker" class="hidden" accept="video/mp4,video/mkv,video/avi,video/mov,video/webm,video/*" onchange="handleVideoUpload(event)"/>
+                <button type="button" id="btn-pick-video" class="bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 text-xs py-1.5 px-3 rounded font-medium flex items-center gap-1.5 transition-colors" onclick="document.getElementById('video-file-picker').click()">
                   <span class="material-symbols-outlined text-[16px]">file_upload</span>
                   Upload Video File
                 </button>
-                <select id="uploaded-videos-select"
-                  class="flex-1 min-w-[200px] bg-surface-container-highest border-transparent text-on-surface text-xs rounded p-1.5 truncate"
-                  onchange="onUploadedVideoSelected()">
+                <select id="uploaded-videos-select" class="flex-1 min-w-[200px] bg-surface-container-highest border-transparent text-on-surface text-xs rounded p-1.5 truncate" onchange="onUploadedVideoSelected()">
                   <option value="">-- Or select previously uploaded video --</option>
                 </select>
               </div>
               <p id="video-upload-status" class="text-[11px] text-on-surface-variant hidden"></p>
             </div>
             <div id="main-source-wrap" class="flex flex-col gap-1.5 hidden">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="main-source-input">Main
-                stream (evidence)</label>
-              <input id="main-source-input"
-                class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                type="text" value="" placeholder="optional high-res rtsp://… for snapshots" autocomplete="off" />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="main-source-input">Main stream (evidence)</label>
+              <input id="main-source-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="" placeholder="optional high-res rtsp://… for snapshots" autocomplete="off"/>
             </div>
             <div class="grid grid-cols-2 gap-4">
               <div class="flex flex-col gap-1.5">
-                <label class="font-label-upper text-label-upper text-on-surface-variant"
-                  for="username-input">Username</label>
-                <input id="username-input"
-                  class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                  type="text" value="" placeholder="optional" autocomplete="off" />
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="username-input">Username</label>
+                <input id="username-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="" placeholder="optional" autocomplete="off"/>
               </div>
               <div class="flex flex-col gap-1.5">
-                <label class="font-label-upper text-label-upper text-on-surface-variant"
-                  for="password-input">Password</label>
-                <input id="password-input"
-                  class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                  type="password" value="" placeholder="optional" autocomplete="off" />
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="password-input">Password</label>
+                <input id="password-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="password" value="" placeholder="optional" autocomplete="off"/>
               </div>
             </div>
             <div id="trigger-mode-wrap" class="flex flex-col gap-1.5">
               <div class="flex items-center justify-between">
-                <label class="font-label-upper text-label-upper text-on-surface-variant"
-                  for="camera-trigger-mode-input">Background ML Auto-Switch</label>
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="camera-trigger-mode-input">Background ML Auto-Switch</label>
                 <span class="text-[10px] text-primary font-medium">Spotlight Trigger</span>
               </div>
-              <select id="camera-trigger-mode-input"
-                class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner">
+              <select id="camera-trigger-mode-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner">
                 <option value="roi_state_change">Bay ROI Activity Only (Default - State Changes)</option>
                 <option value="any_detection">Any Person or Vehicle in Frame</option>
               </select>
-              <p class="text-[11px] text-on-surface-variant leading-relaxed">Auto-switches to this camera when this
-                event condition occurs while in background.</p>
+              <p class="text-[11px] text-on-surface-variant leading-relaxed">Auto-switches to this camera when this event condition occurs while in background.</p>
             </div>
-            <div id="ml-enabled-wrap"
-              class="flex items-center justify-between p-3 rounded-lg bg-surface-container-highest border border-outline-variant/30">
+            <div id="ml-enabled-wrap" class="flex items-center justify-between p-3 rounded-lg bg-surface-container-highest border border-outline-variant/30">
               <div class="flex flex-col">
                 <span class="text-xs font-semibold text-on-surface">AI Person & Vehicle Detection</span>
                 <span class="text-[11px] text-on-surface-variant">Track bay presence, ROI occupancy & wrench time for this camera</span>
@@ -1384,14 +1005,10 @@
               </label>
             </div>
             <div class="flex flex-wrap gap-2 mt-2">
-              <button type="button" id="btn-save-camera"
-                class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-5 rounded-lg font-medium transition-colors text-sm border border-outline-variant disabled:opacity-60"
-                onclick="saveCameraOnly()">
+              <button type="button" id="btn-save-camera" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-5 rounded-lg font-medium transition-colors text-sm border border-outline-variant disabled:opacity-60" onclick="saveCameraOnly()">
                 Save Camera
               </button>
-              <button type="button" id="btn-connect"
-                class="bg-primary-container hover:bg-primary text-on-primary py-2 px-6 rounded-lg font-medium transition-colors text-sm disabled:opacity-60"
-                onclick="connectAndStreamCamera()">
+              <button type="button" id="btn-connect" class="bg-primary-container hover:bg-primary text-on-primary py-2 px-6 rounded-lg font-medium transition-colors text-sm disabled:opacity-60" onclick="connectAndStreamCamera()">
                 Connect Stream
               </button>
             </div>
@@ -1403,37 +1020,21 @@
               <h3 class="text-sm font-semibold text-on-surface mb-4">Stream Processing</h3>
               <div class="py-3 border-b border-outline-variant/50">
                 <p class="text-sm text-on-surface mb-1">Orientation</p>
-                <p class="text-xs text-on-surface-variant mb-3">Auto keeps the camera's native orientation and sizes the
-                  video box to the stream. Choose CW, CCW, or 180° if a phone is mounted on its side. Mirror flips the
-                  image; it does not switch portrait and landscape.</p>
+                <p class="text-xs text-on-surface-variant mb-3">Auto keeps the camera's native orientation and sizes the video box to the stream. Choose CW, CCW, or 180° if a phone is mounted on its side. Mirror flips the image; it does not switch portrait and landscape.</p>
                 <div class="flex flex-wrap gap-2">
-                  <button type="button" id="rot-auto"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="setRotate('auto')">Auto</button>
-                  <button type="button" id="rot-270"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="setRotate(270)">CCW</button>
-                  <button type="button" id="rot-0"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="setRotate(0)">0°</button>
-                  <button type="button" id="rot-90"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="setRotate(90)">CW</button>
-                  <button type="button" id="rot-180"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="setRotate(180)">180°</button>
+                  <button type="button" id="rot-auto" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="setRotate('auto')">Auto</button>
+                  <button type="button" id="rot-270" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="setRotate(270)">CCW</button>
+                  <button type="button" id="rot-0" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="setRotate(0)">0°</button>
+                  <button type="button" id="rot-90" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="setRotate(90)">CW</button>
+                  <button type="button" id="rot-180" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="setRotate(180)">180°</button>
                 </div>
                 <p class="text-xs text-on-surface-variant mt-3 mb-2">Mirror</p>
                 <div class="flex flex-wrap gap-2">
-                  <button type="button" id="flip-h"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="toggleFlip('h')">Left-right</button>
-                  <button type="button" id="flip-v"
-                    class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant"
-                    onclick="toggleFlip('v')">Up-down</button>
+                  <button type="button" id="flip-h" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="toggleFlip('h')">Left-right</button>
+                  <button type="button" id="flip-v" class="px-3 py-1.5 text-xs rounded border border-outline-variant bg-surface-container-highest text-on-surface-variant" onclick="toggleFlip('v')">Up-down</button>
                 </div>
-                <input type="hidden" id="rotate-input" value="auto" />
-                <input type="hidden" id="flip-input" value="none" />
+                <input type="hidden" id="rotate-input" value="auto"/>
+                <input type="hidden" id="flip-input" value="none"/>
               </div>
               <div class="flex items-center justify-between py-3">
                 <div>
@@ -1441,10 +1042,8 @@
                   <p class="text-xs text-on-surface-variant">Use GPU for stream rendering</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
-                  <input id="hw-decode" class="sr-only peer" type="checkbox" />
-                  <div
-                    class="w-9 h-5 bg-surface-container-highest rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
-                  </div>
+                  <input id="hw-decode" class="sr-only peer" type="checkbox"/>
+                  <div class="w-9 h-5 bg-surface-container-highest rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                 </label>
               </div>
             </div>
@@ -1455,25 +1054,18 @@
                   <span class="material-symbols-outlined text-[18px] text-primary">grid_on</span>
                   Service Bay Grid
                 </h3>
-                <span id="cam-bay-count-badge"
-                  class="px-2 py-0.5 rounded-full text-xs bg-surface-container-highest text-on-surface font-mono-data">0
-                  bays</span>
+                <span id="cam-bay-count-badge" class="px-2 py-0.5 rounded-full text-xs bg-surface-container-highest text-on-surface font-mono-data">0 bays</span>
               </div>
               <p class="text-xs text-on-surface-variant mb-3 leading-relaxed">
-                Each camera has its own independent bay grid. Drag directly on the camera viewport to draw or resize
-                bays, or import an existing grid layout from another camera.
+                Each camera has its own independent bay grid. Drag directly on the camera viewport to draw or resize bays, or import an existing grid layout from another camera.
               </p>
               <div class="pt-3 border-t border-outline-variant/50">
-                <label class="font-label-upper text-label-upper text-on-surface-variant block mb-1.5"
-                  for="import-grid-source-select">Import Grid from Camera</label>
+                <label class="font-label-upper text-label-upper text-on-surface-variant block mb-1.5" for="import-grid-source-select">Import Grid from Camera</label>
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <select id="import-grid-source-select"
-                    class="bg-surface-container-highest border-transparent text-on-surface text-xs rounded-lg p-2.5 flex-1 focus:ring-primary focus:border-primary">
+                  <select id="import-grid-source-select" class="bg-surface-container-highest border-transparent text-on-surface text-xs rounded-lg p-2.5 flex-1 focus:ring-primary focus:border-primary">
                     <option value="">Select camera to copy bays from...</option>
                   </select>
-                  <button type="button" id="btn-import-grid"
-                    class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-3 rounded-lg font-medium transition-colors text-xs border border-outline-variant flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
-                    onclick="importGridFromCamera()">
+                  <button type="button" id="btn-import-grid" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-3 rounded-lg font-medium transition-colors text-xs border border-outline-variant flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50" onclick="importGridFromCamera()">
                     <span class="material-symbols-outlined text-[15px]">download</span>
                     Import Grid
                   </button>
@@ -1486,37 +1078,23 @@
 
         <div id="panel-alerts" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="venue-input">Garage
-              Name</label>
-            <input id="venue-input"
-              class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-              type="text" value="Demo Garage" oninput="updateCrumbs()" onchange="saveHubSettings()"
-              onblur="saveHubSettings()" />
+            <label class="font-label-upper text-label-upper text-on-surface-variant" for="venue-input">Garage Name</label>
+            <input id="venue-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="Demo Garage" oninput="updateCrumbs()" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="open-time-input">Shop
-              Opens</label>
-            <input id="open-time-input"
-              class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-              type="time" value="08:00" onchange="saveHubSettings()" onblur="saveHubSettings()" />
+            <label class="font-label-upper text-label-upper text-on-surface-variant" for="open-time-input">Shop Opens</label>
+            <input id="open-time-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="time" value="08:00" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="close-time-input">Shop
-              Closes</label>
-            <input id="close-time-input"
-              class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-              type="time" value="18:00" onchange="saveHubSettings()" onblur="saveHubSettings()" />
+            <label class="font-label-upper text-label-upper text-on-surface-variant" for="close-time-input">Shop Closes</label>
+            <input id="close-time-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="time" value="18:00" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="md:col-span-2 flex flex-col gap-2">
             <div class="flex justify-between items-center">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="absent-slider">Idle-bay
-                alert threshold</label>
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="absent-slider">Idle-bay alert threshold</label>
               <span class="font-mono-data text-mono-data text-primary" id="absent-val-label">10s</span>
             </div>
-            <input id="absent-slider"
-              class="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" max="600"
-              min="5" step="5" type="range" value="10" oninput="updateAbsentLabel(this.value)"
-              onchange="saveHubSettings()" />
+            <input id="absent-slider" class="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" max="600" min="5" step="5" type="range" value="10" oninput="updateAbsentLabel(this.value)" onchange="saveHubSettings()"/>
             <div class="flex justify-between font-mono-data text-mono-data text-on-surface-variant">
               <span>0s</span>
               <span>600s</span>
@@ -1524,22 +1102,13 @@
           </div>
           <div class="md:col-span-2 space-y-3">
             <h3 class="text-sm font-semibold text-on-surface">Mechanic Wi-Fi phones</h3>
-            <p class="text-xs text-on-surface-variant">Register a phone MAC or static IP. Presence is confirmed when
-              Face ID and garage Wi-Fi both match.</p>
+            <p class="text-xs text-on-surface-variant">Register a phone MAC or static IP. Presence is confirmed when Face ID and garage Wi-Fi both match.</p>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input id="wifi-name-input"
-                class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg p-2.5"
-                type="text" placeholder="Mechanic name" />
-              <input id="wifi-mac-input"
-                class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5"
-                type="text" placeholder="aa:bb:cc:dd:ee:ff" />
-              <input id="wifi-ip-input"
-                class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5"
-                type="text" placeholder="192.168.1.42 (optional)" />
+              <input id="wifi-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg p-2.5" type="text" placeholder="Mechanic name"/>
+              <input id="wifi-mac-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5" type="text" placeholder="aa:bb:cc:dd:ee:ff"/>
+              <input id="wifi-ip-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5" type="text" placeholder="192.168.1.42 (optional)"/>
             </div>
-            <button type="button"
-              class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg text-sm border border-outline-variant"
-              onclick="registerWifiDevice()">Register phone</button>
+            <button type="button" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg text-sm border border-outline-variant" onclick="registerWifiDevice()">Register phone</button>
             <p id="wifi-feedback" class="hidden text-sm"></p>
             <div id="wifi-device-list" class="space-y-1"></div>
           </div>
@@ -1552,35 +1121,23 @@
                 <h3 class="text-sm font-semibold text-on-surface">Connect with /start</h3>
                 <p class="text-xs text-on-surface-variant mt-1">Tap Connect Telegram, then Start. This account keeps only the latest Telegram — connecting a different account replaces the previous one, and alerts go only there.</p>
               </div>
-              <span id="tg-link-badge"
-                class="text-xs px-2 py-1 rounded-full border border-outline-variant text-on-surface-variant">Not
-                linked</span>
+              <span id="tg-link-badge" class="text-xs px-2 py-1 rounded-full border border-outline-variant text-on-surface-variant">Not linked</span>
             </div>
             <p id="tg-link-detail" class="font-mono-data text-xs text-on-surface-variant">Chat ID —</p>
             <div class="flex flex-wrap gap-2">
-              <button type="button" id="btn-connect-tg"
-                class="bg-primary hover:brightness-110 text-on-primary py-2 px-4 rounded-lg font-medium text-sm disabled:opacity-60"
-                onclick="connectTelegramAccount()">
+              <button type="button" id="btn-connect-tg" class="bg-primary hover:brightness-110 text-on-primary py-2 px-4 rounded-lg font-medium text-sm disabled:opacity-60" onclick="connectTelegramAccount()">
                 Connect Telegram
               </button>
-              <a id="tg-deep-link"
-                class="hidden bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant inline-flex items-center"
-                href="#" rel="noopener noreferrer">Open bot in Telegram</a>
-              <button type="button" id="btn-test-tg"
-                class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-6 rounded-lg font-medium transition-colors border border-outline-variant text-sm disabled:opacity-60"
-                onclick="testTelegram()">
+              <a id="tg-deep-link" class="hidden bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant inline-flex items-center" href="#" rel="noopener noreferrer">Open bot in Telegram</a>
+              <button type="button" id="btn-test-tg" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-6 rounded-lg font-medium transition-colors border border-outline-variant text-sm disabled:opacity-60" onclick="testTelegram()">
                 Capture &amp; Send Test
               </button>
             </div>
             <details class="text-xs text-on-surface-variant">
               <summary class="cursor-pointer select-none">Advanced: paste chat ID manually</summary>
               <div class="mt-2 flex flex-col gap-1.5">
-                <label class="font-label-upper text-label-upper text-on-surface-variant" for="tg-chat-input">Chat
-                  ID</label>
-                <input id="tg-chat-input"
-                  class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                  type="text" placeholder="Filled automatically after /start" onchange="saveHubSettings()"
-                  onblur="saveHubSettings()" />
+                <label class="font-label-upper text-label-upper text-on-surface-variant" for="tg-chat-input">Chat ID</label>
+                <input id="tg-chat-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" placeholder="Filled automatically after /start" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
               </div>
             </details>
             <p id="tg-feedback" class="hidden text-sm"></p>
@@ -1590,67 +1147,45 @@
         <div id="panel-profile" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
           <div class="rounded-xl border border-outline-variant bg-surface-container p-5 space-y-4">
             <h3 class="text-sm font-semibold text-on-surface">Operator Profile Picture</h3>
-            <p class="text-xs text-on-surface-variant">Upload and crop your profile photo. It is cropped to a circle and
-              displayed throughout the dashboard.</p>
-
+            <p class="text-xs text-on-surface-variant">Upload and crop your profile photo. It is cropped to a circle and displayed throughout the dashboard.</p>
+            
             <div class="flex items-center gap-5 pt-2">
-              <div class="relative group cursor-pointer" onclick="openAvatarCropChooser()"
-                title="Click to upload profile picture">
-                <img id="profile-avatar-preview" src="/inb_surveillance.png" alt="Profile avatar"
-                  class="w-24 h-24 rounded-full object-cover border-2 border-primary shadow-[0_0_16px_rgba(0,255,102,0.4)] transition-transform group-hover:scale-105 bg-black"
-                  onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
-                <div
-                  class="absolute inset-0 rounded-full bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-primary">
+              <div class="relative group cursor-pointer" onclick="openAvatarCropChooser()" title="Click to upload profile picture">
+                <img id="profile-avatar-preview" src="/inb_surveillance.png" alt="Profile avatar" class="w-24 h-24 rounded-full object-cover border-2 border-primary shadow-[0_0_16px_rgba(0,255,102,0.4)] transition-transform group-hover:scale-105 bg-black" onerror="if (!this.dataset.fallback) { this.dataset.fallback='1'; this.src='/inb_surveillance-removebg-preview.png'; }" />
+                <div class="absolute inset-0 rounded-full bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-primary">
                   <span class="material-symbols-outlined text-2xl">photo_camera</span>
                   <span class="text-[10px] font-semibold">Change</span>
                 </div>
               </div>
               <div class="space-y-2">
-                <button type="button"
-                  class="bg-primary hover:brightness-110 text-on-primary py-2 px-4 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-colors"
-                  onclick="openAvatarCropChooser()">
+                <button type="button" class="bg-primary hover:brightness-110 text-on-primary py-2 px-4 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-colors" onclick="openAvatarCropChooser()">
                   <span class="material-symbols-outlined text-sm">upload</span> Choose Photo
                 </button>
-                <button type="button"
-                  class="bg-surface-container-highest hover:bg-surface-bright text-on-surface py-1.5 px-3 rounded-lg text-xs border border-outline-variant transition-colors"
-                  onclick="resetAvatarToDefault()">
+                <button type="button" class="bg-surface-container-highest hover:bg-surface-bright text-on-surface py-1.5 px-3 rounded-lg text-xs border border-outline-variant transition-colors" onclick="resetAvatarToDefault()">
                   Reset to Default
                 </button>
                 <p class="text-[11px] text-on-surface-variant">JPG, PNG, WebP. Circular crop tool included.</p>
               </div>
             </div>
-            <input type="file" id="profile-avatar-file" class="hidden"
-              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-              onchange="handleAvatarFileSelected(event)" />
+            <input type="file" id="profile-avatar-file" class="hidden" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onchange="handleAvatarFileSelected(event)" />
           </div>
 
           <div class="rounded-xl border border-outline-variant bg-surface-container p-5 space-y-4">
             <h3 class="text-sm font-semibold text-on-surface">Account Information</h3>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-name-input">Display
-                Name</label>
-              <input id="profile-name-input"
-                class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                type="text" placeholder="Operator Name" />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-name-input">Display Name</label>
+              <input id="profile-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" placeholder="Operator Name" />
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-venue-input">Venue /
-                Garage Name</label>
-              <input id="profile-venue-input"
-                class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-                type="text" placeholder="Shop or site name" />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-venue-input">Venue / Garage Name</label>
+              <input id="profile-venue-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" placeholder="Shop or site name" />
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-email-input">Account
-                Email</label>
-              <input id="profile-email-input"
-                class="bg-surface-container-highest/60 border-transparent text-on-surface-variant text-sm rounded-lg block w-full p-2.5 cursor-not-allowed"
-                type="email" readonly disabled />
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-email-input">Account Email</label>
+              <input id="profile-email-input" class="bg-surface-container-highest/60 border-transparent text-on-surface-variant text-sm rounded-lg block w-full p-2.5 cursor-not-allowed" type="email" readonly disabled />
             </div>
             <div class="pt-2 flex items-center justify-between">
-              <button type="button" id="btn-save-profile"
-                class="bg-primary hover:brightness-110 text-on-primary py-2 px-6 rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
-                onclick="saveProfileSettings()">
+              <button type="button" id="btn-save-profile" class="bg-primary hover:brightness-110 text-on-primary py-2 px-6 rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5" onclick="saveProfileSettings()">
                 <span class="material-symbols-outlined text-sm">save</span> Save Profile
               </button>
               <span id="profile-feedback" class="text-xs hidden"></span>
@@ -1664,23 +1199,20 @@
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 class="font-headline-md text-headline-md text-on-surface" id="identity-heading">Identity</h2>
-          <p class="text-body-sm text-on-surface-variant mt-1" id="identity-sub">Create a person, then add photos from
-            several angles so the live feed can name them.</p>
+          <p class="text-body-sm text-on-surface-variant mt-1" id="identity-sub">Create a person, then add photos from several angles so the live feed can name them.</p>
         </div>
         <div class="flex items-center gap-2" id="identity-actions"></div>
       </div>
       <p id="identity-feedback" class="hidden text-sm"></p>
       <div id="identity-content" class="flex-1 min-h-0"></div>
-      <input id="identity-file-input" class="hidden" type="file"
-        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple />
+      <input id="identity-file-input" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple/>
     </div>
 
     <div class="flex-1 min-h-0 p-edge-margin hidden" id="scorecard-workspace">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 class="font-headline-md text-headline-md text-on-surface">Mechanics &amp; Scorecards</h2>
-          <p class="text-body-sm text-on-surface-variant mt-1">Live attendance, wrench time, and garage Wi-Fi presence
-            for today.</p>
+          <p class="text-body-sm text-on-surface-variant mt-1">Live attendance, wrench time, and garage Wi-Fi presence for today.</p>
         </div>
         <div class="flex items-center gap-2 text-sm">
           <span id="scorecard-util" class="font-mono-data text-mono-data text-primary">Utilization —</span>
@@ -1719,47 +1251,10 @@
       </div>
     </div>
 
-    <div class="flex-1 min-h-0 p-edge-margin hidden overflow-y-auto" id="complaints-workspace">
-      <div class="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-outline-variant">
-        <div>
-          <div class="flex items-center gap-3">
-            <h2 class="font-headline-md text-headline-md text-on-surface">Customer Complaints &amp; Voice Audits</h2>
-            <span
-              class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-mono-data font-semibold">
-              <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-              MIC LIVE · SILERO VAD
-            </span>
-          </div>
-          <p class="text-body-sm text-on-surface-variant mt-1">Automatic Khmer voice capture, faster-whisper STT,
-            Netra-NMT translation &amp; Ollama complaint auditing with Telegram evidence.</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <button type="button"
-            class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-3 rounded-lg font-medium text-xs border border-outline-variant flex items-center gap-1.5 transition-colors"
-            onclick="openTestComplaintModal()">
-            <span class="material-symbols-outlined text-sm text-primary">science</span>
-            Simulate / Test Speech
-          </button>
-          <button type="button"
-            class="bg-primary-container hover:bg-primary text-on-primary py-2 px-3 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-colors"
-            onclick="renderComplaints()">
-            <span class="material-symbols-outlined text-sm">refresh</span>
-            Refresh
-          </button>
-        </div>
-      </div>
-      <div id="complaints-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 my-4"></div>
-      <div id="complaints-content" class="space-y-4 pb-8"></div>
-    </div>
-
     <footer class="flex justify-between items-center px-container-padding h-8 bg-surface-container-lowest border-t border-outline-variant shrink-0 z-10 w-full gap-4">
       <div id="telem-footer-stats" class="font-mono-data text-mono-data text-primary truncate">
-        FPS: <span id="telem-fps">—</span> | Ingest: <span id="telem-ingest-fps">—</span> | Infer: <span
-          id="telem-infer-ms">—</span> | Protocol: <span id="telem-protocol">—</span> | Main: <span
-          id="telem-main-stream">—</span> | Detections: <span id="telem-people">—</span> | Identified: <span
-          id="telem-identities">—</span> | Stream Health: <span id="telem-health">Standby</span>
-        <span class="text-on-surface-variant"> | Floor <span id="telem-status">STANDBY</span> · Bays <span
-            id="telem-elapsed">—</span></span>
+        FPS: <span id="telem-fps">—</span> | Ingest: <span id="telem-ingest-fps">—</span> | Infer: <span id="telem-infer-ms">—</span> | Protocol: <span id="telem-protocol">—</span> | Main: <span id="telem-main-stream">—</span> | Detections: <span id="telem-people">—</span> | Identified: <span id="telem-identities">—</span> | Stream Health: <span id="telem-health">Standby</span>
+        <span class="text-on-surface-variant"> | Floor <span id="telem-status">STANDBY</span> · Bays <span id="telem-elapsed">—</span></span>
       </div>
       <div class="flex gap-4 font-mono-data text-mono-data text-on-surface-variant shrink-0">
         <span>Privacy Policy</span>
@@ -1768,192 +1263,76 @@
     </footer>
   </main>
 
-  <div id="discover-cred-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-    onclick="if (event.target === this) cancelDiscoverConnect()">
-    <div
-      class="bg-surface-container-low border border-outline-variant rounded-xl w-full max-w-md p-5 space-y-4 shadow-2xl">
+  <div id="discover-cred-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onclick="if (event.target === this) cancelDiscoverConnect()">
+    <div class="bg-surface-container-low border border-outline-variant rounded-xl w-full max-w-md p-5 space-y-4 shadow-2xl">
       <h3 class="text-sm font-semibold text-on-surface" id="discover-cred-title">Connect camera</h3>
       <p class="text-xs text-on-surface-variant" id="discover-cred-meta"></p>
       <div class="flex flex-col gap-1.5">
         <label class="font-label-upper text-label-upper text-on-surface-variant" for="discover-user">Username</label>
-        <input id="discover-user"
-          class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-          type="text" value="" placeholder="camera login" autocomplete="off" />
+        <input id="discover-user" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="" placeholder="camera login" autocomplete="off"/>
       </div>
       <div class="flex flex-col gap-1.5">
         <label class="font-label-upper text-label-upper text-on-surface-variant" for="discover-pass">Password</label>
-        <input id="discover-pass"
-          class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner"
-          type="password" value="" placeholder="camera password" autocomplete="off" />
+        <input id="discover-pass" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="password" value="" placeholder="camera password" autocomplete="off"/>
       </div>
       <p id="discover-cred-error" class="hidden text-sm text-error"></p>
       <div class="flex justify-end gap-2">
-        <button type="button"
-          class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant"
-          onclick="cancelDiscoverConnect()">Cancel</button>
-        <button type="button" id="btn-discover-connect"
-          class="bg-primary-container hover:bg-primary text-on-primary py-2 px-5 rounded-lg font-medium text-sm"
-          onclick="submitDiscoverConnect()">Connect</button>
+        <button type="button" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant" onclick="cancelDiscoverConnect()">Cancel</button>
+        <button type="button" id="btn-discover-connect" class="bg-primary-container hover:bg-primary text-on-primary py-2 px-5 rounded-lg font-medium text-sm" onclick="submitDiscoverConnect()">Connect</button>
       </div>
     </div>
   </div>
 
-  <div id="avatar-crop-modal"
-    class="hidden fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-    onclick="if (event.target === this) closeAvatarCropModal()">
-    <div
-      class="bg-surface-container border border-outline-variant rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+  <div id="avatar-crop-modal" class="hidden fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onclick="if (event.target === this) closeAvatarCropModal()">
+    <div class="bg-surface-container border border-outline-variant rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary text-xl">crop</span>
           <h3 class="font-headline-sm text-base font-semibold text-on-surface">Crop Profile Picture</h3>
         </div>
-        <button type="button" class="text-on-surface-variant hover:text-on-surface p-1"
-          onclick="closeAvatarCropModal()">
+        <button type="button" class="text-on-surface-variant hover:text-on-surface p-1" onclick="closeAvatarCropModal()">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <p class="text-xs text-on-surface-variant">Drag to position your photo. Everything inside the green circle will be
-        displayed as your profile picture.</p>
-
-      <div
-        class="relative w-[280px] h-[280px] mx-auto rounded-xl overflow-hidden bg-black flex items-center justify-center border border-outline-variant select-none">
+      <p class="text-xs text-on-surface-variant">Drag to position your photo. Everything inside the green circle will be displayed as your profile picture.</p>
+      
+      <div class="relative w-[280px] h-[280px] mx-auto rounded-xl overflow-hidden bg-black flex items-center justify-center border border-outline-variant select-none">
         <canvas id="crop-canvas" width="280" height="280" class="cursor-grab active:cursor-grabbing block"></canvas>
-        <div class="absolute inset-0 pointer-events-none"
-          style="box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65); border-radius: 50%; width: 220px; height: 220px; margin: auto; border: 2px solid #00FF66;">
-        </div>
+        <div class="absolute inset-0 pointer-events-none" style="box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65); border-radius: 50%; width: 220px; height: 220px; margin: auto; border: 2px solid #00FF66;"></div>
       </div>
 
       <div class="flex items-center gap-3 px-2 pt-1">
         <span class="material-symbols-outlined text-on-surface-variant text-sm">zoom_out</span>
-        <input type="range" id="crop-zoom-slider" min="1" max="3" step="0.02" value="1"
-          class="flex-1 h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer"
-          oninput="onCropZoomChange(this.value)" />
+        <input type="range" id="crop-zoom-slider" min="1" max="3" step="0.02" value="1" class="flex-1 h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" oninput="onCropZoomChange(this.value)" />
         <span class="material-symbols-outlined text-on-surface-variant text-sm">zoom_in</span>
       </div>
 
       <div class="flex items-center justify-end gap-3 pt-3 border-t border-outline-variant">
-        <button type="button"
-          class="bg-surface-container-highest hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg text-sm border border-outline-variant"
-          onclick="closeAvatarCropModal()">
+        <button type="button" class="bg-surface-container-highest hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg text-sm border border-outline-variant" onclick="closeAvatarCropModal()">
           Cancel
         </button>
-        <button type="button" id="btn-apply-crop"
-          class="bg-primary hover:brightness-110 text-on-primary py-2 px-5 rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
-          onclick="applyAvatarCrop()">
+        <button type="button" id="btn-apply-crop" class="bg-primary hover:brightness-110 text-on-primary py-2 px-5 rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5" onclick="applyAvatarCrop()">
           <span class="material-symbols-outlined text-sm">check</span> Apply &amp; Save
         </button>
       </div>
     </div>
   </div>
 
-  <div id="test-complaint-modal"
-    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-    onclick="if (event.target === this) closeTestComplaintModal()">
-    <div
-      class="bg-surface-container-low border border-outline-variant rounded-xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary">record_voice_over</span>
-          <h3 class="text-base font-semibold text-on-surface">Simulate / Test Customer Speech</h3>
-        </div>
-        <button type="button" class="text-on-surface-variant hover:text-on-surface p-1"
-          onclick="closeTestComplaintModal()">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-      <p class="text-xs text-on-surface-variant">Test the full AI pipeline: Khmer Speech &rarr; Netra-NMT English
-        Translation &rarr; Ollama Classification &rarr; Camera Frame Capture &rarr; Telegram Alert.</p>
-
-      <div class="space-y-1.5">
-        <label class="font-label-upper text-label-upper text-on-surface-variant">Select Preset Sentence or Type
-          Khmer</label>
-        <select id="test-complaint-preset"
-          class="bg-surface-container-highest border border-outline-variant text-on-surface text-sm rounded-lg block w-full p-2.5"
-          onchange="applyPresetComplaint(this.value)">
-          <option value="custom">-- Custom Input --</option>
-          <option value="ខ្ញុំមិនពេញចិត្តនឹងការជួសជុលឡាននេះទេ សំឡេងហ្វ្រាំងនៅតែលាន់ដដែល">Complaint: Brake repair still
-            noisy (Repair Quality)</option>
-          <option value="ថ្លៃពេកហើយបង ហើយធ្វើការយឺតណាស់ រង់ចាំ២ម៉ោងហើយ">Complaint: Too expensive and slow (Pricing &amp;
-            Wait Time)</option>
-          <option value="បុគ្គលិកនិយាយស្តីមិនសមរម្យដាក់អតិថិជនសោះ">Complaint: Rude staff attitude (Staff Behavior)
-          </option>
-          <option value="ជួយប្តូរប្រេងម៉ាស៊ីនមួយមកបង">Normal dialogue: Oil change request (Not a complaint)</option>
-          <option value="អរគុណច្រើនបង ឡានជួសជុលបានល្អណាស់">Positive dialogue: Thank you, good repair (Not a complaint)
-          </option>
-        </select>
-      </div>
-
-      <div class="space-y-1.5">
-        <label class="font-label-upper text-label-upper text-on-surface-variant" for="test-complaint-text">Khmer
-          Statement</label>
-        <textarea id="test-complaint-text" rows="3"
-          class="bg-surface-container-highest border border-outline-variant text-on-surface text-sm rounded-lg block w-full p-2.5 focus:ring-primary focus:border-primary"
-          placeholder="វាយអក្សរខ្មែរនៅទីនេះ..."></textarea>
-      </div>
-
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="font-label-upper text-label-upper text-on-surface-variant"
-            for="test-complaint-customer">Customer Name</label>
-          <input id="test-complaint-customer" type="text" value="Customer"
-            class="bg-surface-container-highest border border-outline-variant text-on-surface text-sm rounded-lg block w-full p-2" />
-        </div>
-        <div>
-          <label class="font-label-upper text-label-upper text-on-surface-variant" for="test-complaint-camera">Camera
-            Source</label>
-          <input id="test-complaint-camera" type="text" value="cam-1"
-            class="bg-surface-container-highest border border-outline-variant text-on-surface text-sm rounded-lg block w-full p-2" />
-        </div>
-      </div>
-
-      <div id="test-complaint-feedback" class="hidden text-xs"></div>
-
-      <div class="flex justify-end gap-2 pt-2">
-        <button type="button"
-          class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant"
-          onclick="closeTestComplaintModal()">Cancel</button>
-        <button type="button" id="btn-submit-test-complaint"
-          class="bg-primary-container hover:bg-primary text-on-primary py-2 px-5 rounded-lg font-medium text-sm flex items-center gap-1.5"
-          onclick="submitTestComplaint()">
-          <span class="material-symbols-outlined text-sm">play_arrow</span> Run Test
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div id="image-zoom-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/90 p-4"
-    onclick="closeImageZoomModal()">
-    <div class="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
-      <img id="image-zoom-img" src="" alt="Zoomed screenshot"
-        class="max-w-full max-h-[85vh] rounded-lg border border-outline-variant object-contain shadow-2xl" />
-      <p id="image-zoom-caption" class="text-xs text-on-surface mt-2 text-center"></p>
-    </div>
-  </div>
-
-  <div id="bay-context-menu"
-    class="hidden fixed z-50 bg-surface-container-high border border-outline-variant rounded-lg shadow-xl py-1 text-sm text-on-surface">
-
-    <button type="button" id="ctx-rename-bay"
-      class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
+  <div id="bay-context-menu" class="hidden fixed z-50 bg-surface-container-high border border-outline-variant rounded-lg shadow-xl py-1 text-sm text-on-surface">
+    <button type="button" id="ctx-rename-bay" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
       <span>✏️</span> Rename Bay
     </button>
-    <button type="button" id="ctx-type-bay"
-      class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
+    <button type="button" id="ctx-type-bay" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
       <span>🏷️</span> Toggle Vehicle Bay / Tool Station
     </button>
-    <button type="button" id="ctx-align-rect"
-      class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
+    <button type="button" id="ctx-align-rect" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
       <span>📐</span> Reset to Rectangle (Square Angles)
     </button>
-    <button type="button" id="ctx-import-grid"
-      class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2"
-      onclick="promptImportGrid()">
+    <button type="button" id="ctx-import-grid" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2" onclick="promptImportGrid()">
       <span>📥</span> Import Grid from Camera…
     </button>
     <div class="my-1 border-t border-outline-variant"></div>
-    <button type="button" id="ctx-delete-bay"
-      class="w-full px-4 py-1.5 text-left text-error hover:bg-error/10 flex items-center gap-2">
+    <button type="button" id="ctx-delete-bay" class="w-full px-4 py-1.5 text-left text-error hover:bg-error/10 flex items-center gap-2">
       <span>🗑️</span> Delete Bay
     </button>
   </div>
@@ -2167,7 +1546,7 @@
         try {
           const checkAv = await fetch('/api/profile/avatar', { method: 'HEAD', cache: 'no-cache' });
           if (checkAv.ok) avatar = '/api/profile/avatar?t=' + Date.now();
-        } catch (_) { }
+        } catch (_) {}
       }
       const greeting = document.getElementById('greeting');
       const venueEl = document.getElementById('profile-venue');
@@ -2192,7 +1571,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ telegram_chat_id: profile.telegram_chat_id }),
           });
-        } catch (_) { }
+        } catch (_) {}
       }
       paintTelegramLinkStatus({
         telegram_chat_id: (profile && profile.telegram_chat_id) || '',
@@ -2213,11 +1592,11 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ session }),
             });
-          } catch (_) { }
+          } catch (_) {}
         } else {
           try {
             await fetch('/api/auth-session', { method: 'DELETE' });
-          } catch (_) { }
+          } catch (_) {}
         }
 
         document.body.classList.remove('auth-locked');
@@ -2292,20 +1671,6 @@
           if (error) throw error;
           if (!data.session) {
             setHubAuthMode('confirm', 'Account created. Enter the 6-digit code we just emailed.');
-          } else {
-            await enterHub(data.session);
-          }
-          return false;
-        }
-
-        if (mode === 'signin') {
-          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (error) throw error;
-          if (data && data.session) {
-            await enterHub(data.session);
-          }
-          return false;
-        }
           }
           return false;
         }
@@ -2380,18 +1745,18 @@
     async function signOutAccount() {
       try {
         await fetch('/api/disconnect', { method: 'POST' });
-      } catch (_) { }
+      } catch (_) {}
       try {
         await fetch('/api/auth-session', { method: 'DELETE' });
-      } catch (_) { }
+      } catch (_) {}
       try {
         localStorage.removeItem('hub_remembered_email');
         localStorage.removeItem('hub_remember_me');
-      } catch (_) { }
+      } catch (_) {}
       if (supabaseClient) {
         try {
           await supabaseClient.auth.signOut();
-        } catch (_) { }
+        } catch (_) {}
       }
       window.location.reload();
     }
@@ -2413,7 +1778,7 @@
         try {
           const res = await fetch('/api/public-config', { cache: 'no-store' });
           if (res.ok) cfg = await res.json();
-        } catch (_) { }
+        } catch (_) {}
 
         const supabaseUrl = (cfg && cfg.supabaseUrl ? cfg.supabaseUrl : DEFAULT_SUPABASE_URL).trim();
         const supabaseAnonKey = (cfg && cfg.supabaseAnonKey ? cfg.supabaseAnonKey : DEFAULT_SUPABASE_ANON_KEY).trim();
@@ -2430,7 +1795,7 @@
                 return;
               }
             }
-          } catch (_) { }
+          } catch (_) {}
           return;
         }
         if (!supabaseUrl || !supabaseAnonKey) {
@@ -2770,7 +2135,7 @@
       try {
         try {
           await fetch('/api/profile/avatar', { method: 'DELETE' });
-        } catch (_) { }
+        } catch (_) {}
 
         if (supabaseClient && hubAccountUser) {
           const { data } = await supabaseClient
@@ -2794,12 +2159,12 @@
       const avatarPreview = document.getElementById('profile-avatar-preview');
 
       const name = (hubAccountProfile && hubAccountProfile.display_name) ||
-        (hubAccountUser && hubAccountUser.user_metadata && hubAccountUser.user_metadata.display_name) ||
-        (hubAccountUser && hubAccountUser.email ? hubAccountUser.email.split('@')[0] : '') ||
-        document.getElementById('greeting')?.textContent || '';
+                   (hubAccountUser && hubAccountUser.user_metadata && hubAccountUser.user_metadata.display_name) ||
+                   (hubAccountUser && hubAccountUser.email ? hubAccountUser.email.split('@')[0] : '') ||
+                   document.getElementById('greeting')?.textContent || '';
       const venue = (hubAccountProfile && hubAccountProfile.venue_name) ||
-        (hubAccountUser && hubAccountUser.user_metadata && hubAccountUser.user_metadata.venue_name) ||
-        document.getElementById('profile-venue')?.textContent || '';
+                    (hubAccountUser && hubAccountUser.user_metadata && hubAccountUser.user_metadata.venue_name) ||
+                    document.getElementById('profile-venue')?.textContent || '';
       const email = (hubAccountUser && hubAccountUser.email) || '';
 
       if (nameInput) nameInput.value = name;
@@ -2832,7 +2197,7 @@
               venue_name: venueName,
             }),
           });
-        } catch (_) { }
+        } catch (_) {}
 
         try {
           await fetch('/api/settings', {
@@ -2843,7 +2208,7 @@
               garage_name: venueName,
             }),
           });
-        } catch (_) { }
+        } catch (_) {}
 
         if (supabaseClient && hubAccountUser) {
           const { data, error } = await supabaseClient
@@ -2909,12 +2274,12 @@
         if (icon && key === 'live') {
           icon.style.fontVariationSettings = on ? "'FILL' 1" : "'FILL' 0";
         }
-      const overlay = name === 'identity' || name === 'scorecards' || name === 'pipeline' || name === 'complaints';
+      });
+      const overlay = name === 'identity' || name === 'scorecards' || name === 'pipeline';
       document.getElementById('workspace').classList.toggle('hidden', overlay);
       document.getElementById('identity-workspace').classList.toggle('hidden', name !== 'identity');
       document.getElementById('scorecard-workspace').classList.toggle('hidden', name !== 'scorecards');
       document.getElementById('pipeline-workspace').classList.toggle('hidden', name !== 'pipeline');
-      document.getElementById('complaints-workspace').classList.toggle('hidden', name !== 'complaints');
       const telemStats = document.getElementById('telem-footer-stats');
       if (telemStats) {
         telemStats.style.visibility = overlay ? 'hidden' : 'visible';
@@ -2924,7 +2289,6 @@
         else showIdentityList();
       }
       if (name === 'scorecards') renderScorecard();
-      if (name === 'complaints') renderComplaints();
       if (name === 'pipeline' && window.PipelineGraph) {
         PipelineGraph.open((currentConfig && currentConfig.workplace_type) || 'garage', cameras);
       } else if (window.PipelineGraph) {
@@ -2936,7 +2300,6 @@
       if (name === 'settings') showConfigTab('alerts');
       if (!overlay) requestAnimationFrame(layoutVideoStage);
     }
-
 
     function identityFeedback(ok, message) {
       const el = document.getElementById('identity-feedback');
@@ -3056,7 +2419,7 @@
         name,
         'Photos of ' + name + ' from every angle. Anyone not enrolled here is labeled Employee.',
         '<button type="button" class="border border-outline-variant text-on-surface py-2 px-4 rounded-lg text-sm" onclick="showIdentityList()">All identities</button>'
-        + '<button type="button" class="bg-primary-container hover:bg-primary text-on-primary py-2 px-4 rounded-lg font-medium text-sm flex items-center gap-1" onclick="document.getElementById(\'identity-file-input\').click()"><span class="material-symbols-outlined text-sm">upload</span> Upload photos</button>'
+          + '<button type="button" class="bg-primary-container hover:bg-primary text-on-primary py-2 px-4 rounded-lg font-medium text-sm flex items-center gap-1" onclick="document.getElementById(\'identity-file-input\').click()"><span class="material-symbols-outlined text-sm">upload</span> Upload photos</button>'
       );
       const root = document.getElementById('identity-content');
       root.innerHTML = '<p class="text-on-surface-variant text-sm">Loading photos…</p>';
@@ -3513,7 +2876,7 @@
           pc.addEventListener('track', function (ev) {
             if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
             else video.srcObject = new MediaStream([ev.track]);
-            video.play().catch(function () { });
+            video.play().catch(function () {});
             onVideoReady();
           });
           const offer = await pc.createOffer();
@@ -3811,6 +3174,7 @@
           }
           const select = document.getElementById('uploaded-videos-select');
           if (select) select.value = data.path;
+          await connectAndStreamCamera();
         } else {
           throw new Error(data.error || 'Upload failed.');
         }
@@ -4259,7 +3623,7 @@
       const grid = document.getElementById('multi-cam-grid');
       if (!grid) return;
       const count = cameras.length;
-
+      
       let cols = 1, rows = 1;
       if (gridDimensionPreference === '2x2') {
         cols = 2; rows = 2;
@@ -5687,7 +5051,7 @@
         if (AudioContextClass) audioCtx = new AudioContextClass();
       }
       if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume().catch(() => { });
+        audioCtx.resume().catch(() => {});
       }
       return audioCtx;
     }
@@ -5721,7 +5085,7 @@
         const ctx = getAudioContext();
         if (!ctx) return;
         const now = ctx.currentTime;
-
+        
         // Pleasant rising double-beep chime for vehicle work start
         const osc1 = ctx.createOscillator();
         const gain1 = ctx.createGain();
@@ -6185,11 +5549,11 @@
         let fullLabel = '';
         if (live.badge) {
           const icon = state === 'WORKING' ? '🟢 ' :
-            state === 'UNDER_VEHICLE' ? '🔵 ' :
-              state === 'NOT_WORKING' ? '🔴 ' :
-                state === 'ON_BREAK' ? '☕ ' :
-                  state === 'PARKED_WAITING' ? '⏳ ' :
-                    state === 'IDLE' ? '🟡 ' : '';
+                       state === 'UNDER_VEHICLE' ? '🔵 ' :
+                       state === 'NOT_WORKING' ? '🔴 ' :
+                       state === 'ON_BREAK' ? '☕ ' :
+                       state === 'PARKED_WAITING' ? '⏳ ' :
+                       state === 'IDLE' ? '🟡 ' : '';
           fullLabel = bay.name + ' · ' + icon + live.badge;
         } else {
           fullLabel = bay.name + ' · ' + stateBadge(bay);
@@ -6728,7 +6092,7 @@
         const chatInput = document.getElementById('tg-chat-input');
         if (chatInput) chatInput.value = data.telegram_chat_id;
       }
-      if (data.just_linked) {
+        if (data.just_linked) {
         stopTelegramLinkPoll();
         await persistTelegramLinkToAccount(data.just_linked);
         const feedback = document.getElementById('tg-feedback');
@@ -6786,7 +6150,7 @@
           });
           const resData = await res.json();
           openedOnHost = !!(resData && resData.opened_on_host);
-        } catch (_) { }
+        } catch (_) {}
         // If not opened on host (remote client), safely open the HTTPS web link in a new tab
         if (!openedOnHost && webHref) {
           window.open(webHref, '_blank', 'noopener,noreferrer');
@@ -6990,221 +6354,7 @@
       }
     }
 
-    async function renderComplaints() {
-      const root = document.getElementById('complaints-content');
-      const statsRoot = document.getElementById('complaints-stats');
-      if (!root) return;
-      try {
-        const res = await fetch('/api/complaints?limit=50', { cache: 'no-store' });
-        const data = await res.json();
-        const complaints = data.complaints || [];
-
-        // Calculate stats
-        const total = complaints.length;
-        const criticalOrHigh = complaints.filter((c) => (c.severity || '').toLowerCase() === 'high' || (c.severity || '').toLowerCase() === 'critical').length;
-        const telegramDelivered = complaints.filter((c) => c.telegram_sent).length;
-
-        if (statsRoot) {
-          statsRoot.innerHTML = ''
-            + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3">'
-            + '<p class="text-xs text-on-surface-variant">Total Complaints</p>'
-            + '<p class="font-mono-data text-base font-bold text-on-surface mt-1">' + total + '</p></div>'
-            + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3">'
-            + '<p class="text-xs text-on-surface-variant">Critical / High Severity</p>'
-            + '<p class="font-mono-data text-base font-bold ' + (criticalOrHigh > 0 ? 'text-rose-400' : 'text-on-surface') + ' mt-1">' + criticalOrHigh + '</p></div>'
-            + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3">'
-            + '<p class="text-xs text-on-surface-variant">Telegram Evidence Delivered</p>'
-            + '<p class="font-mono-data text-base font-bold text-primary mt-1">' + telegramDelivered + ' / ' + total + '</p></div>'
-            + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3">'
-            + '<p class="text-xs text-on-surface-variant">Audio Source &amp; AI Stack</p>'
-            + '<p class="font-mono-data text-xs text-on-surface mt-1">Laptop Mic · Silero VAD · Faster-Whisper · Ollama</p></div>';
-        }
-
-        if (!complaints.length) {
-          root.innerHTML = '<div class="rounded-xl border border-dashed border-outline-variant p-10 text-center text-on-surface-variant space-y-2">'
-            + '<span class="material-symbols-outlined text-3xl text-outline">hearing</span>'
-            + '<p class="text-sm font-medium text-on-surface">No Customer Complaints Recorded</p>'
-            + '<p class="text-xs max-w-md mx-auto">The system is actively listening via laptop microphone. When speech is detected, it transcribes Khmer, translates to English, and evaluates complaints with local Ollama.</p>'
-            + '<button type="button" class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30 transition-colors" onclick="openTestComplaintModal()">'
-            + '<span class="material-symbols-outlined text-sm">play_arrow</span> Run Test Speech'
-            + '</button>'
-            + '</div>';
-          return;
-        }
-
-        let html = '';
-        complaints.forEach((c) => {
-          const sev = (c.severity || 'medium').toLowerCase();
-          const isHigh = sev === 'high' || sev === 'critical';
-          const sevBadgeClass = isHigh ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : (sev === 'medium' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30');
-          const sevDot = isHigh ? 'bg-rose-400' : (sev === 'medium' ? 'bg-amber-400' : 'bg-blue-400');
-          const timeFormatted = (c.timestamp || '').replace('T', ' ').slice(0, 19);
-          const catLabel = (c.category || 'General').replace(/_/g, ' ').toUpperCase();
-
-          html += '<div class="rounded-xl border border-outline-variant bg-surface-container p-4 space-y-3 shadow-lg hover:border-outline transition-colors">'
-            + '<div class="flex items-start justify-between gap-3 flex-wrap">'
-            + '<div class="flex items-center gap-2.5 flex-wrap">'
-            + '<span class="font-mono-data text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">' + identityEsc(c.complaint_id) + '</span>'
-            + '<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ' + sevBadgeClass + '">'
-            + '<span class="w-1.5 h-1.5 rounded-full ' + sevDot + '"></span>' + identityEsc(sev.toUpperCase())
-            + '</span>'
-            + '<span class="text-xs px-2 py-0.5 rounded bg-surface-container-highest text-on-surface-variant font-medium">' + identityEsc(catLabel) + '</span>'
-            + '<span class="text-xs text-on-surface-variant font-mono-data">· ' + identityEsc(timeFormatted) + '</span>'
-            + '</div>'
-            + '<div class="flex items-center gap-2">'
-            + (c.telegram_sent
-              ? '<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"><span class="material-symbols-outlined text-xs">send</span> Telegram Sent</span>'
-              : '<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant"><span class="material-symbols-outlined text-xs">schedule</span> Saved Local</span>')
-            + '</div>'
-            + '</div>'
-
-            + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">'
-            + '<div class="rounded-lg bg-surface-container-low p-3 space-y-1 border border-outline-variant/40">'
-            + '<p class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5"><span>🇰🇭</span> Khmer Transcript</p>'
-            + '<p class="text-xs text-on-surface font-medium leading-relaxed">' + identityEsc(c.khmer_transcript || '—') + '</p>'
-            + '</div>'
-            + '<div class="rounded-lg bg-surface-container-low p-3 space-y-1 border border-outline-variant/40">'
-            + '<p class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5"><span>🇬🇧</span> English Translation</p>'
-            + '<p class="text-xs text-on-surface font-medium leading-relaxed">' + identityEsc(c.english_transcript || '—') + '</p>'
-            + '</div>'
-            + '</div>'
-
-            + '<div class="rounded-lg bg-surface-dim p-3 border border-outline-variant/60 flex items-start gap-2.5">'
-            + '<span class="material-symbols-outlined text-primary text-base shrink-0 mt-0.5">smart_toy</span>'
-            + '<div class="min-w-0 flex-1">'
-            + '<p class="text-[11px] font-semibold text-primary uppercase">AI Root Cause &amp; Summary</p>'
-            + '<p class="text-xs text-on-surface mt-0.5">' + identityEsc(c.summary || '—') + '</p>'
-            + '</div>'
-            + '</div>'
-
-            + '<div class="flex items-center justify-between gap-3 pt-1 flex-wrap border-t border-outline-variant/30">'
-            + '<div class="flex items-center gap-3 flex-wrap">'
-            + (c.audio_url
-              ? '<div class="flex items-center gap-2">'
-              + '<span class="material-symbols-outlined text-primary text-sm">mic</span>'
-              + '<audio controls class="h-7 w-48 sm:w-64 accent-primary" src="' + c.audio_url + '"></audio>'
-              + '<a href="' + c.audio_url + '" download class="text-xs text-on-surface-variant hover:text-primary" title="Download Audio WAV"><span class="material-symbols-outlined text-sm">download</span></a>'
-              + '</div>'
-              : '<span class="text-xs text-on-surface-variant">No audio recording attached</span>')
-            + '</div>'
-            + '<div class="flex items-center gap-3">'
-            + (c.screenshot_url
-              ? '<div class="flex items-center gap-2 cursor-pointer group" onclick="openImageZoomModal(\'' + c.screenshot_url + '\', \'' + identityEsc(c.complaint_id) + '\')">'
-              + '<img src="' + c.screenshot_url + '" class="w-16 h-10 object-cover rounded border border-outline-variant group-hover:border-primary transition-colors" alt="snapshot" />'
-              + '<span class="text-xs text-on-surface-variant group-hover:text-primary flex items-center gap-0.5"><span class="material-symbols-outlined text-xs">photo_camera</span> Frame View</span>'
-              + '</div>'
-              : '<span class="text-xs text-on-surface-variant">No camera frame</span>')
-            + '</div>'
-            + '</div>'
-            + '</div>';
-        });
-
-        root.innerHTML = html;
-      } catch (err) {
-        root.innerHTML = '<p class="text-error text-sm">' + identityEsc(err.message) + '</p>';
-      }
-    }
-
-    function openTestComplaintModal() {
-      const modal = document.getElementById('test-complaint-modal');
-      if (modal) modal.classList.remove('hidden');
-      const preset = document.getElementById('test-complaint-preset');
-      if (preset && preset.value && preset.value !== 'custom') {
-        applyPresetComplaint(preset.value);
-      }
-    }
-
-    function closeTestComplaintModal() {
-      const modal = document.getElementById('test-complaint-modal');
-      if (modal) modal.classList.add('hidden');
-      const fb = document.getElementById('test-complaint-feedback');
-      if (fb) fb.className = 'hidden text-xs';
-    }
-
-    function applyPresetComplaint(val) {
-      const txt = document.getElementById('test-complaint-text');
-      if (txt && val !== 'custom') {
-        txt.value = val;
-      }
-    }
-
-    async function submitTestComplaint() {
-      const txt = document.getElementById('test-complaint-text');
-      const cust = document.getElementById('test-complaint-customer');
-      const cam = document.getElementById('test-complaint-camera');
-      const fb = document.getElementById('test-complaint-feedback');
-      const btn = document.getElementById('btn-submit-test-complaint');
-
-      const khmerText = (txt ? txt.value : '').trim();
-      if (!khmerText) {
-        if (fb) {
-          fb.className = 'text-xs text-rose-400 block';
-          fb.textContent = 'Please enter a Khmer statement to test.';
-        }
-        return;
-      }
-
-      if (btn) btn.disabled = true;
-      if (fb) {
-        fb.className = 'text-xs text-primary animate-pulse block';
-        fb.textContent = 'Running STT translation, Ollama evaluation & Telegram dispatch...';
-      }
-
-      try {
-        const res = await fetch('/api/complaints/test-trigger', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            khmer_text: khmerText,
-            customer_id: cust ? cust.value : 'Customer',
-            camera_id: cam ? cam.value : 'cam-1',
-          }),
-        });
-        const data = await res.json();
-        if (data.ok && data.complaint) {
-          const comp = data.complaint;
-          if (fb) {
-            fb.className = 'text-xs text-emerald-400 block';
-            fb.textContent = 'Success: Complaint ' + comp.complaint_id + ' processed! (is_complaint=' + comp.is_complaint + ', severity=' + comp.severity + ')';
-          }
-          setTimeout(() => {
-            closeTestComplaintModal();
-            renderComplaints();
-          }, 1200);
-        } else {
-          if (fb) {
-            fb.className = 'text-xs text-rose-400 block';
-            fb.textContent = 'Error: ' + (data.error || 'Failed to process test complaint');
-          }
-        }
-      } catch (err) {
-        if (fb) {
-          fb.className = 'text-xs text-rose-400 block';
-          fb.textContent = 'Network error: ' + err.message;
-        }
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    }
-
-    function openImageZoomModal(imgUrl, caption) {
-      const modal = document.getElementById('image-zoom-modal');
-      const img = document.getElementById('image-zoom-img');
-      const cap = document.getElementById('image-zoom-caption');
-      if (modal && img) {
-        img.src = imgUrl;
-        if (cap) cap.textContent = caption ? ('Evidence Snapshot · ' + caption) : '';
-        modal.classList.remove('hidden');
-      }
-    }
-
-    function closeImageZoomModal() {
-      const modal = document.getElementById('image-zoom-modal');
-      if (modal) modal.classList.add('hidden');
-    }
-
     function tickClock() {
-
       const d = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       document.getElementById('overlay-clock').textContent =
@@ -7228,9 +6378,7 @@
       setInterval(pollTelemetry, 600);
       setInterval(pollGarage, 1200);
       setInterval(() => { if (currentNav === 'scorecards') renderScorecard(); }, 2500);
-      setInterval(() => { if (currentNav === 'complaints') renderComplaints(); }, 3000);
       window.addEventListener('mousemove', onRoiMove);
-
       window.addEventListener('mouseup', onRoiUp);
       window.addEventListener('resize', () => {
         if (currentLayoutMode === 'grid') {
@@ -7275,5 +6423,4 @@
     }
   </script>
 </body>
-
 </html>

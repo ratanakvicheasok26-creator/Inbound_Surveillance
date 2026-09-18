@@ -48,9 +48,26 @@ class KhmerSTTService:
             if self._is_loaded and (self._hf_pipeline is not None or self._fw_model is not None):
                 return True
 
-            # 1. Try HuggingFace Transformers pipeline (high accuracy for fine-tuned Khmer models)
         try:
-            from transformers import pipeline
+            # 1. Try HuggingFace Transformers pipeline (high accuracy for fine-tuned Khmer models).
+            # Retry import briefly: at engine boot other threads may still be
+            # initializing transformers, which can transiently hide `pipeline`.
+            import time as _time
+            pipeline = None
+            hf_err = None
+            for _attempt in range(3):
+                try:
+                    from transformers import pipeline
+                except ImportError:
+                    try:
+                        from transformers.pipelines import pipeline
+                    except ImportError as p_err:
+                        hf_err = p_err
+                        _time.sleep(0.5)
+                        continue
+                break
+            if pipeline is None:
+                raise ImportError(hf_err or "pipeline unavailable")
             logger.info(f"[KhmerSTT] Loading HuggingFace pipeline for '{self.model_name_or_path}' on {self.device}...")
             self._hf_pipeline = pipeline(
                 "automatic-speech-recognition",
