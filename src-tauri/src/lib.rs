@@ -625,16 +625,26 @@ fn open_engine_log(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Windows WebView2 serves bundled assets as `http://tauri.localhost/...`
+/// (and IPC as `http://ipc.localhost/...`). Those must stay in-webview.
+fn is_internal_navigation(scheme: &str, host: Option<&str>) -> bool {
+    if matches!(scheme, "tauri" | "data" | "about") {
+        return true;
+    }
+    if scheme != "http" && scheme != "https" {
+        return false;
+    }
+    match host {
+        Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]") => true,
+        Some(h) if h.ends_with(".localhost") => true,
+        _ => false,
+    }
+}
+
 fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("navigation-guard")
         .on_navigation(|_webview, url| {
-            let scheme = url.scheme();
-            if scheme == "tauri" || scheme == "data" || scheme == "about" {
-                return true;
-            }
-            if (scheme == "http" || scheme == "https")
-                && (url.host_str() == Some("127.0.0.1") || url.host_str() == Some("localhost"))
-            {
+            if is_internal_navigation(url.scheme(), url.host_str()) {
                 return true;
             }
             // Open external URLs and custom URI schemes with the system handler, never navigating the webview
@@ -700,5 +710,47 @@ pub fn run() {
                 kill_engine(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_internal_navigation;
+
+    fn allow(raw: &str) -> bool {
+        let parsed = url::Url::parse(raw).unwrap_or_else(|err| panic!("{raw}: {err}"));
+        is_internal_navigation(parsed.scheme(), parsed.host_str())
+    }
+
+    #[test]
+    fn allows_windows_asset_protocol() {
+        assert!(allow("http://tauri.localhost/desktop.html"));
+    }
+
+    #[test]
+    fn allows_tauri_ipc_host() {
+        assert!(allow("http://ipc.localhost/"));
+    }
+
+    #[test]
+    fn allows_engine_loopback() {
+        assert!(allow("http://127.0.0.1:8765/"));
+    }
+
+    #[test]
+    fn allows_localhost_and_ipv6_loopback() {
+        assert!(allow("http://localhost:1420/"));
+        assert!(allow("https://[::1]/"));
+        assert!(allow("tauri://localhost/desktop.html"));
+    }
+
+    #[test]
+    fn denies_external_https() {
+        assert!(!allow("https://example.com"));
+    }
+
+    #[test]
+    fn denies_telegram_scheme() {
+        assert!(!allow("tg://resolve?domain=inbound_bot"));
+    }
 }
 
