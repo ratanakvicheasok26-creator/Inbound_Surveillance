@@ -44,3 +44,4 @@ edge/.env
 .vscode/
 dataset/
 runs/
+supabase/
