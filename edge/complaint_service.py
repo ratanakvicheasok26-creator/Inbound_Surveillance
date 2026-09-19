@@ -43,6 +43,7 @@ from complaint_auditor import (
     OllamaComplaintAuditor,
     _has_khmer_script,
     _khmer_coverage,
+    _latin_coverage,
 )
 from db import insert_customer_complaint, update_complaint_telegram_status
 from speech_pipeline import KhmerSTTService, KhmerTranslationService
@@ -356,19 +357,36 @@ class ComplaintMonitoringService:
             logger.info("[ComplaintService] No intelligible Khmer speech transcribed. Dropping.")
             return None
 
-        # 2b. Khmer-script validation gate — reject hallucinations in other
-        # scripts (e.g. Thai/Latin) before translation & audit so garbage never
-        # reaches the LLM classifier or Telegram.
+        # 2b. Script validation gate — accept complaints in EITHER Khmer script
+        # (native Khmer customers) OR Latin/English script (foreign customers).
+        # Only pure-noise transcripts (low coverage in BOTH scripts) are dropped,
+        # so bilingual complaints always reach the translator + auditor + Telegram.
         km_cov = _khmer_coverage(khmer_text)
-        if km_cov < 0.5:
+        lat_cov = _latin_coverage(khmer_text)
+        if km_cov < 0.5 and lat_cov < 0.5:
             logger.info(
-                f"[ComplaintService] Low Khmer script coverage ({km_cov:.0%}); "
-                f"dropping transcript '{khmer_text}'."
+                f"[ComplaintService] Low script coverage in both Khmer ({km_cov:.0%}) "
+                f"and Latin ({lat_cov:.0%}); dropping transcript '{khmer_text}'."
             )
             return None
+        logger.info(
+            f"[ComplaintService] Script gate passed (khmer={km_cov:.0%}, latin={lat_cov:.0%}) "
+            f"-> '{khmer_text}'"
+        )
 
-        # 3. Khmer -> English Translation (Netra-NMT / Ollama)
-        english_text = self.translator.translate_km_to_en(khmer_text)
+        # 3. Khmer -> English Translation (Netra-NMT / Ollama).
+        # Bilingual: if the surviving transcript is ENGLISH-dominant (foreign
+        # customer spoke English), skip the wrong-direction Khmer NMT and use
+        # it verbatim — the auditor reads English directly. Only run NMT for
+        # Khmer-dominant transcripts.
+        if lat_cov >= 0.5 and km_cov < 0.5:
+            logger.info(
+                f"[ComplaintService] English-dominant transcript ({lat_cov:.0%}); "
+                f"skipping Khmer NMT, using transcript as English."
+            )
+            english_text = khmer_text
+        else:
+            english_text = self.translator.translate_km_to_en(khmer_text)
 
         # 4. Ollama Complaint Evaluation
         analysis: ComplaintAnalysis = self.auditor.analyze(khmer_text, english_text)

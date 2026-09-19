@@ -50,6 +50,21 @@ def _khmer_coverage(text: str) -> float:
     return len(khmer) / len(letters)
 
 
+def _latin_coverage(text: str) -> float:
+    """Fraction of characters that belong to Latin/English script.
+
+    Used to let English-speaking (foreign) customers through the same
+    complaint gate as Khmer speakers, so their complaints are NOT dropped.
+    """
+    if not text:
+        return 0.0
+    letters = [ch for ch in text if ch.isalnum()]
+    if not letters:
+        return 0.0
+    latin = [ch for ch in letters if ("A" <= ch <= "Z") or ("a" <= ch <= "z")]
+    return len(latin) / len(letters)
+
+
 @dataclasses.dataclass
 class ComplaintAnalysis:
     """Structured complaint analysis result."""

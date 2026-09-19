@@ -23,6 +23,41 @@ DEFAULT_KHMER_MODEL = "sengtha/whisper-base-khmer"
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 
+def _preprocess_for_stt(audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
+    """Whisper-friendly input conditioning (pure numpy, no scipy).
+
+    1. FFT band-pass: roll off rumble < 80 Hz and hiss > 7.5 kHz so the
+       laptop's built-in mic stops smearing whisper's mel bins.
+    2. RMS normalize to -22 dBFS so loudness-independent speech never clips
+       and quiet phrases rise above whisper's noise floor.
+
+    Returns the cleaned float32 array (same length, same sr).
+    """
+    n = len(audio)
+    if n == 0:
+        return audio
+    a = np.asarray(audio, dtype=np.float32)
+    if n < 512:
+        return a
+
+    a = a - float(np.mean(a))  # DC removal
+
+    # FFT band-pass filter
+    spec = np.fft.rfft(a)
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+    filt = np.ones_like(spec)
+    filt = filt * (1.0 / (1.0 + np.exp(-(freqs - 80.0) / 6.0)))      # high-pass edge @ 80 Hz
+    filt = filt * (1.0 / (1.0 + np.exp((freqs - 7500.0) / 400.0)))   # low-pass edge @ 7.5kHz
+    out = np.fft.irfft(spec * filt, n=n).astype(np.float32)
+
+    # RMS normalize to ~0.08 amplitude (~-22 dBFS) with safety floor
+    rms = float(np.sqrt(np.mean(out.astype(np.float64) ** 2))) if len(out) else 0.0
+    if rms > 1e-5:
+        out = out * (0.08 / rms)
+    np.clip(out, -1.0, 1.0, out=out)
+    return out
+
+
 class KhmerSTTService:
     """Khmer Speech-to-Text service supporting fine-tuned Khmer models."""
 
@@ -112,6 +147,14 @@ class KhmerSTTService:
                 audio_float = audio_data.astype(np.float32)
 
             # 1. If HF pipeline loaded
+            # 0. INPUT CONDITIONING — pre-process before whisper so the
+            # built-in mic stops reading 'unintelligible': FFT band-pass
+            # (kill <80Hz rumble + >7.5kHz hiss) + RMS normalize to -22dBFS.
+            try:
+                audio_float = _preprocess_for_stt(audio_float, sample_rate)
+            except Exception as _pp_err:
+                logger.warning(f"[KhmerSTT] Pre-process skipped: {_pp_err}; using raw.")
+
             if self._hf_pipeline is not None:
                 res = self._hf_pipeline(
                     {"raw": audio_float, "sampling_rate": sample_rate},
