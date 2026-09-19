@@ -11,7 +11,8 @@ edge/config.yaml
 *.pt
 edge/*.pt
 edge/models/*.onnx
-models/
+!edge/models/.gitkeep
+/models/
 *.onnx
 edge/__pycache__/
 __pycache__/
