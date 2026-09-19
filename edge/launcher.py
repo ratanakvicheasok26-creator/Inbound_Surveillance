@@ -1511,11 +1511,12 @@ class LiveStreamEngine:
             )
             source = self.cfg.get("source", 0)
             existing_worker = self.camera_pool.get_worker(active_id)
-            worker_live = (
-                existing_worker is not None
-                and existing_worker.grabber.connection_state in ("CONNECTED", "CONNECTING", "RECONNECTING")
-                and str(existing_worker.cfg.get("source")) == str(source)
-            )
+            worker_live = False
+            if existing_worker is not None:
+                worker_live = (
+                    existing_worker.grabber.connection_state in ("CONNECTED", "CONNECTING", "RECONNECTING")
+                    and str(existing_worker.cfg.get("source")) == str(source)
+                )
             self.error_message = None
             self.is_streaming = True
             self.current_frame_jpeg = None
@@ -1524,7 +1525,7 @@ class LiveStreamEngine:
             self.person_count = 0
             self.staff_names = []
             self.identities = []
-            if worker_live:
+            if worker_live and existing_worker is not None:
                 grabber_state = existing_worker.grabber.connection_state
                 self.connection_state = grabber_state if grabber_state == "CONNECTED" else "CONNECTING"
                 self.status_text = "CONNECTED" if grabber_state == "CONNECTED" else "CONNECTING"
@@ -1552,11 +1553,12 @@ class LiveStreamEngine:
         save_config(cfg_to_save)
 
         existing = self.camera_pool.get_worker(active_id)
-        worker_live = (
-            existing is not None
-            and existing.grabber.connection_state in ("CONNECTED", "CONNECTING", "RECONNECTING")
-            and str(existing.cfg.get("source")) == str(source)
-        )
+        worker_live = False
+        if existing is not None:
+            worker_live = (
+                existing.grabber.connection_state in ("CONNECTED", "CONNECTING", "RECONNECTING")
+                and str(existing.cfg.get("source")) == str(source)
+            )
 
         if _needs_onvif_onboard(protocol, source, xaddrs) and not worker_live:
             self.grabber.mark_connecting()

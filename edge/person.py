@@ -10,6 +10,7 @@ upper-body shortcuts that catch far / under-car workers at high confidence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal, overload
 
 import cv2
 import numpy as np
@@ -806,6 +807,48 @@ def is_human_pose(
         return True
 
     return torso_visible >= 3 and bones >= 2
+
+
+@overload
+def person_detections(
+    result,
+    frame_h: int,
+    conf_min: float = 0.25,
+    min_height_frac: float = 0.05,
+    min_aspect: float = 1.1,
+    min_keypoints: int = 3,
+    kpt_conf: float = 0.25,
+    track_low_thresh: float = 0.10,
+    return_low: Literal[False] = False,
+) -> tuple[list[Detection], list[Detection]]: ...
+
+
+@overload
+def person_detections(
+    result,
+    frame_h: int,
+    conf_min: float = 0.25,
+    min_height_frac: float = 0.05,
+    min_aspect: float = 1.1,
+    min_keypoints: int = 3,
+    kpt_conf: float = 0.25,
+    track_low_thresh: float = 0.10,
+    return_low: Literal[True] = ...,
+) -> tuple[list[Detection], list[Detection], list[Detection]]: ...
+
+
+@overload
+def person_detections(
+    result,
+    frame_h: int,
+    conf_min: float = 0.25,
+    min_height_frac: float = 0.05,
+    min_aspect: float = 1.1,
+    min_keypoints: int = 3,
+    kpt_conf: float = 0.25,
+    track_low_thresh: float = 0.10,
+    return_low: bool = False,
+) -> tuple[list[Detection], list[Detection]] | tuple[list[Detection], list[Detection], list[Detection]]: ...
 
 
 def person_detections(
