@@ -69,19 +69,74 @@ def data_dir() -> Path:
     return path
 
 
+from datetime import datetime
+
+
+def diagnostic_log_paths() -> list[Path]:
+    paths: list[Path] = []
+    try:
+        exe_dir = Path(sys.executable).parent
+        paths.append(exe_dir / "inbound-surveillance.log")
+    except Exception:
+        pass
+
+    try:
+        dd = data_dir()
+        paths.append(dd / "logs" / "startup.log")
+        paths.append(dd / "startup.log")
+    except Exception:
+        pass
+    return paths
+
+
+def append_to_diagnostic_log(text: str) -> None:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for path in diagnostic_log_paths():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8", errors="replace") as f:
+                f.write(f"[{now_str}] [PYTHON] {text}\n")
+        except Exception:
+            pass
+
+
 def log_boot_banner() -> None:
     """Print a one-line identity so Windows engine.log proves which build ran."""
-    print(
+    banner = (
         f"[INBOUND_BOOT] build={INBOUND_BUILD_ID} version={INBOUND_APP_VERSION} "
         f"platform={sys.platform} frozen={int(is_frozen())} "
-        f"resource={resource_dir()} data={data_dir()}",
-        flush=True,
+        f"resource={resource_dir()} data={data_dir()} python={sys.executable}"
     )
+    print(banner, flush=True)
+    append_to_diagnostic_log(banner)
 
 
 def fatal_boot(exc: BaseException) -> None:
     """Log a startup crash and exit. Used by the frozen Windows sidecar."""
-    print(f"[FATAL] Engine startup failed: {exc}", file=sys.stderr, flush=True)
+    msg = f"[FATAL] Engine startup failed: {exc}"
+    print(msg, file=sys.stderr, flush=True)
     traceback.print_exc(file=sys.stderr)
     sys.stderr.flush()
+
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    append_to_diagnostic_log(f"{msg}\n{tb}")
+
+    # Also write to Desktop crash report if possible
+    try:
+        desktop_candidates = []
+        if sys.platform == "win32":
+            userprofile = os.environ.get("USERPROFILE")
+            if userprofile:
+                desktop_candidates.append(Path(userprofile) / "Desktop")
+        desktop_candidates.append(Path.home() / "Desktop")
+        for desk in desktop_candidates:
+            if desk.exists():
+                report = desk / "INBOUND_CRASH_REPORT.txt"
+                with open(report, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"\n[CRASH REPORT FROM PYTHON ENGINE]\nTimestamp: {datetime.now()}\n{msg}\n{tb}\n")
+                break
+    except Exception:
+        pass
+
     sys.exit(1)
+

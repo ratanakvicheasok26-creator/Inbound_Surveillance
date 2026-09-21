@@ -8,8 +8,10 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const tauriDebug = !!process.env.TAURI_ENV_DEBUG;
 
 export default defineConfig({
+  base: "./",
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+
   resolve: {
     alias: {
       "@": path.resolve(root, "src"),

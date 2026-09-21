@@ -5,7 +5,9 @@ on:
     branches:
       - camera-detection
       - main
+      - windows-diagnostic-logging
   workflow_dispatch:
+
 
 permissions:
   contents: write
@@ -115,4 +117,6 @@ jobs:
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
+            scripts/run-debug.bat
           if-no-files-found: warn
+

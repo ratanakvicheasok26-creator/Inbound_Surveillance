@@ -130,10 +130,18 @@ function showEngineFailure(failure: EngineFailure) {
     errorLog.textContent = failure.error_summary || "No error output recorded.";
   }
 
-  if (errorPath && failure.log_path) {
-    errorPath.textContent = `Log file: ${failure.log_path}`;
+  if (errorPath) {
+    errorPath.textContent = failure.log_path ? `Log: ${failure.log_path}` : "Diagnostic log written to disk & Desktop.";
+    void invoke<string[]>("get_diagnostic_logs")
+      .then((logs) => {
+        if (logs && logs.length > 0 && errorPath) {
+          errorPath.innerHTML = `<strong>Diagnostic Logs:</strong><br/>${logs.map((p) => `• ${p}`).join("<br/>")}<br/><em>Crash report also saved to Desktop as INBOUND_CRASH_REPORT.txt</em>`;
+        }
+      })
+      .catch(() => {});
   }
 }
+
 
 async function probe(port: number): Promise<boolean> {
   const controller = new AbortController();
@@ -282,11 +290,31 @@ async function boot() {
     // Running outside Tauri
   }
 
+  try {
+    type EngineStatusResponse =
+      | { status: "Starting" }
+      | { status: "Ready"; data: { port: number } }
+      | { status: "Failed"; data: EngineFailure };
+
+    const engineState = await invoke<EngineStatusResponse>("get_engine_status");
+    if (engineState.status === "Ready" && engineState.data?.port) {
+      openHub(engineState.data.port);
+      return;
+    }
+    if (engineState.status === "Failed" && engineState.data) {
+      showEngineFailure(engineState.data);
+      return;
+    }
+  } catch {
+    // Running outside Tauri or older backend
+  }
+
   const initial = enginePort();
   if (await probe(initial)) {
     openHub(initial);
     return;
   }
+
 
   setStatus("Starting local camera engine…");
   startPolling();

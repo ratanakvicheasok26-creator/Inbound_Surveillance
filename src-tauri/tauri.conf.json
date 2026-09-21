@@ -18,8 +18,10 @@
         "height": 800,
         "resizable": true,
         "fullscreen": false,
-        "url": "desktop.html"
+        "url": "desktop.html",
+        "devtools": true
       }
+
     ],
     "security": {
       "csp": null

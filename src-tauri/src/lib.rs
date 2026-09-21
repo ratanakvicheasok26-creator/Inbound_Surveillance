@@ -12,7 +12,20 @@ use tauri::{Emitter, Manager, RunEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
+pub mod logger;
+use logger::{log_error, log_info, log_warn};
+
 struct EngineProcess(Mutex<Option<CommandChild>>);
+
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "status", content = "data")]
+pub enum EngineStatus {
+    Starting,
+    Ready { port: u16 },
+    Failed(EngineFailure),
+}
+
+pub struct EngineStatusState(pub Mutex<EngineStatus>);
 
 /// Sidecar PID kept outside Tauri managed state so we can still kill it
 /// after `RunEvent::Exit` has already dropped app state.
@@ -25,7 +38,7 @@ const ENGINE_PORT: &str = "8765";
 const READY_MARKER: &str = "[INBOUND_SERVER_READY]";
 
 #[derive(Clone, serde::Serialize)]
-struct MissingRuntime {
+pub struct MissingRuntime {
     id: String,
     title: String,
     description: String,
@@ -35,13 +48,14 @@ struct MissingRuntime {
 }
 
 #[derive(Clone, serde::Serialize)]
-struct EngineFailure {
+pub struct EngineFailure {
     exit_code: Option<i32>,
     error_summary: String,
     log_path: String,
     is_dll_error: bool,
     missing_runtime: Option<MissingRuntime>,
 }
+
 
 fn apply_linux_webkit_workarounds() {
     #[cfg(target_os = "linux")]
@@ -74,26 +88,11 @@ fn parse_ready_port(line: &str) -> Option<u16> {
     None
 }
 
-fn engine_log_path(app: &tauri::AppHandle) -> std::path::PathBuf {
-    let dir = app
-        .path()
-        .app_log_dir()
-        .or_else(|_| app.path().app_data_dir())
-        .unwrap_or_else(|_| std::env::temp_dir().join("inbound-surveillance"));
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("engine.log")
+fn engine_log_path(_app: &tauri::AppHandle) -> std::path::PathBuf {
+    logger::get().primary_log_path()
 }
 
-fn append_to_engine_log(log_path: &std::path::Path, text: &str) {
-    use std::io::Write;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
-        let _ = writeln!(file, "{text}");
-    }
-}
+
 
 fn check_is_dll_error(text: &str, exit_code: Option<i32>) -> bool {
     if let Some(code) = exit_code {
@@ -313,6 +312,12 @@ fn ensure_windows_runtimes(app: &tauri::AppHandle) {
 }
 
 fn notify_engine_ready(app: &tauri::AppHandle, port: u16) {
+    if let Some(state) = app.try_state::<EngineStatusState>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = EngineStatus::Ready { port };
+        }
+    }
+    log_info("BOOT", &format!("Camera engine successfully reported ready on port {port}"));
     let _ = app.emit("engine-ready", port);
     if let Some(window) = app.get_webview_window("main") {
         let script = format!(
@@ -325,6 +330,25 @@ fn notify_engine_ready(app: &tauri::AppHandle, port: u16) {
 }
 
 fn notify_engine_failed(app: &tauri::AppHandle, failure: EngineFailure) {
+    if let Some(state) = app.try_state::<EngineStatusState>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = EngineStatus::Failed(failure.clone());
+        }
+    }
+    log_error("BOOT", &format!("Camera engine failed: {}", failure.error_summary));
+    logger::write_emergency_crash_report(&failure.error_summary);
+
+    #[cfg(target_os = "windows")]
+    {
+        logger::show_native_message_box(
+            "Inbound Surveillance - Startup Error",
+            &format!(
+                "The camera engine failed to start.\n\nError:\n{}\n\nA full crash report was saved to your Desktop:\nINBOUND_CRASH_REPORT.txt\n\nPlease share this file with support.",
+                failure.error_summary
+            ),
+        );
+    }
+
     let _ = app.emit("engine-failed", &failure);
     if let Some(window) = app.get_webview_window("main") {
         if let Ok(json) = serde_json::to_string(&failure) {
@@ -337,6 +361,7 @@ fn notify_engine_failed(app: &tauri::AppHandle, failure: EngineFailure) {
         }
     }
 }
+
 
 fn run_silent(program: &str, args: &[&str]) {
     let _ = std::process::Command::new(program)
@@ -464,8 +489,8 @@ fn spawn_engine(app: tauri::AppHandle) {
             if let Ok(mut guard) = app.state::<EngineProcess>().0.lock() {
                 *guard = Some(child);
             }
-            let log_file_cloned = log_file.clone();
             let log_path_str_cloned = log_path_str.clone();
+
 
             tauri::async_runtime::spawn(async move {
                 let mut stdout_buf = String::new();
@@ -478,13 +503,12 @@ fn spawn_engine(app: tauri::AppHandle) {
                             let chunk = String::from_utf8_lossy(&bytes);
                             let trimmed = chunk.trim();
                             if !trimmed.is_empty() {
-                                log::info!("[engine] {trimmed}");
+                                log_info("ENGINE:OUT", trimmed);
                                 for line in trimmed.lines() {
                                     if recent_lines.len() >= 50 {
                                         recent_lines.pop_front();
                                     }
                                     recent_lines.push_back(line.to_string());
-                                    append_to_engine_log(&log_file_cloned, line);
                                 }
                             }
                             stdout_buf.push_str(&chunk);
@@ -500,13 +524,12 @@ fn spawn_engine(app: tauri::AppHandle) {
                             let chunk = String::from_utf8_lossy(&bytes);
                             let trimmed = chunk.trim();
                             if !trimmed.is_empty() {
-                                log::warn!("[engine:err] {trimmed}");
+                                log_warn("ENGINE:ERR", trimmed);
                                 for line in trimmed.lines() {
                                     if recent_lines.len() >= 50 {
                                         recent_lines.pop_front();
                                     }
                                     recent_lines.push_back(line.to_string());
-                                    append_to_engine_log(&log_file_cloned, &format!("[ERR] {line}"));
                                 }
                             }
                             if !notified {
@@ -523,7 +546,7 @@ fn spawn_engine(app: tauri::AppHandle) {
                                 Ordering::SeqCst,
                                 Ordering::SeqCst,
                             );
-                            log::info!("inbound-engine exited: {payload:?}");
+                            log_info("ENGINE", &format!("inbound-engine exited: {payload:?}"));
                             if !notified {
                                 let exit_code = payload.code;
                                 let summary = if !recent_lines.is_empty() {
@@ -543,8 +566,7 @@ fn spawn_engine(app: tauri::AppHandle) {
                             break;
                         }
                         CommandEvent::Error(message) => {
-                            log::error!("inbound-engine error: {message}");
-                            append_to_engine_log(&log_file_cloned, &format!("[FATAL] {message}"));
+                            log_error("ENGINE", &format!("inbound-engine error: {message}"));
                             if !notified {
                                 notify_engine_failed(
                                     &app,
@@ -562,9 +584,12 @@ fn spawn_engine(app: tauri::AppHandle) {
             });
         }
         Err(err) => {
-            log::error!(
-                "failed to spawn inbound-engine ({err}); \
-                 start `python edge/launcher.py --no-browser` for local development"
+            log_error(
+                "ENGINE",
+                &format!(
+                    "failed to spawn inbound-engine ({err}); \
+                     start `python edge/launcher.py --no-browser` for local development"
+                )
             );
             if cfg!(debug_assertions) {
                 notify_engine_ready(&app, 8765);
@@ -581,6 +606,7 @@ fn spawn_engine(app: tauri::AppHandle) {
         }
     }
 }
+
 
 #[tauri::command]
 fn retry_engine(app: tauri::AppHandle) {
@@ -606,8 +632,22 @@ fn install_bundled_runtime(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_engine_log(app: tauri::AppHandle) -> Result<(), String> {
-    let path = engine_log_path(&app);
+fn get_engine_status(state: tauri::State<EngineStatusState>) -> EngineStatus {
+    state.0.lock().map(|g| g.clone()).unwrap_or(EngineStatus::Starting)
+}
+
+#[tauri::command]
+fn get_diagnostic_logs() -> Vec<String> {
+    logger::get()
+        .all_log_paths()
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
+#[tauri::command]
+fn open_engine_log(_app: tauri::AppHandle) -> Result<(), String> {
+    let path = logger::get().primary_log_path();
     if let Some(parent) = path.parent() {
         #[cfg(target_os = "windows")]
         {
@@ -675,18 +715,22 @@ pub fn run() {
         .plugin(navigation_guard_plugin())
         .plugin(tauri_plugin_shell::init())
         .manage(EngineProcess(Mutex::new(None)))
+        .manage(EngineStatusState(Mutex::new(EngineStatus::Starting)))
         .invoke_handler(tauri::generate_handler![
             retry_engine,
             open_engine_log,
-            install_bundled_runtime
+            install_bundled_runtime,
+            get_engine_status,
+            get_diagnostic_logs,
         ])
         .setup(|app| {
+            logger::log_system_diagnostics(Some(&app.handle()));
             if cfg!(debug_assertions) {
-                app.handle().plugin(
+                let _ = app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
-                )?;
+                );
             }
             if let Some(window) = app.get_webview_window("main") {
                 let icon = tauri::include_image!("icons/128x128.png");
@@ -695,6 +739,7 @@ pub fn run() {
             spawn_engine(app.handle().clone());
             Ok(())
         })
+
         .on_window_event(|window, event| {
             if matches!(
                 event,

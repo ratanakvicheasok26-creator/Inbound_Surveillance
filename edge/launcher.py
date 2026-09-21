@@ -32,6 +32,7 @@ from typing import Any
 
 from paths import (
     INBOUND_BUILD_ID,
+    append_to_diagnostic_log,
     data_dir,
     fatal_boot,
     get_resource_path,
@@ -39,6 +40,7 @@ from paths import (
     log_boot_banner,
     resource_dir,
 )
+
 
 # Default FFmpeg RTSP options for any leftover OpenCV opens (CLI preview).
 # The grabber's RTSPAdapter overrides per-attempt with a 2s stimeout.
@@ -92,6 +94,32 @@ def resolve_static_asset(url_path: str) -> Path | None:
     return None
 
 
+def _verify_engine_imports() -> None:
+    packages = [
+        ("sqlite3", lambda: __import__("sqlite3")),
+        ("yaml", lambda: __import__("yaml")),
+        ("requests", lambda: __import__("requests")),
+        ("numpy", lambda: __import__("numpy")),
+        ("cv2", lambda: __import__("cv2")),
+        ("onnxruntime", lambda: __import__("onnxruntime")),
+    ]
+    for name, loader in packages:
+        try:
+            mod = loader()
+            ver = getattr(mod, "__version__", "loaded")
+            msg = f"[IMPORT] {name}: OK ({ver})"
+            print(msg, flush=True)
+            append_to_diagnostic_log(msg)
+        except Exception as ex:
+            err_msg = f"[IMPORT_FAIL] {name}: {ex}"
+            print(err_msg, file=sys.stderr, flush=True)
+            append_to_diagnostic_log(err_msg)
+            if __name__ == "__main__":
+                fatal_boot(ex)
+            raise
+
+_verify_engine_imports()
+
 try:
     import cv2
     import numpy as np
@@ -101,6 +129,7 @@ except Exception as _boot_err:
     if __name__ == "__main__":
         fatal_boot(_boot_err)
     raise
+
 
 import re
 

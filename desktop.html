@@ -4,11 +4,46 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Inbound Surveillance</title>
-  <link rel="icon" type="image/png" href="/favicon.png" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="shortcut icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/vendor/fonts.css" />
+  <script>
+    window.__inboundEarlyErrors = [];
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      var errStr = msg + " at " + (url || "unknown") + ":" + lineNo;
+      window.__inboundEarlyErrors.push(errStr);
+      var statusEl = document.getElementById("status");
+      if (statusEl) {
+        statusEl.textContent = "Script load error: " + msg;
+        statusEl.style.color = "#f87171";
+      }
+      var errLogEl = document.getElementById("error-log");
+      if (errLogEl) {
+        errLogEl.textContent = errStr + (error && error.stack ? "\n" + error.stack : "");
+      }
+      var panel = document.getElementById("error-panel");
+      if (panel) {
+        panel.style.display = "block";
+      }
+      var desc = document.getElementById("error-desc");
+      if (desc) {
+        desc.textContent = "A frontend script error prevented the boot screen from loading. Check the log file for details.";
+      }
+      return false;
+    };
+    window.addEventListener("unhandledrejection", function(event) {
+      var reason = event.reason ? (event.reason.stack || event.reason.message || String(event.reason)) : "Unknown rejection";
+      window.__inboundEarlyErrors.push(reason);
+      var statusEl = document.getElementById("status");
+      if (statusEl) {
+        statusEl.textContent = "Unhandled rejection: " + reason;
+        statusEl.style.color = "#f87171";
+      }
+    });
+  </script>
+  <link rel="icon" type="image/png" href="./favicon.png" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="shortcut icon" href="./favicon.ico" />
+  <link rel="stylesheet" href="./vendor/fonts.css" />
   <style>
+
     :root {
       color-scheme: dark;
       --color-bg-base: #000000;
@@ -217,8 +252,9 @@
         <div style="position: absolute; inset: -6px; border-radius: 50%; border: 2px dashed #00FF66; animation: iris-rotate-cw 12s linear infinite; opacity: 0.8;"></div>
         <div style="position: absolute; inset: -14px; border-radius: 50%; border: 1px solid rgba(11, 131, 58, 0.5); animation: iris-rotate-ccw 8s linear infinite;"></div>
         <img
-          src="/inb_surveillance.png"
+          src="./inb_surveillance.png"
           alt="Inbound Surveillance Mascot"
+
           style="width: 140px; height: 140px; border-radius: 50%; object-fit: cover; border: 2px solid #00FF66; box-shadow: 0 0 24px rgba(0, 255, 102, 0.45); display: block;"
         />
       </div>
