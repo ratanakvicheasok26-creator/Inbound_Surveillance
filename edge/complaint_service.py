@@ -29,7 +29,6 @@ import uuid
 
 import cv2
 import numpy as np
-import soundfile as sf
 
 from audio_source import (
     AudioSource,
@@ -41,20 +40,26 @@ from audio_source import (
 from complaint_auditor import (
     ComplaintAnalysis,
     OllamaComplaintAuditor,
-    _has_khmer_script,
     _khmer_coverage,
     _latin_coverage,
 )
 from db import insert_customer_complaint, update_complaint_telegram_status
+from paths import data_dir
 from speech_pipeline import KhmerSTTService, KhmerTranslationService
 from telegram_out import TelegramOut
 from vad import SileroVAD, SpeechSegment
 
 logger = logging.getLogger("complaint_service")
 
-COMPLAINTS_DIR = Path(__file__).parent / "proofs" / "complaints"
-COMPLAINTS_AUDIO_DIR = COMPLAINTS_DIR / "audio"
-COMPLAINTS_STILLS_DIR = COMPLAINTS_DIR / "stills"
+
+def complaints_proof_dirs(root: Path | None = None) -> tuple[Path, Path]:
+    """Writable audio/still folders (AppData when frozen, edge/ in source)."""
+    base = Path(root or data_dir()) / "proofs" / "complaints"
+    audio = base / "audio"
+    stills = base / "stills"
+    audio.mkdir(parents=True, exist_ok=True)
+    stills.mkdir(parents=True, exist_ok=True)
+    return audio, stills
 
 TG_SEVERITY_ORDER = ["none", "low", "medium", "high", "critical"]
 
@@ -122,6 +127,7 @@ class ComplaintMonitoringService:
         telegram_min_severity: str = "low",
         telegram_alert_enabled: bool = True,
         enabled: bool = True,
+        data_root: Optional[Path] = None,
     ) -> None:
         self.db_conn = db_conn
         self.telegram_out = telegram_out
@@ -134,10 +140,7 @@ class ComplaintMonitoringService:
         self.dedup_window_seconds = dedup_window_seconds
         self.telegram_min_severity = (telegram_min_severity or "low").lower()
         self._audio_source_label = str(audio_source_type or "laptop").lower()
-
-        # Directory initialization
-        COMPLAINTS_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-        COMPLAINTS_STILLS_DIR.mkdir(parents=True, exist_ok=True)
+        self._audio_dir, self._stills_dir = complaints_proof_dirs(data_root)
 
         # Select audio source
         if audio_source is not None:
@@ -344,8 +347,10 @@ class ComplaintMonitoringService:
 
         # 1. Save Original Audio (Only once, reusing the same buffer)
         audio_filename = f"complaint_{stamp_str}_{uid}.wav"
-        audio_path = COMPLAINTS_AUDIO_DIR / audio_filename
+        audio_path = self._audio_dir / audio_filename
         try:
+            import soundfile as sf
+
             sf.write(str(audio_path), segment.audio, segment.sample_rate, subtype="PCM_16")
             logger.info(f"[ComplaintService] Saved speech audio to {audio_path}")
         except Exception as exc:
@@ -415,7 +420,7 @@ class ComplaintMonitoringService:
         # 5. Capture / Retrieve Camera Frame
         screenshot_path = None
         screenshot_filename = f"complaint_{stamp_str}_{uid}.jpg"
-        screenshot_dest = COMPLAINTS_STILLS_DIR / screenshot_filename
+        screenshot_dest = self._stills_dir / screenshot_filename
 
         frame = None
         if self.get_camera_frame_fn is not None:

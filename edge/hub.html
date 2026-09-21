@@ -7,15 +7,9 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />
-  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+  <script src="/static/vendor/tailwind.js"></script>
+  <link href="/static/vendor/fonts.css" rel="stylesheet"/>
   <script src="/static/supabase.js"></script>
-  <script>
-    if (!window.supabase) {
-      document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
-    }
-  </script>
   <script id="tailwind-config">
     tailwind.config = {
       darkMode: "class",
@@ -210,7 +204,7 @@
       z-index: 25;
       transition: top 0.05s ease, left 0.05s ease;
     }
-    .roi-box { position: absolute; box-sizing: border-box; }
+    .roi-box { position: absolute; box-sizing: border-box; pointer-events: none; border: 0; }
     .roi-box.selected { z-index: 10; }
     .roi-box .bay-chip {
       position: absolute; top: -22px; left: 0;
@@ -232,15 +226,16 @@
     .roi-handle {
       position: absolute; width: 8px; height: 8px;
       background: #00FF66; z-index: 9;
+      pointer-events: auto;
     }
     .roi-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
     .roi-handle.n  { left: 50%; top: -4px; transform: translateX(-50%); cursor: ns-resize; }
     .roi-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
-    .roi-handle.e  { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .roi-handle.e  { right: -5px; top: 50%; width: 10px; height: 28px; border-radius: 2px; transform: translateY(-50%); cursor: ew-resize; z-index: 45; }
     .roi-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
     .roi-handle.s  { left: 50%; bottom: -4px; transform: translateX(-50%); cursor: ns-resize; }
     .roi-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
-    .roi-handle.w  { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .roi-handle.w  { left: -5px; top: 50%; width: 10px; height: 28px; border-radius: 2px; transform: translateY(-50%); cursor: ew-resize; z-index: 45; }
     .roi-svg-poly {
       cursor: move;
       transition: fill 0.15s ease, stroke-width 0.15s ease;
@@ -417,8 +412,9 @@
       border: 1px solid #222;
       background: #1a1a1a;
       color: #FAFAFA;
-      cursor: pointer;
+      cursor: grab;
     }
+    .pipe-palette button:active { cursor: grabbing; }
     .pipe-palette button strong { font-size: 13px; font-weight: 600; }
     .pipe-palette button span { font-size: 11px; color: #8E9297; }
     .pipe-palette button:hover { border-color: #00FF66; }
@@ -455,6 +451,7 @@
       min-height: 0;
     }
     #pipe-stage:active { cursor: grabbing; }
+    #pipe-stage.is-drop { box-shadow: inset 0 0 0 1px #00FF66; }
     #pipe-world {
       position: absolute;
       left: 0;
@@ -498,6 +495,9 @@
       padding: 6px 10px 4px;
       font-size: 11px;
       color: #8E9297;
+      line-height: 1.35;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .pipe-node__io {
       display: grid;
@@ -526,6 +526,148 @@
     @media (max-width: 980px) {
       .pipe-bench { grid-template-columns: 1fr; }
       #pipe-stage { min-height: 52vh; }
+    }
+    #pipe-layout-modal.hidden { display: none; }
+    .pipe-layout-dialog {
+      width: min(920px, calc(100vw - 32px));
+      max-height: min(640px, calc(100dvh - 32px));
+      background: #121212;
+      border: 1px solid #2b2b2b;
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    }
+    .pipe-layout-dialog header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid #222;
+    }
+    .pipe-layout-dialog header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #FAFAFA;
+    }
+    .pipe-layout-dialog header p {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: #8E9297;
+    }
+    .pipe-layout-body {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 0;
+      flex: 1;
+    }
+    .pipe-layout-list {
+      overflow: auto;
+      border-right: 1px solid #222;
+      padding: 8px;
+      display: grid;
+      align-content: start;
+      gap: 4px;
+    }
+    .pipe-layout-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      text-align: left;
+      background: #1a1a1a;
+      border: 1px solid #222;
+      color: #FAFAFA;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+    .pipe-layout-item:hover { border-color: #00FF66; }
+    .pipe-layout-item.is-on {
+      border-color: #00FF66;
+      background: rgba(0, 255, 102, 0.1);
+    }
+    .pipe-layout-item strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pipe-layout-item span {
+      display: block;
+      font-size: 11px;
+      color: #8E9297;
+    }
+    .pipe-layout-item__meta { flex: 1; min-width: 0; }
+    .pipe-layout-item__del {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border: 0;
+      background: transparent;
+      color: #ff5555;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .pipe-layout-item__del:hover { background: rgba(255, 85, 85, 0.15); }
+    .pipe-layout-preview {
+      position: relative;
+      min-height: 360px;
+      background:
+        radial-gradient(circle at 1px 1px, #1a1a1a 1px, transparent 0) 0 0 / 18px 18px,
+        #0a0a0a;
+      overflow: hidden;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .pipe-layout-preview.is-panning { cursor: grabbing; }
+    .pipe-layout-world {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: 0 0;
+    }
+    .pipe-layout-preview svg {
+      display: block;
+      width: auto;
+      height: auto;
+      min-height: 0;
+      pointer-events: none;
+    }
+    .pipe-layout-dialog footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid #222;
+    }
+    .pipe-layout-dialog footer .pipe-layout-spacer { flex: 1; }
+    .pipe-layout-dialog footer button {
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #pipe-layout-save {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #FAFAFA;
+    }
+    #pipe-layout-cancel {
+      background: transparent;
+      border: 1px solid #333;
+      color: #FAFAFA;
+    }
+    #pipe-layout-apply {
+      background: #00FF66;
+      border: 1px solid #00FF66;
+      color: #000;
+    }
+    @media (max-width: 720px) {
+      .pipe-layout-body { grid-template-columns: 1fr; }
+      .pipe-layout-list { border-right: 0; border-bottom: 1px solid #222; max-height: 180px; }
     }
     .wrench-bar { height: 8px; background: #222222; border-radius: 9999px; overflow: hidden; }
     .wrench-bar > span { display: block; height: 100%; background: #00FF66; }
@@ -712,7 +854,7 @@
       <li>
         <button type="button" class="nav-off w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-high hover:text-on-surface text-left" data-nav="scorecards" onclick="setNav('scorecards')">
           <span class="material-symbols-outlined">monitoring</span>
-          <span>Mechanics</span>
+          <span id="nav-scorecards-label">Staff</span>
         </button>
       </li>
       <li>
@@ -770,13 +912,13 @@
         </div>
       </div>
       <div class="flex items-center gap-3 shrink-0">
-        <button id="btn-audio-alert" type="button" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container border border-primary text-primary hover:bg-primary/10 transition-colors" title="Vehicle Audio Chimes" onclick="toggleAudioAlerts()">
+        <button id="btn-audio-alert" type="button" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container border border-primary text-primary hover:bg-primary/10 transition-colors" title="Vehicle Audio Chimes" onclick="toggleAudioAlerts()" data-garage-only="1">
           <span id="audio-alert-icon" class="material-symbols-outlined text-[16px]">volume_up</span>
           <span id="audio-alert-label" class="font-mono-data text-[11px] font-semibold">SOUND ON</span>
         </button>
         <div id="shop-status-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
           <span id="shop-status-dot" class="w-2 h-2 rounded-full bg-outline"></span>
-          <span id="shop-status-label" class="font-label-upper text-label-upper text-on-surface-variant">SHOP</span>
+          <span id="shop-status-label" class="font-label-upper text-label-upper text-on-surface-variant">CLOSED</span>
         </div>
         <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant">
           <span class="material-symbols-outlined text-[16px] text-primary">garage</span>
@@ -798,7 +940,7 @@
       <div class="flex-1 min-h-0" id="feed-column">
         <div class="flex items-center justify-between gap-3 mb-1">
           <div class="flex items-center gap-3">
-            <h2 class="font-headline-md text-headline-md text-on-surface">Shop Floor Feed</h2>
+            <h2 id="feed-heading" class="font-headline-md text-headline-md text-on-surface">Live feed</h2>
             <div id="live-badge" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant">
               <span id="live-dot" class="w-2 h-2 rounded-full bg-outline"></span>
               <span id="live-label" class="font-label-upper text-label-upper text-on-surface-variant">STANDBY</span>
@@ -857,8 +999,8 @@
 
           <div class="absolute inset-0 flex flex-col items-center justify-center bg-surface-container-lowest z-20" id="stream-placeholder">
             <span class="material-symbols-outlined text-5xl text-on-surface-variant mb-4">videocam_off</span>
-            <h3 class="text-on-surface font-medium mb-1">No camera connected</h3>
-            <p class="text-body-sm text-on-surface-variant text-center max-w-sm px-4">Select a source in Source Configuration to begin monitoring.</p>
+            <h3 class="text-on-surface font-medium mb-1" id="stream-placeholder-title">No camera connected</h3>
+            <p class="text-body-sm text-on-surface-variant text-center max-w-sm px-4" id="stream-placeholder-sub">Select a source in Source Configuration to begin monitoring.</p>
           </div>
 
           <div id="multi-cam-grid" class="w-full h-full p-1.5 gap-2" style="display: none;"></div>
@@ -867,8 +1009,8 @@
             <video id="live-webrtc" autoplay playsinline muted></video>
             <img id="live-camera-feed" alt="Live camera feed" onerror="handleStreamError()"/>
             <div id="roi-overlay" class="roi-overlay" onmousedown="onRoiDown(event)" oncontextmenu="onBayContextMenu(event)"></div>
-            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full z-20 pointer-events-none text-label-upper font-label-upper text-on-surface">
-              Drag corners to stretch bay angles · Drag inside to move · Right-click for options
+            <div id="live-roi-hint" class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full z-20 pointer-events-none text-label-upper font-label-upper text-on-surface">
+              Side edges scale both vertices · Inside moves · Corners stretch angles · R rotates
             </div>
           </div>
 
@@ -877,7 +1019,7 @@
               <span class="font-mono-data text-mono-data text-on-surface" id="overlay-clock">—</span>
               <span class="w-2 h-2 rounded-full bg-green-400"></span>
             </div>
-            <div id="overlay-staff-list" class="flex flex-col gap-1 border-t border-outline-variant/40 pt-1.5 text-xs">
+            <div id="overlay-staff-list" class="flex flex-col gap-1 border-t border-outline-variant/40 pt-1.5 text-xs" data-garage-only="1">
               <span class="text-on-surface-variant text-[11px]">No active technicians</span>
             </div>
           </div>
@@ -1050,20 +1192,20 @@
 
             <div class="bg-surface-container rounded-lg p-5 border border-outline-variant mt-4">
               <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-semibold text-on-surface flex items-center gap-1.5">
+                <h3 id="grid-section-title" class="text-sm font-semibold text-on-surface flex items-center gap-1.5">
                   <span class="material-symbols-outlined text-[18px] text-primary">grid_on</span>
-                  Service Bay Grid
+                  <span id="grid-section-title-text">Zone grid</span>
                 </h3>
-                <span id="cam-bay-count-badge" class="px-2 py-0.5 rounded-full text-xs bg-surface-container-highest text-on-surface font-mono-data">0 bays</span>
+                <span id="cam-bay-count-badge" class="px-2 py-0.5 rounded-full text-xs bg-surface-container-highest text-on-surface font-mono-data">0 zones</span>
               </div>
-              <p class="text-xs text-on-surface-variant mb-3 leading-relaxed">
-                Each camera has its own independent bay grid. Drag directly on the camera viewport to draw or resize bays, or import an existing grid layout from another camera.
+              <p id="grid-section-help" class="text-xs text-on-surface-variant mb-3 leading-relaxed">
+                Each camera has its own independent zone grid. Drag directly on the camera viewport to draw or resize zones, or import an existing grid layout from another camera.
               </p>
               <div class="pt-3 border-t border-outline-variant/50">
                 <label class="font-label-upper text-label-upper text-on-surface-variant block mb-1.5" for="import-grid-source-select">Import Grid from Camera</label>
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <select id="import-grid-source-select" class="bg-surface-container-highest border-transparent text-on-surface text-xs rounded-lg p-2.5 flex-1 focus:ring-primary focus:border-primary">
-                    <option value="">Select camera to copy bays from...</option>
+                    <option value="">Select camera to copy zones from...</option>
                   </select>
                   <button type="button" id="btn-import-grid" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-3 rounded-lg font-medium transition-colors text-xs border border-outline-variant flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50" onclick="importGridFromCamera()">
                     <span class="material-symbols-outlined text-[15px]">download</span>
@@ -1078,33 +1220,28 @@
 
         <div id="panel-alerts" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="venue-input">Garage Name</label>
+            <label id="venue-field-label" class="font-label-upper text-label-upper text-on-surface-variant" for="venue-input">Venue name</label>
             <input id="venue-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" value="Demo Garage" oninput="updateCrumbs()" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="open-time-input">Shop Opens</label>
+            <label class="font-label-upper text-label-upper text-on-surface-variant" for="open-time-input">Opens</label>
             <input id="open-time-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="time" value="08:00" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="font-label-upper text-label-upper text-on-surface-variant" for="close-time-input">Shop Closes</label>
+            <label class="font-label-upper text-label-upper text-on-surface-variant" for="close-time-input">Closes</label>
             <input id="close-time-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="time" value="18:00" onchange="saveHubSettings()" onblur="saveHubSettings()"/>
           </div>
           <div class="md:col-span-2 flex flex-col gap-2">
-            <div class="flex justify-between items-center">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="absent-slider">Idle-bay alert threshold</label>
-              <span class="font-mono-data text-mono-data text-primary" id="absent-val-label">10s</span>
-            </div>
-            <input id="absent-slider" class="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" max="600" min="5" step="5" type="range" value="10" oninput="updateAbsentLabel(this.value)" onchange="saveHubSettings()"/>
-            <div class="flex justify-between font-mono-data text-mono-data text-on-surface-variant">
-              <span>0s</span>
-              <span>600s</span>
-            </div>
+            <label id="idle-alert-label" class="font-label-upper text-label-upper text-on-surface-variant">Idle-zone alert threshold</label>
+            <p id="idle-alert-help" class="text-xs text-on-surface-variant">How long a zone stays empty before an alert. Each camera can wait a different number of seconds.</p>
+            <div id="absent-camera-list" class="space-y-3"></div>
+            <p id="absent-camera-empty" class="text-xs text-on-surface-variant">Add a camera to set an idle-zone alert.</p>
           </div>
-          <div class="md:col-span-2 space-y-3">
-            <h3 class="text-sm font-semibold text-on-surface">Mechanic Wi-Fi phones</h3>
+          <div id="wifi-setup-section" class="md:col-span-2 space-y-3" data-garage-only="1">
+            <h3 class="text-sm font-semibold text-on-surface">Staff Wi-Fi phones</h3>
             <p class="text-xs text-on-surface-variant">Register a phone MAC or static IP. Presence is confirmed when Face ID and garage Wi-Fi both match.</p>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input id="wifi-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg p-2.5" type="text" placeholder="Mechanic name"/>
+              <input id="wifi-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg p-2.5" type="text" placeholder="Staff name"/>
               <input id="wifi-mac-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5" type="text" placeholder="aa:bb:cc:dd:ee:ff"/>
               <input id="wifi-ip-input" class="bg-surface-container-highest border-transparent text-on-surface font-mono-data text-xs rounded-lg p-2.5" type="text" placeholder="192.168.1.42 (optional)"/>
             </div>
@@ -1177,7 +1314,7 @@
               <input id="profile-name-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" placeholder="Operator Name" />
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-venue-input">Venue / Garage Name</label>
+              <label class="font-label-upper text-label-upper text-on-surface-variant" for="profile-venue-input">Venue name</label>
               <input id="profile-venue-input" class="bg-surface-container-highest border-transparent text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 shadow-inner" type="text" placeholder="Shop or site name" />
             </div>
             <div class="flex flex-col gap-1.5">
@@ -1211,8 +1348,8 @@
     <div class="flex-1 min-h-0 p-edge-margin hidden" id="scorecard-workspace">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 class="font-headline-md text-headline-md text-on-surface">Mechanics &amp; Scorecards</h2>
-          <p class="text-body-sm text-on-surface-variant mt-1">Live attendance, wrench time, and garage Wi-Fi presence for today.</p>
+          <h2 id="scorecard-heading" class="font-headline-md text-headline-md text-on-surface">Staff</h2>
+          <p id="scorecard-sub" class="text-body-sm text-on-surface-variant mt-1">Live attendance, wrench time, and garage Wi-Fi presence for today.</p>
         </div>
         <div class="flex items-center gap-2 text-sm">
           <span id="scorecard-util" class="font-mono-data text-mono-data text-primary">Utilization —</span>
@@ -1230,7 +1367,8 @@
         <div class="flex items-center gap-2 flex-wrap">
           <span id="pipe-status" class="pipe-status is-ok">Valid</span>
           <span id="pipe-unsaved" class="pipe-unsaved hidden">Unsaved</span>
-          <button type="button" id="pipe-load-template" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant">Load template</button>
+          <button type="button" id="pipe-save-layout" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant">Save as layout</button>
+          <button type="button" id="pipe-load-layout" class="bg-secondary-container hover:bg-surface-bright text-on-surface py-2 px-4 rounded-lg font-medium text-sm border border-outline-variant">Load layout</button>
           <button type="button" id="pipe-deploy" class="bg-primary-container hover:bg-primary text-on-primary py-2 px-4 rounded-lg font-medium text-sm">Deploy</button>
         </div>
       </div>
@@ -1254,7 +1392,7 @@
     <footer class="flex justify-between items-center px-container-padding h-8 bg-surface-container-lowest border-t border-outline-variant shrink-0 z-10 w-full gap-4">
       <div id="telem-footer-stats" class="font-mono-data text-mono-data text-primary truncate">
         FPS: <span id="telem-fps">—</span> | Ingest: <span id="telem-ingest-fps">—</span> | Infer: <span id="telem-infer-ms">—</span> | Protocol: <span id="telem-protocol">—</span> | Main: <span id="telem-main-stream">—</span> | Detections: <span id="telem-people">—</span> | Identified: <span id="telem-identities">—</span> | Stream Health: <span id="telem-health">Standby</span>
-        <span class="text-on-surface-variant"> | Floor <span id="telem-status">STANDBY</span> · Bays <span id="telem-elapsed">—</span></span>
+        <span class="text-on-surface-variant"> | Floor <span id="telem-status">STANDBY</span> · <span id="telem-zone-noun">Bays</span> <span id="telem-elapsed">—</span></span>
       </div>
       <div class="flex gap-4 font-mono-data text-mono-data text-on-surface-variant shrink-0">
         <span>Privacy Policy</span>
@@ -1262,6 +1400,25 @@
       </div>
     </footer>
   </main>
+
+  <div id="pipe-layout-modal" class="hidden fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+    <div class="pipe-layout-dialog" role="dialog" aria-labelledby="pipe-layout-title">
+      <header>
+        <h3 id="pipe-layout-title">Load layout</h3>
+        <p>Pick Garage, Massage, or a saved layout. Preview it, then load it onto the canvas. Deployed detection is unchanged until you Deploy.</p>
+      </header>
+      <div class="pipe-layout-body">
+        <aside id="pipe-layout-list" class="pipe-layout-list"></aside>
+        <div id="pipe-layout-preview" class="pipe-layout-preview" aria-label="Layout preview"></div>
+      </div>
+      <footer>
+        <button type="button" id="pipe-layout-save">Save current as layout</button>
+        <span class="pipe-layout-spacer"></span>
+        <button type="button" id="pipe-layout-cancel">Cancel</button>
+        <button type="button" id="pipe-layout-apply">Load</button>
+      </footer>
+    </div>
+  </div>
 
   <div id="discover-cred-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onclick="if (event.target === this) cancelDiscoverConnect()">
     <div class="bg-surface-container-low border border-outline-variant rounded-xl w-full max-w-md p-5 space-y-4 shadow-2xl">
@@ -1320,11 +1477,9 @@
 
   <div id="bay-context-menu" class="hidden fixed z-50 bg-surface-container-high border border-outline-variant rounded-lg shadow-xl py-1 text-sm text-on-surface">
     <button type="button" id="ctx-rename-bay" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
-      <span>✏️</span> Rename Bay
+      <span>✏️</span> <span id="ctx-rename-label">Rename zone</span>
     </button>
-    <button type="button" id="ctx-type-bay" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
-      <span>🏷️</span> Toggle Vehicle Bay / Tool Station
-    </button>
+    <div id="ctx-type-group"></div>
     <button type="button" id="ctx-align-rect" class="w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2">
       <span>📐</span> Reset to Rectangle (Square Angles)
     </button>
@@ -1333,11 +1488,12 @@
     </button>
     <div class="my-1 border-t border-outline-variant"></div>
     <button type="button" id="ctx-delete-bay" class="w-full px-4 py-1.5 text-left text-error hover:bg-error/10 flex items-center gap-2">
-      <span>🗑️</span> Delete Bay
+      <span>🗑️</span> <span id="ctx-delete-label">Delete zone</span>
     </button>
   </div>
 
   <script src="/static/pipeline-graph.js"></script>
+  <script src="/static/visits-reporting.js"></script>
   <script>
     let currentConfig = {};
     let isStreamActive = false;
@@ -1357,6 +1513,10 @@
     let roiOrigin = [0, 0];
     let roiStartPoly = [];
     let roiStart = [0.30, 0.20, 0.40, 0.60];
+    let roiCentroid = [0.5, 0.5];
+    let roiRotateArmed = false;
+    let roiSideIndices = [];
+    let roiLastPos = [0.5, 0.5];
     let rotateDeg = 'auto';
     let flipMode = 'none';
     let cameras = [];
@@ -1381,6 +1541,7 @@
     let jpegPumpTimer = 0;
     let jpegPumpGeneration = 0;
     let jpegObjectUrl = '';
+    let jpegPumpGotFrame = false;
     let lastLayoutKey = '';
 
     const VENDOR_TEMPLATES = {
@@ -2288,7 +2449,10 @@
         if (identityView === 'detail' && identityName) openIdentity(identityName);
         else showIdentityList();
       }
-      if (name === 'scorecards') renderScorecard();
+      if (name === 'scorecards') {
+        applyWorkplaceChrome();
+        renderScorecard();
+      }
       if (name === 'pipeline' && window.PipelineGraph) {
         PipelineGraph.open((currentConfig && currentConfig.workplace_type) || 'garage', cameras);
       } else if (window.PipelineGraph) {
@@ -2649,8 +2813,65 @@
       }
     }
 
+    function clampAbsentSeconds(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 10;
+      return Math.max(5, Math.min(600, Math.round(n)));
+    }
+
+    function cameraAbsentSeconds(cam) {
+      return clampAbsentSeconds(cam && cam.absent_seconds);
+    }
+
+    function syncPipelineCameras() {
+      if (window.PipelineGraph && typeof PipelineGraph.setCameras === 'function') {
+        PipelineGraph.setCameras(cameras);
+      }
+    }
+
+    function renderAbsentCameraRows() {
+      const root = document.getElementById('absent-camera-list');
+      const empty = document.getElementById('absent-camera-empty');
+      if (!root) return;
+      root.innerHTML = '';
+      if (empty) empty.classList.toggle('hidden', cameras.length > 0);
+      cameras.forEach((cam) => {
+        const sec = cameraAbsentSeconds(cam);
+        const row = document.createElement('div');
+        row.className = 'flex flex-col gap-1.5';
+        const head = document.createElement('div');
+        head.className = 'flex justify-between items-center gap-2';
+        const name = document.createElement('span');
+        name.className = 'text-sm text-on-surface truncate';
+        name.textContent = cam.name || cam.id || 'Camera';
+        const label = document.createElement('span');
+        label.className = 'font-mono-data text-mono-data text-primary shrink-0';
+        label.textContent = sec + 's';
+        head.appendChild(name);
+        head.appendChild(label);
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '5';
+        slider.max = '600';
+        slider.step = '5';
+        slider.value = String(sec);
+        slider.className = 'w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer';
+        slider.setAttribute('aria-label', (cam.name || 'Camera') + ' idle-bay alert seconds');
+        slider.addEventListener('input', () => {
+          label.textContent = clampAbsentSeconds(slider.value) + 's';
+        });
+        slider.addEventListener('change', () => {
+          void saveCameraAbsentSeconds(cam.id, slider.value);
+        });
+        row.appendChild(head);
+        row.appendChild(slider);
+        root.appendChild(row);
+      });
+    }
+
     function updateAbsentLabel(val) {
-      document.getElementById('absent-val-label').innerText = val + 's';
+      const el = document.getElementById('absent-val-label');
+      if (el) el.innerText = val + 's';
     }
 
     function hubSettingsPayload() {
@@ -2659,9 +2880,41 @@
         venue: document.getElementById('venue-input').value,
         garage_name: document.getElementById('venue-input').value,
         open_time: document.getElementById('open-time-input').value,
-        close_time: document.getElementById('close-time-input').value,
-        absent_seconds: Number(document.getElementById('absent-slider').value)
+        close_time: document.getElementById('close-time-input').value
       };
+    }
+
+    async function saveCameraAbsentSeconds(cameraId, seconds) {
+      const n = clampAbsentSeconds(seconds);
+      const cam = cameras.find((c) => c.id === cameraId);
+      if (cam) cam.absent_seconds = n;
+      renderAbsentCameraRows();
+      syncPipelineCameras();
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera_id: cameraId, absent_seconds: n })
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentConfig = Object.assign({}, currentConfig, data);
+          if (Array.isArray(data.cameras)) applyCameraList(data);
+        }
+      } catch (err) {
+        console.error('Failed to save alert seconds', err);
+      }
+    }
+
+    if (window.PipelineGraph && typeof PipelineGraph.onAbsentSecondsChange === 'function') {
+      PipelineGraph.onAbsentSecondsChange((cameraId, seconds) => {
+        void saveCameraAbsentSeconds(cameraId, seconds);
+      });
+    }
+    if (window.PipelineGraph && typeof PipelineGraph.onDeploy === 'function') {
+      PipelineGraph.onDeploy((data) => {
+        applyLiveOverlaysFromDeploy(data);
+      });
     }
 
     async function saveHubSettings() {
@@ -2715,6 +2968,7 @@
 
     function startJpegPump(url) {
       stopJpegPump();
+      jpegPumpGotFrame = false;
       const generation = jpegPumpGeneration;
       const img = document.getElementById('live-camera-feed');
       if (!img || !url) return;
@@ -2743,6 +2997,7 @@
           if (!res.ok) throw new Error('frame ' + res.status);
           const blob = await res.blob();
           if (generation !== jpegPumpGeneration || !isStreamActive) return;
+          jpegPumpGotFrame = true;
           const nextUrl = URL.createObjectURL(blob);
           const prev = jpegObjectUrl;
           jpegObjectUrl = nextUrl;
@@ -2931,6 +3186,17 @@
       btn.textContent = 'Connect Stream';
     }
 
+    function setPlaceholderCopy(title, sub) {
+      const titleEl = document.getElementById('stream-placeholder-title');
+      const subEl = document.getElementById('stream-placeholder-sub');
+      if (titleEl) titleEl.textContent = title;
+      if (subEl) subEl.textContent = sub;
+    }
+
+    function setConnectingPlaceholder() {
+      setPlaceholderCopy('Opening camera…', 'Waiting for the first frame from this source.');
+    }
+
     function showDisconnectedPlaceholder() {
       if (currentLayoutMode === 'grid') return;
       detachLiveFeed();
@@ -2938,7 +3204,27 @@
       const placeholder = document.getElementById('stream-placeholder');
       if (stage) stage.style.display = 'none';
       if (placeholder) placeholder.style.display = 'flex';
+      setPlaceholderCopy('No camera connected', 'Select a source in Source Configuration to begin monitoring.');
       clearNativeFeedLayout();
+    }
+
+    function beginLivePreview(streamId, media) {
+      isStreamActive = true;
+      lastLiveStreamId = streamId || lastLiveStreamId;
+      lastLiveMedia = media || lastLiveMedia;
+      const placeholder = document.getElementById('stream-placeholder');
+      const stage = document.getElementById('video-stage');
+      if (currentLayoutMode === 'grid') {
+        if (stage) stage.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'none';
+        const gridStage = document.getElementById('multi-cam-grid');
+        if (gridStage) gridStage.style.display = 'grid';
+        updateMultiCamGridFocus();
+        return;
+      }
+      if (placeholder) placeholder.style.display = 'none';
+      if (stage) stage.style.display = 'block';
+      startLivePlayer(streamId, media);
     }
 
     function markPortClosed() {
@@ -3329,7 +3615,37 @@
       if (Array.isArray(data.cameras)) cameras = data.cameras;
       if (data.active_camera_id !== undefined) activeCameraId = data.active_camera_id || '';
       renderCameraList();
+      renderAbsentCameraRows();
+      syncPipelineCameras();
       updateCrumbs();
+    }
+
+    function applyLiveOverlaysFromDeploy(data) {
+      if (!data || typeof data !== 'object') return;
+      if (data.config && data.config.workplace_type) {
+        currentConfig.workplace_type = data.config.workplace_type;
+        applyWorkplaceChrome();
+      }
+      if (Array.isArray(data.cameras)) applyCameraList(data);
+      const cameraList = Array.isArray(data.cameras) ? data.cameras : cameras;
+      const activeId = (data.active_camera_id !== undefined && data.active_camera_id !== null)
+        ? String(data.active_camera_id || '')
+        : String(activeCameraId || '');
+      const cam = cameraList.find((c) => c && c.id === activeId) || cameraList[0];
+      const overlayBays = (cam && Array.isArray(cam.bays) && cam.bays.length)
+        ? cam.bays
+        : (Array.isArray(data.bays) ? data.bays : null);
+      if (overlayBays && overlayBays.length) {
+        liveBays = overlayBays.map(cloneBay);
+        selectedBayId = liveBays[0] ? liveBays[0].id : '';
+        liveRoi = liveBays[0] ? liveBays[0].roi.slice() : liveRoi;
+      } else {
+        liveBays = defaultLiveBays();
+        selectedBayId = liveBays[0] ? liveBays[0].id : '';
+        if (liveBays[0]) liveRoi = liveBays[0].roi.slice();
+      }
+      syncBayDom();
+      layoutRoiOverlay();
     }
 
     function renderCameraList() {
@@ -3891,16 +4207,16 @@
       const select = document.getElementById('import-grid-source-select');
       const badge = document.getElementById('cam-bay-count-badge');
       if (badge) {
-        badge.textContent = `${liveBays.length} bay${liveBays.length === 1 ? '' : 's'}`;
+        badge.textContent = countLabel(liveBays.length);
       }
       if (!select) return;
-      select.innerHTML = '<option value="">Select camera to copy bays from...</option>';
+      select.innerHTML = '<option value="">Select camera to copy ' + zoneNounPlural() + ' from...</option>';
       const others = cameras.filter((c) => c.id !== activeCameraId);
       others.forEach((c) => {
         const opt = document.createElement('option');
         opt.value = c.id;
         const count = Array.isArray(c.bays) ? c.bays.length : 0;
-        opt.textContent = `${c.name || 'Untitled'} (${count} bay${count === 1 ? '' : 's'})`;
+        opt.textContent = `${c.name || 'Untitled'} (${countLabel(count)})`;
         select.appendChild(opt);
       });
       const btn = document.getElementById('btn-import-grid');
@@ -3913,7 +4229,7 @@
       const srcId = String(sourceId || (select ? select.value : '')).trim();
       if (!srcId) {
         if (feedback) {
-          feedback.textContent = 'Please choose a camera to import bays from.';
+          feedback.textContent = 'Please choose a camera to import ' + zoneNounPlural() + ' from.';
           feedback.className = 'text-xs text-error mt-2 block';
         }
         return;
@@ -3923,7 +4239,7 @@
       const srcName = sourceCam ? sourceCam.name : 'Selected camera';
       const tgtName = targetCam ? targetCam.name : 'Current camera';
       const bayCount = (sourceCam && Array.isArray(sourceCam.bays)) ? sourceCam.bays.length : 0;
-      const ok = confirm(`Import ${bayCount} bays from "${srcName}" into "${tgtName}"?\n\nThis will replace the current bay layout on this camera.`);
+      const ok = confirm('Import ' + countLabel(bayCount) + ' from "' + srcName + '" into "' + tgtName + '"?\n\nThis will replace the current ' + zoneNoun() + ' layout on this camera.');
       if (!ok) return;
 
       try {
@@ -3938,7 +4254,7 @@
         const data = await res.json();
         if (!data.success) {
           if (feedback) {
-            feedback.textContent = data.error || 'Failed to import bays.';
+            feedback.textContent = data.error || 'Failed to import ' + zoneNounPlural() + '.';
             feedback.className = 'text-xs text-error mt-2 block';
           }
           return;
@@ -3953,7 +4269,7 @@
         layoutRoiOverlay();
         updateImportGridOptions();
         if (feedback) {
-          feedback.textContent = data.message || `Imported ${liveBays.length} bays successfully.`;
+          feedback.textContent = data.message || 'Imported ' + countLabel(liveBays.length) + ' successfully.';
           feedback.className = 'text-xs text-primary mt-2 block';
           setTimeout(() => { if (feedback) feedback.classList.add('hidden'); }, 4000);
         }
@@ -3990,18 +4306,13 @@
         liveRoi = liveBays[0].roi.slice();
       } else if (Array.isArray(cam.roi) && cam.roi.length === 4) {
         liveRoi = cam.roi.map(Number);
-        liveBays = [
-          { id: 'bay_1', name: 'Lift Bay 1', roi: liveRoi.slice(), type: 'vehicle_bay' },
-          { id: 'tools', name: 'Tool Station', roi: [0.42, 0.05, 0.16, 0.20], type: 'tool_area' }
-        ];
-        selectedBayId = 'bay_1';
+        liveBays = defaultLiveBays();
+        if (liveBays[0]) liveBays[0].roi = liveRoi.slice();
+        selectedBayId = liveBays[0] ? liveBays[0].id : '';
       } else {
-        liveRoi = [0.30, 0.20, 0.40, 0.60];
-        liveBays = [
-          { id: 'bay_1', name: 'Lift Bay 1', roi: liveRoi.slice(), type: 'vehicle_bay' },
-          { id: 'tools', name: 'Tool Station', roi: [0.42, 0.05, 0.16, 0.20], type: 'tool_area' }
-        ];
-        selectedBayId = 'bay_1';
+        liveBays = defaultLiveBays();
+        selectedBayId = liveBays[0] ? liveBays[0].id : '';
+        liveRoi = liveBays[0] ? liveBays[0].roi.slice() : [0.30, 0.20, 0.40, 0.60];
       }
       syncBayDom();
       updateImportGridOptions();
@@ -4553,6 +4864,7 @@
         const res = await fetch('/api/config');
         if (!res.ok) return;
         currentConfig = await res.json();
+        applyWorkplaceChrome();
         cameras = Array.isArray(currentConfig.cameras) ? currentConfig.cameras : [];
         activeCameraId = currentConfig.active_camera_id || '';
         if (currentConfig.venue || currentConfig.garage_name) {
@@ -4563,10 +4875,6 @@
         if (currentConfig.operating_hours) {
           if (currentConfig.operating_hours.open) document.getElementById('open-time-input').value = currentConfig.operating_hours.open;
           if (currentConfig.operating_hours.close) document.getElementById('close-time-input').value = currentConfig.operating_hours.close;
-        }
-        if (currentConfig.absent_seconds) {
-          document.getElementById('absent-slider').value = currentConfig.absent_seconds;
-          updateAbsentLabel(currentConfig.absent_seconds);
         }
         if (currentConfig.rotate !== undefined && currentConfig.rotate !== 'auto') {
           const n = Number(currentConfig.rotate);
@@ -4580,13 +4888,21 @@
           telegram_bot_token_set: !!currentConfig.telegram_bot_configured,
           bot_username: currentConfig.telegram_bot_username || '',
         });
-        if (Array.isArray(currentConfig.bays) && currentConfig.bays.length) {
-          liveBays = currentConfig.bays.map(cloneBay);
+        const overlayCam = cameras.find((c) => c.id === activeCameraId) || cameras[0];
+        const overlayBays = (overlayCam && Array.isArray(overlayCam.bays) && overlayCam.bays.length)
+          ? overlayCam.bays
+          : currentConfig.bays;
+        if (Array.isArray(overlayBays) && overlayBays.length) {
+          liveBays = overlayBays.map(cloneBay);
           selectedBayId = liveBays[0].id;
           liveRoi = liveBays[0].roi.slice();
         } else if (Array.isArray(currentConfig.roi) && currentConfig.roi.length === 4) {
           liveRoi = currentConfig.roi.map(Number);
           if (liveBays[0]) liveBays[0].roi = liveRoi.slice();
+        } else if (!Array.isArray(currentConfig.bays) || !currentConfig.bays.length) {
+          liveBays = defaultLiveBays();
+          selectedBayId = liveBays[0] ? liveBays[0].id : '';
+          if (liveBays[0]) liveRoi = liveBays[0].roi.slice();
         }
         wifiDevices = Array.isArray(currentConfig.wifi_devices) ? currentConfig.wifi_devices : [];
         renderWifiDevices();
@@ -4602,6 +4918,8 @@
           onProtocolChange();
         }
         renderCameraList();
+        renderAbsentCameraRows();
+        syncPipelineCameras();
         updateCrumbs();
         updateImportGridOptions();
         if (!document.body.classList.contains('auth-locked')) {
@@ -4652,8 +4970,6 @@
     async function connectAndStreamCamera() {
       const feedback = document.getElementById('camera-feedback');
       const btn = document.getElementById('btn-connect');
-      const placeholder = document.getElementById('stream-placeholder');
-      const stage = document.getElementById('video-stage');
       const name = document.getElementById('camera-name-input').value.trim();
 
       if (!name) {
@@ -4674,6 +4990,7 @@
       btn.textContent = 'Connecting…';
       feedback.classList.add('hidden');
       showConfigTab('source');
+      setConnectingPlaceholder();
       setLiveChrome(false, 'Connecting');
       document.getElementById('telem-status').textContent = 'CONNECTING';
       document.getElementById('telem-health').textContent = 'Connecting';
@@ -4699,7 +5016,6 @@
             xaddrs: payload.xaddrs,
             venue: document.getElementById('venue-input').value,
             open_time: document.getElementById('open-time-input').value,
-            absent_seconds: Number(document.getElementById('absent-slider').value),
             rotate: payload.rotate,
             flip: payload.flip,
             roi: payload.roi,
@@ -4718,48 +5034,30 @@
         }
         if (Array.isArray(data.roi) && data.roi.length === 4) liveRoi = data.roi;
         updateCrumbs();
-        if (data.stream_id && data.media && data.media.ready) {
-          isStreamActive = true;
-          if (currentLayoutMode === 'grid') {
-            stage.style.display = 'none';
-            if (placeholder) placeholder.style.display = 'none';
-            const gridStage = document.getElementById('multi-cam-grid');
-            if (gridStage) gridStage.style.display = 'grid';
-            updateMultiCamGridFocus();
-          } else {
-            stage.style.display = 'block';
-            placeholder.style.display = 'none';
-            startLivePlayer(data.stream_id, data.media);
-          }
-        }
+        beginLivePreview(data.stream_id, data.media);
 
         const outcome = data.pending === false && data.width
           ? { connected: true, data: data }
           : await waitForConnection(seq);
         if (seq !== connectSeq || outcome.superseded) return;
         if (outcome.failed) {
+          const hardFail = outcome.data && isFailedConnection(outcome.data);
+          if (jpegPumpGotFrame && !hardFail) {
+            liveStatusText = 'Live';
+            showBanner(feedback, true, 'Camera is live.');
+            setLiveChrome(true, 'LIVE');
+            renderCameraList();
+            requestAnimationFrame(layoutVideoStage);
+            return;
+          }
           showBanner(feedback, false, outcome.error || 'Connection failed.');
           markStreamOffline();
           return;
         }
 
-        isStreamActive = true;
         lastFailedId = '';
         liveStatusText = 'Live';
         showBanner(feedback, true, data.message || 'Camera connected.');
-        const streamId = data.stream_id || (outcome.data && outcome.data.stream_id) || '';
-        const media = data.media || (outcome.data && outcome.data.media) || {};
-        if (currentLayoutMode === 'grid') {
-          stage.style.display = 'none';
-          if (placeholder) placeholder.style.display = 'none';
-          const gridStage = document.getElementById('multi-cam-grid');
-          if (gridStage) gridStage.style.display = 'grid';
-          updateMultiCamGridFocus();
-        } else {
-          startLivePlayer(streamId, media);
-          stage.style.display = 'block';
-          placeholder.style.display = 'none';
-        }
         setLiveChrome(true, 'LIVE');
         document.getElementById('telem-health').textContent = 'Stable';
         const tel = outcome.data || {};
@@ -4958,6 +5256,10 @@
 
     function applyGarageHeader(data) {
       if (!data) return;
+      if (data.workplace_type && data.workplace_type !== currentConfig.workplace_type) {
+        currentConfig.workplace_type = data.workplace_type;
+        applyWorkplaceChrome();
+      }
       const garage = data.garage || data;
       const bays = data.bays || liveBays;
       const active = garage.active_bay_count != null
@@ -4965,13 +5267,13 @@
         : bays.filter((b) => (bayLive[b.bay_id || b.id] || b).state && (bayLive[b.bay_id || b.id] || b).state !== 'EMPTY').length;
       const total = garage.total_bays != null ? garage.total_bays : bays.length;
       const countEl = document.getElementById('header-bay-count');
-      if (countEl) countEl.textContent = active + ' / ' + total + ' bays';
+      if (countEl) countEl.textContent = active + ' / ' + total + ' ' + (total === 1 ? zoneNoun() : zoneNounPlural());
       const open = (garage.shop_open !== undefined) ? garage.shop_open : data.shop_open;
       const dot = document.getElementById('shop-status-dot');
       const label = document.getElementById('shop-status-label');
       if (dot && label && open !== undefined && open !== null) {
         dot.className = 'w-2 h-2 rounded-full ' + (open ? 'bg-green-500' : 'bg-outline');
-        label.textContent = open ? 'SHOP OPEN' : 'SHOP CLOSED';
+        label.textContent = open ? 'OPEN' : 'CLOSED';
         label.className = 'font-label-upper text-label-upper ' + (open ? 'text-green-400' : 'text-on-surface-variant');
       }
       const vName = garage.name || garage.garage_name;
@@ -5080,7 +5382,7 @@
     }
 
     function playSoundArrival() {
-      if (!audioAlertsEnabled) return;
+      if (!audioAlertsEnabled || !isGarageWorkplace()) return;
       try {
         const ctx = getAudioContext();
         if (!ctx) return;
@@ -5116,7 +5418,7 @@
     }
 
     function playSoundDeparture() {
-      if (!audioAlertsEnabled) return;
+      if (!audioAlertsEnabled || !isGarageWorkplace()) return;
       try {
         const ctx = getAudioContext();
         if (!ctx) return;
@@ -5152,6 +5454,7 @@
     }
 
     function checkBayStateAudioAlerts(rows) {
+      if (!isGarageWorkplace()) return;
       rows.forEach((row) => {
         const id = row.bay_id || row.id;
         const prevState = previousBayStates[id];
@@ -5191,7 +5494,7 @@
           const newBay = {
             id: id,
             name: row.name || id,
-            type: row.type || 'vehicle_bay',
+            type: parseLiveZoneKind(row.type),
             roi: row.roi.map(Number),
             is_auto: Boolean(id.startsWith('auto_') || (row.id && String(row.id).startsWith('auto_')))
           };
@@ -5207,16 +5510,156 @@
         }
       }
       checkBayStateAudioAlerts(rows);
-      updateOverlayStaff(rows);
+      if (isGarageWorkplace()) updateOverlayStaff(rows);
       syncBayDom();
       layoutRoiOverlay();
+    }
+
+    const ALL_LIVE_ZONE_KINDS = ['vehicle_bay', 'tool_area', 'entrance', 'waiting', 'treatment_room', 'reception'];
+    const GARAGE_ZONE_KIND_OPTIONS = [
+      { id: 'vehicle_bay', label: 'Vehicle Bay' },
+      { id: 'tool_area', label: 'Tool Station' }
+    ];
+    const MASSAGE_ZONE_KIND_OPTIONS = [
+      { id: 'entrance', label: 'Entrance' },
+      { id: 'waiting', label: 'Waiting' },
+      { id: 'treatment_room', label: 'Treatment room' },
+      { id: 'reception', label: 'Reception' }
+    ];
+
+    function workplaceType() {
+      const raw = (currentConfig && currentConfig.workplace_type) || '';
+      return raw === 'massage' ? 'massage' : 'garage';
+    }
+
+    function isMassageWorkplace() {
+      return workplaceType() === 'massage';
+    }
+
+    function isGarageWorkplace() {
+      return !isMassageWorkplace();
+    }
+
+    function zoneNoun() {
+      return isMassageWorkplace() ? 'zone' : 'bay';
+    }
+
+    function zoneNounPlural() {
+      return isMassageWorkplace() ? 'zones' : 'bays';
+    }
+
+    function zoneNounTitle() {
+      return isMassageWorkplace() ? 'Zone' : 'Bay';
+    }
+
+    function workplaceZoneKinds() {
+      return isMassageWorkplace() ? MASSAGE_ZONE_KIND_OPTIONS : GARAGE_ZONE_KIND_OPTIONS;
+    }
+
+    function defaultZoneKind() {
+      return isMassageWorkplace() ? 'treatment_room' : 'vehicle_bay';
+    }
+
+    function parseLiveZoneKind(raw) {
+      const value = String(raw || '');
+      const allowed = workplaceZoneKinds().map((k) => k.id);
+      if (allowed.indexOf(value) !== -1) return value;
+      if (ALL_LIVE_ZONE_KINDS.indexOf(value) !== -1) return value;
+      return defaultZoneKind();
+    }
+
+    function defaultLiveBays() {
+      if (isMassageWorkplace()) {
+        return [
+          { id: 'entrance', name: 'Entrance', roi: [0.05, 0.15, 0.25, 0.70], type: 'entrance' },
+          { id: 'waiting', name: 'Waiting', roi: [0.35, 0.20, 0.28, 0.55], type: 'waiting' },
+          { id: 'room_1', name: 'Treatment Room 1', roi: [0.68, 0.18, 0.28, 0.62], type: 'treatment_room' },
+          { id: 'reception', name: 'Reception', roi: [0.38, 0.06, 0.14, 0.14], type: 'reception' }
+        ];
+      }
+      return [
+        { id: 'bay_1', name: 'Lift Bay 1', roi: [0.10, 0.20, 0.35, 0.60], type: 'vehicle_bay' },
+        { id: 'bay_2', name: 'Bay 2 (Brakes/Tires)', roi: [0.55, 0.20, 0.35, 0.60], type: 'vehicle_bay' },
+        { id: 'tools', name: 'Tool Station', roi: [0.42, 0.05, 0.16, 0.20], type: 'tool_area' }
+      ];
+    }
+
+    function countLabel(n) {
+      return n + ' ' + (n === 1 ? zoneNoun() : zoneNounPlural());
+    }
+
+    function setHidden(el, hidden) {
+      if (!el) return;
+      el.classList.toggle('hidden', !!hidden);
+    }
+
+    function applyWorkplaceChrome() {
+      const massage = isMassageWorkplace();
+      const noun = zoneNoun();
+      const plural = zoneNounPlural();
+      const title = zoneNounTitle();
+      const nav = document.getElementById('nav-scorecards-label');
+      if (nav) nav.textContent = massage ? 'Visits' : 'Staff';
+      const heading = document.getElementById('scorecard-heading');
+      if (heading) heading.textContent = massage ? 'Visits' : 'Staff';
+      const sub = document.getElementById('scorecard-sub');
+      if (sub) {
+        sub.textContent = massage
+          ? 'Today and week unique visitors, plus open sessions.'
+          : 'Live attendance, wrench time, and garage Wi-Fi presence for today.';
+      }
+      const util = document.getElementById('scorecard-util');
+      setHidden(util, massage);
+      const hint = document.getElementById('live-roi-hint');
+      if (hint) {
+        hint.textContent = 'Side edges scale both vertices · Inside moves · Corners stretch angles · R rotates';
+      }
+      const rename = document.getElementById('ctx-rename-label');
+      if (rename) rename.textContent = 'Rename ' + noun;
+      const del = document.getElementById('ctx-delete-label');
+      if (del) del.textContent = 'Delete ' + noun;
+      const badge = document.getElementById('cam-bay-count-badge');
+      if (badge) badge.textContent = countLabel(liveBays.length);
+      const gridTitle = document.getElementById('grid-section-title-text');
+      if (gridTitle) gridTitle.textContent = title + ' grid';
+      const gridHelp = document.getElementById('grid-section-help');
+      if (gridHelp) {
+        gridHelp.textContent = 'Each camera has its own independent ' + noun + ' grid. Drag directly on the camera viewport to draw or resize ' + plural + ', or import an existing grid layout from another camera.';
+      }
+      const idleHelp = document.getElementById('idle-alert-help');
+      if (idleHelp) {
+        idleHelp.textContent = massage
+          ? 'How long a zone stays empty before an alert. Each camera can wait a different number of seconds.'
+          : 'How long a bay stays empty before an alert. Each camera can wait a different number of seconds.';
+      }
+      const idleEmpty = document.getElementById('absent-camera-empty');
+      if (idleEmpty) idleEmpty.textContent = 'Add a camera to set an idle-zone alert.';
+      const telemNoun = document.getElementById('telem-zone-noun');
+      if (telemNoun) telemNoun.textContent = title + 's';
+      document.querySelectorAll('[data-garage-only]').forEach((el) => setHidden(el, massage));
+      syncBayTypeMenu();
+    }
+
+    function syncBayTypeMenu() {
+      const group = document.getElementById('ctx-type-group');
+      if (!group) return;
+      group.innerHTML = '';
+      workplaceZoneKinds().forEach((opt) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full px-4 py-1.5 text-left hover:bg-surface-container-highest flex items-center gap-2';
+        btn.dataset.zoneKind = opt.id;
+        btn.innerHTML = '<span>🏷️</span> ' + opt.label;
+        btn.addEventListener('click', () => setSelectedBayType(opt.id));
+        group.appendChild(btn);
+      });
     }
 
     function cloneBay(bay) {
       return {
         id: String(bay.id || ('bay_' + Date.now())),
-        name: String(bay.name || bay.id || 'Bay'),
-        type: bay.type === 'tool_area' ? 'tool_area' : 'vehicle_bay',
+        name: String(bay.name || bay.id || zoneNounTitle()),
+        type: parseLiveZoneKind(bay.type),
         roi: Array.isArray(bay.roi) ? bay.roi.map(Number) : [0.3, 0.2, 0.2, 0.3],
         polygon: Array.isArray(bay.polygon) && bay.polygon.length >= 3
           ? bay.polygon.map((p) => [Number(p[0]), Number(p[1])])
@@ -5225,14 +5668,16 @@
     }
 
     function nextAvailableBayName(bays) {
+      const prefix = isMassageWorkplace() ? 'Treatment Room' : 'Bay';
       const usedNumbers = new Set();
+      const re = new RegExp(prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\d+)', 'i');
       (bays || []).forEach((b) => {
-        const m = (b.name || '').match(/Bay\s*(\d+)/i);
+        const m = (b.name || '').match(re);
         if (m) usedNumbers.add(parseInt(m[1], 10));
       });
       let num = 1;
       while (usedNumbers.has(num)) num++;
-      return 'Bay ' + num;
+      return prefix + ' ' + num;
     }
 
     function hideBayContextMenu() {
@@ -5302,25 +5747,34 @@
       hideBayContextMenu();
       const bay = selectedBay();
       if (!bay) return;
-      const label = prompt('Rename bay', bay.name);
+      const label = prompt('Rename ' + zoneNoun(), bay.name);
       if (label == null) return;
       const next = label.trim();
       if (!next) return;
       bay.name = next;
-      if (/tool/i.test(bay.name)) bay.type = 'tool_area';
+      if (isGarageWorkplace() && /tool/i.test(bay.name)) bay.type = 'tool_area';
+      syncBayDom();
+      layoutRoiOverlay();
+      await persistLiveBays();
+    }
+
+    async function setSelectedBayType(kind) {
+      hideBayContextMenu();
+      const bay = selectedBay();
+      if (!bay) return;
+      bay.type = parseLiveZoneKind(kind);
       syncBayDom();
       layoutRoiOverlay();
       await persistLiveBays();
     }
 
     async function toggleSelectedBayType() {
-      hideBayContextMenu();
+      const kinds = workplaceZoneKinds();
       const bay = selectedBay();
-      if (!bay) return;
-      bay.type = bay.type === 'tool_area' ? 'vehicle_bay' : 'tool_area';
-      syncBayDom();
-      layoutRoiOverlay();
-      await persistLiveBays();
+      if (!bay || !kinds.length) return;
+      const idx = kinds.findIndex((k) => k.id === bay.type);
+      const next = kinds[(idx + 1 + kinds.length) % kinds.length] || kinds[0];
+      await setSelectedBayType(next.id);
     }
 
     async function resetSelectedBayToRect() {
@@ -5590,6 +6044,24 @@
         }
       }
 
+      let sideBox = document.getElementById('roi-box-selected');
+      if (!sideBox) {
+        sideBox = document.createElement('div');
+        sideBox.id = 'roi-box-selected';
+        sideBox.className = 'roi-box selected';
+        ['e', 'w'].forEach((side) => {
+          const handle = document.createElement('div');
+          handle.className = 'roi-handle ' + side;
+          handle.dataset.roiSide = side;
+          handle.title = side === 'e'
+            ? 'Drag right edge to scale both vertices'
+            : 'Drag left edge to scale both vertices';
+          sideBox.appendChild(handle);
+        });
+        overlay.appendChild(sideBox);
+      }
+      sideBox.style.display = selBay ? 'block' : 'none';
+
       if (selBay) liveRoi = selBay.roi.slice();
     }
 
@@ -5782,6 +6254,17 @@
             handle.style.background = color;
           }
         });
+        const [bx, by, bw, bh] = selBay.roi;
+        const sideBox = document.getElementById('roi-box-selected');
+        if (sideBox) {
+          sideBox.style.left = (bx * 100) + '%';
+          sideBox.style.top = (by * 100) + '%';
+          sideBox.style.width = (bw * 100) + '%';
+          sideBox.style.height = (bh * 100) + '%';
+          sideBox.querySelectorAll('.roi-handle').forEach((h) => {
+            h.style.background = color;
+          });
+        }
       }
     }
 
@@ -5792,14 +6275,67 @@
       return [clamp01(x), clamp01(y)];
     }
 
+    function polygonCentroid(poly) {
+      if (!Array.isArray(poly) || !poly.length) return [0.5, 0.5];
+      let x = 0;
+      let y = 0;
+      poly.forEach((pt) => {
+        x += Number(pt[0]) || 0;
+        y += Number(pt[1]) || 0;
+      });
+      return [x / poly.length, y / poly.length];
+    }
+
+    function rotatePoint(px, py, cx, cy, angle) {
+      const dx = px - cx;
+      const dy = py - cy;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      return [cx + dx * cos - dy * sin, cy + dy * cos + dx * sin];
+    }
+
+    function sideVertexIndices(poly, side) {
+      const indexed = poly.map((pt, i) => ({ i, x: Number(pt[0]) || 0 }));
+      indexed.sort((a, b) => a.x - b.x);
+      if (side === 'w') return [indexed[0].i, indexed[1] ? indexed[1].i : indexed[0].i];
+      const last = indexed.length - 1;
+      return [indexed[last].i, indexed[last - 1] ? indexed[last - 1].i : indexed[last].i];
+    }
+
+    function beginRotateDrag(bay, nx, ny) {
+      const poly = ensureBayPolygon(bay);
+      roiDragging = true;
+      roiMode = 'rotate';
+      roiOrigin = [nx, ny];
+      roiStartPoly = poly.map((p) => p.slice());
+      roiCentroid = polygonCentroid(roiStartPoly);
+      roiRotateArmed = false;
+    }
+
     function onRoiDown(ev) {
       if (!isStreamActive) return;
       if (ev.button !== 0) return;
       hideBayContextMenu();
       ev.preventDefault();
       const [nx, ny] = clientToRoi(ev);
+      roiLastPos = [nx, ny];
 
-      // Check if user clicked a corner control handle
+      const side = ev.target.dataset ? ev.target.dataset.roiSide : undefined;
+      if (side === 'e' || side === 'w') {
+        const bay = selectedBay();
+        if (bay) {
+          const poly = ensureBayPolygon(bay);
+          roiDragging = true;
+          roiMode = 'scale-side';
+          roiHandle = side;
+          roiOrigin = [nx, ny];
+          roiStartPoly = poly.map((p) => p.slice());
+          roiSideIndices = sideVertexIndices(roiStartPoly, side);
+          roiRotateArmed = false;
+          return;
+        }
+      }
+
       const cornerIdxStr = ev.target.dataset ? ev.target.dataset.cornerIdx : undefined;
       if (cornerIdxStr !== undefined) {
         const bay = selectedBay();
@@ -5811,13 +6347,13 @@
             roiMode = 'stretch-corner';
             roiOrigin = [nx, ny];
             roiStartPoly = poly.map((p) => p.slice());
+            roiRotateArmed = false;
             ev.target.classList.add('corner-active');
             return;
           }
         }
       }
 
-      // Check if clicked bay chip or SVG polygon or hit polygon interior
       const bayIdFromEl = ev.target.dataset && ev.target.dataset.bayId;
       let bay = bayIdFromEl ? liveBays.find((b) => b.id === bayIdFromEl) : null;
       if (!bay) {
@@ -5829,17 +6365,22 @@
 
       if (bay) {
         selectedBayId = bay.id;
-        roiMode = 'move';
         ensureBayPolygon(bay);
-        roiStartPoly = bay.polygon.map((p) => p.slice());
-        roiStart = bay.roi.slice();
+        if (roiRotateArmed) {
+          beginRotateDrag(bay, nx, ny);
+        } else {
+          roiMode = 'move';
+          roiStartPoly = bay.polygon.map((p) => p.slice());
+          roiStart = bay.roi.slice();
+        }
       } else {
+        roiRotateArmed = false;
         roiMode = 'draw';
         const id = 'bay_' + Date.now();
         const created = {
           id: id,
           name: nextAvailableBayName(liveBays),
-          type: 'vehicle_bay',
+          type: defaultZoneKind(),
           roi: [nx, ny, 0.02, 0.02],
           polygon: [
             [nx, ny],
@@ -5863,12 +6404,33 @@
     function onRoiMove(ev) {
       if (!roiDragging) return;
       const [nx, ny] = clientToRoi(ev);
+      roiLastPos = [nx, ny];
       const bay = selectedBay();
       if (!bay) return;
 
       if (roiMode === 'stretch-corner' && roiCornerIdx >= 0) {
         ensureBayPolygon(bay);
         bay.polygon[roiCornerIdx] = [clamp01(nx), clamp01(ny)];
+        recomputeBayRoi(bay);
+      } else if (roiMode === 'scale-side' && roiStartPoly.length && roiSideIndices.length) {
+        const dx = nx - roiOrigin[0];
+        const dy = ny - roiOrigin[1];
+        bay.polygon = roiStartPoly.map((pt) => pt.slice());
+        roiSideIndices.forEach((idx) => {
+          const pt = roiStartPoly[idx];
+          if (!pt) return;
+          bay.polygon[idx] = [clamp01(pt[0] + dx), clamp01(pt[1] + dy)];
+        });
+        recomputeBayRoi(bay);
+      } else if (roiMode === 'rotate' && roiStartPoly.length) {
+        const [cx, cy] = roiCentroid;
+        const startAngle = Math.atan2(roiOrigin[1] - cy, roiOrigin[0] - cx);
+        const nowAngle = Math.atan2(ny - cy, nx - cx);
+        const delta = nowAngle - startAngle;
+        bay.polygon = roiStartPoly.map((pt) => {
+          const rotated = rotatePoint(pt[0], pt[1], cx, cy, delta);
+          return [clamp01(rotated[0]), clamp01(rotated[1])];
+        });
         recomputeBayRoi(bay);
       } else if (roiMode === 'move' && roiStartPoly.length) {
         const dx = nx - roiOrigin[0];
@@ -5901,6 +6463,9 @@
       roiDragging = false;
       roiMode = null;
       roiCornerIdx = -1;
+      roiHandle = null;
+      roiSideIndices = [];
+      roiRotateArmed = false;
       const bay = selectedBay();
       if (bay && wasDraw) {
         const [x, y, w, h] = bay.roi;
@@ -5914,7 +6479,7 @@
           await persistLiveBays();
           return;
         }
-        const label = prompt('Name this service bay', bay.name);
+        const label = prompt('Name this ' + zoneNoun(), bay.name);
         if (label === null) {
           recentlyDeletedBayIds.add(bay.id);
           delete bayLive[bay.id];
@@ -5926,7 +6491,7 @@
           return;
         }
         if (label.trim()) bay.name = label.trim();
-        if (/tool/i.test(bay.name)) bay.type = 'tool_area';
+        if (isGarageWorkplace() && /tool/i.test(bay.name)) bay.type = 'tool_area';
       }
       layoutRoiOverlay();
       await persistLiveBays();
@@ -5938,7 +6503,7 @@
       const mac = (document.getElementById('wifi-mac-input').value || '').trim();
       const ip = (document.getElementById('wifi-ip-input').value || '').trim();
       if (!name || (!mac && !ip)) {
-        showBanner(feedback, false, 'Need a mechanic name and a MAC or IP.');
+        showBanner(feedback, false, 'Need a staff name and a MAC or IP.');
         return;
       }
       const next = wifiDevices.filter((d) => d.name.toLowerCase() !== name.toLowerCase());
@@ -6227,7 +6792,62 @@
       }
     }
 
+    async function renderVisitsPanel() {
+      const root = document.getElementById('scorecard-content');
+      if (!root) return;
+      const util = document.getElementById('scorecard-util');
+      if (util) util.textContent = '';
+      if (window.VisitsReportingComponent && typeof window.VisitsReportingComponent.render === 'function') {
+        window.VisitsReportingComponent.render(root);
+        return;
+      }
+      const emptyData = { today_unique: 0, today_visits: 0, week_unique: 0, week_visits: 0, open_sessions: [] };
+      let data = emptyData;
+      try {
+        const res = await fetch('/api/workplace/visits', { cache: 'no-store' });
+        if (res.ok) {
+          data = Object.assign({}, emptyData, await res.json());
+        }
+      } catch (err) {
+        /* Network / WebKit Load failed — show zeros, not raw TypeError */
+        data = emptyData;
+      }
+      const todayUnique = Number(data.today_unique || 0);
+      const todayVisits = Number(data.today_visits || 0);
+      const weekUnique = Number(data.week_unique || 0);
+      const weekVisits = Number(data.week_visits || 0);
+      const sessions = Array.isArray(data.open_sessions) ? data.open_sessions : [];
+      let html = '<div class="grid grid-cols-2 md:grid-cols-4 gap-3">'
+        + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3"><p class="text-xs text-on-surface-variant">Today unique</p><p class="font-mono-data text-sm text-primary mt-1">' + todayUnique + '</p></div>'
+        + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3"><p class="text-xs text-on-surface-variant">Today visits</p><p class="font-mono-data text-sm text-on-surface mt-1">' + todayVisits + '</p></div>'
+        + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3"><p class="text-xs text-on-surface-variant">Week unique</p><p class="font-mono-data text-sm text-primary mt-1">' + weekUnique + '</p></div>'
+        + '<div class="rounded-xl border border-outline-variant bg-surface-container p-3"><p class="text-xs text-on-surface-variant">Week visits</p><p class="font-mono-data text-sm text-on-surface mt-1">' + weekVisits + '</p></div>'
+        + '</div>';
+      html += '<div class="rounded-xl border border-outline-variant bg-surface-container-low p-4">'
+        + '<h3 class="text-sm font-semibold text-on-surface mb-3">Open sessions</h3>';
+      if (!sessions.length) {
+        html += '<p class="text-sm text-on-surface-variant">No open sessions.</p>';
+      } else {
+        html += '<div class="space-y-2">';
+        sessions.forEach((session) => {
+          html += '<div class="rounded-lg bg-surface-container p-3 flex items-start justify-between gap-3">'
+            + '<div><p class="text-sm text-on-surface font-medium">' + identityEsc(session.subject_id || 'visitor') + '</p>'
+            + '<p class="font-mono-data text-xs text-on-surface-variant mt-0.5">Open in '
+            + identityEsc(session.zone_name || session.zone_id || 'zone')
+            + (session.started_at ? ' · ' + identityEsc(session.started_at) : '')
+            + '</p></div></div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+      root.innerHTML = html;
+    }
+
     async function renderScorecard() {
+      if (isMassageWorkplace()) {
+        await renderVisitsPanel();
+        return;
+      }
       const root = document.getElementById('scorecard-content');
       if (!root) return;
       try {
@@ -6348,6 +6968,51 @@
           console.error('Failed to load AI audits:', auditErr);
         }
 
+        try {
+          const cmpRes = await fetch('/api/complaints?limit=8', { cache: 'no-store' });
+          const cmpData = await cmpRes.json();
+          const complaints = cmpData.complaints || [];
+          const listening = !!cmpData.listening;
+          const cmpEnabled = !!cmpData.enabled;
+          html += '<div class="rounded-xl border border-outline-variant bg-surface-container-low p-4 space-y-3">'
+            + '<div class="flex items-center justify-between gap-3">'
+            + '<h3 class="text-sm font-semibold text-on-surface flex items-center gap-2">'
+            + '<span class="material-symbols-outlined text-primary text-base">record_voice_over</span>'
+            + 'Customer complaints (Khmer STT)</h3>'
+            + '<span class="font-mono-data text-xs ' + (listening ? 'text-primary' : 'text-on-surface-variant') + '">'
+            + (listening ? 'Listening' : (cmpEnabled ? 'Armed' : 'Off — add Complaint intake')) + '</span>'
+            + '</div>';
+          if (!complaints.length) {
+            html += '<p class="text-xs text-on-surface-variant">No complaints logged yet. Massage graphs include Complaint intake; garage can add the node and Deploy.</p>';
+          } else {
+            html += '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">';
+            complaints.forEach((c) => {
+              const sev = String(c.severity || 'low').toLowerCase();
+              const hot = sev === 'high' || sev === 'critical';
+              const badgeClass = hot ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+              const imgSrc = c.screenshot_url || '';
+              const audioSrc = c.audio_url || '';
+              const timeFormatted = String(c.timestamp || c.created_at || '').slice(11, 19) || '—';
+              html += '<div class="flex gap-3 bg-surface-container rounded-lg p-3 border border-outline-variant/50">'
+                + (imgSrc ? '<img src="' + imgSrc + '" class="w-16 h-16 rounded object-cover border border-outline-variant shrink-0" onerror="this.style.display=\'none\'" alt="complaint still"/>' : '')
+                + '<div class="flex-1 min-w-0 space-y-1">'
+                + '<div class="flex items-center justify-between gap-2">'
+                + '<span class="font-mono-data text-xs text-on-surface-variant font-medium">' + identityEsc(c.complaint_id || '') + ' · ' + timeFormatted + '</span>'
+                + '<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ' + badgeClass + '">'
+                + identityEsc((c.category || 'complaint') + ' · ' + sev)
+                + '</span></div>'
+                + '<p class="text-xs text-on-surface font-medium line-clamp-2">' + identityEsc(c.summary || c.english_transcript || c.khmer_transcript || '') + '</p>'
+                + (c.khmer_transcript ? '<p class="text-[11px] text-on-surface-variant line-clamp-2 leading-tight">' + identityEsc(c.khmer_transcript) + '</p>' : '')
+                + (audioSrc ? '<audio controls preload="none" class="w-full mt-1 h-8" src="' + audioSrc + '"></audio>' : '')
+                + '</div></div>';
+            });
+            html += '</div>';
+          }
+          html += '</div>';
+        } catch (cmpErr) {
+          console.error('Failed to load complaints:', cmpErr);
+        }
+
         root.innerHTML = html;
       } catch (err) {
         root.innerHTML = '<p class="text-error text-sm">' + identityEsc(err.message) + '</p>';
@@ -6391,11 +7056,29 @@
         if (ev.key === 'Escape') {
           hideBayContextMenu();
           cancelDiscoverConnect();
+          roiRotateArmed = false;
+          return;
+        }
+        const tag = ((ev.target && ev.target.tagName) || '').toLowerCase();
+        const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (ev.target && ev.target.isContentEditable);
+        if ((ev.key === 'r' || ev.key === 'R') && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          if (typing) return;
+          if (currentNav === 'pipeline') return;
+          if (!selectedBayId || !liveBays.some((b) => b.id === selectedBayId)) return;
+          ev.preventDefault();
+          const bay = selectedBay();
+          if (!bay) return;
+          if (roiDragging && (roiMode === 'move' || roiMode === 'rotate')) {
+            beginRotateDrag(bay, roiLastPos[0], roiLastPos[1]);
+          } else {
+            roiRotateArmed = true;
+          }
           return;
         }
         if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
-        const tag = ((ev.target && ev.target.tagName) || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ev.target && ev.target.isContentEditable)) return;
+        if (typing) return;
+        const pipeWs = document.getElementById('pipeline-workspace');
+        if (currentNav === 'pipeline' || (pipeWs && !pipeWs.classList.contains('hidden'))) return;
         if (!selectedBayId || !liveBays.some((b) => b.id === selectedBayId)) return;
         ev.preventDefault();
         deleteBay(selectedBayId);
@@ -6406,13 +7089,12 @@
         if (!menu.contains(ev.target)) hideBayContextMenu();
       });
       const ctxRename = document.getElementById('ctx-rename-bay');
-      const ctxType = document.getElementById('ctx-type-bay');
       const ctxAlign = document.getElementById('ctx-align-rect');
       const ctxDelete = document.getElementById('ctx-delete-bay');
       if (ctxRename) ctxRename.addEventListener('click', () => renameSelectedBay());
-      if (ctxType) ctxType.addEventListener('click', () => toggleSelectedBayType());
       if (ctxAlign) ctxAlign.addEventListener('click', () => resetSelectedBayToRect());
       if (ctxDelete) ctxDelete.addEventListener('click', () => deleteBay(selectedBayId));
+      applyWorkplaceChrome();
       const fileInput = document.getElementById('identity-file-input');
       if (fileInput) {
         fileInput.addEventListener('change', () => {

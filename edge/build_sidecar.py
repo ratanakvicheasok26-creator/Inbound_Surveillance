@@ -206,8 +206,14 @@ REQUIRED_PYZ_MODULES = (
     "adapters.video_file",
     "workplaces",
     "workplaces.customer_visits",
+    "workplaces.staff_memory",
     "graph",
     "graph.compile",
+    "complaint_service",
+    "complaint_auditor",
+    "audio_source",
+    "speech_pipeline",
+    "vad",
 )
 
 

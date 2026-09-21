@@ -36,6 +36,7 @@ hiddenimports = [
     "occupancy",
     "workplaces",
     "workplaces.customer_visits",
+    "workplaces.staff_memory",
     "graph",
     "graph.compile",
     "person",
@@ -76,6 +77,11 @@ hiddenimports = [
     "one_euro",
     "tinypose",
     "rtmpose",
+    "audio_source",
+    "complaint_auditor",
+    "complaint_service",
+    "speech_pipeline",
+    "vad",
 ]
 
 
@@ -190,6 +196,15 @@ try:
     pkgs_to_collect.append("openvino")
 except Exception:
     pass
+# Native audio libs only. Do not collect_all(silero_vad): it pulls torchaudio
+# and, with CUDA Torch, nvidia/* wheels that blow past PyInstaller's 4 GiB
+# one-file CArchive limit (struct.error: 'I' format requires <= 4294967295).
+for optional_pkg in ("soundfile", "sounddevice"):
+    try:
+        __import__(optional_pkg)
+        pkgs_to_collect.append(optional_pkg)
+    except Exception:
+        pass
 
 for pkg in pkgs_to_collect:
     try:
@@ -213,8 +228,60 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib.tests", "pytest", "IPython"],
+    excludes=[
+        "tkinter",
+        "matplotlib.tests",
+        "pytest",
+        "IPython",
+        "torchaudio",
+        "triton",
+    ],
     noarchive=False,
+)
+
+_BUNDLE_BLOAT = (
+    "nvidia",
+    "torchaudio",
+    "triton",
+    "libtorch_cuda",
+    "cudnn",
+    "cublas",
+    "cusparse",
+    "cusolver",
+    "cufft",
+    "curand",
+    "nccl",
+    "nvrtc",
+    "nvjitlink",
+    "nvtx",
+    "nvshmem",
+    "cusparselt",
+    "cufile",
+    "cuda_runtime",
+    "cuda-cupti",
+)
+
+
+def _keep_collected(item) -> bool:
+    dest = ""
+    src = ""
+    if isinstance(item, (tuple, list)) and item:
+        dest = str(item[0])
+        src = str(item[1]) if len(item) > 1 else ""
+    else:
+        dest = str(getattr(item, "name", item) or "")
+        src = str(getattr(item, "path", "") or "")
+    text = f"{dest} {src}".replace("\\", "/").lower()
+    return not any(marker in text for marker in _BUNDLE_BLOAT)
+
+
+_before_binaries, _before_datas = len(a.binaries), len(a.datas)
+a.binaries = [item for item in a.binaries if _keep_collected(item)]
+a.datas = [item for item in a.datas if _keep_collected(item)]
+print(
+    f"Stripped CUDA/audio bloat: binaries {_before_binaries}->{len(a.binaries)} "
+    f"datas {_before_datas}->{len(a.datas)}",
+    flush=True,
 )
 
 if sys.platform == "win32":

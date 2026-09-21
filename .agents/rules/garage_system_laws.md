@@ -1,5 +1,8 @@
 # Inbound Garage Core Operating Rules & Architecture Laws
 
+> **SUPREME LAW REFERENCE:** All work on this system is governed by [SYSTEM_ARCHITECTURE_LAWS.md](file:///home/george/Documents/Inbound-Surveillance/.agents/rules/SYSTEM_ARCHITECTURE_LAWS.md).  
+> **LAW 0 (STOP AND REPORT):** If an edit risks frame drops, tracking loss, or regressions, STOP and warn the user before writing code.
+
 These architectural laws prevent regressions and ensure the system accurately mirrors real-world garage operations:
 
 ---

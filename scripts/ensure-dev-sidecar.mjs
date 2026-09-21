@@ -156,10 +156,12 @@ function shouldRebuildSidecar(destFile) {
     const destMtime = statSync(destFile).mtimeMs;
     const watchPaths = [
       path.join(repo, "edge", "launcher.py"),
+      path.join(repo, "edge", "db.py"),
       path.join(repo, "edge", "ai_auditor.py"),
       path.join(repo, "edge", "occupancy.py"),
       path.join(repo, "edge", "runtime.py"),
       path.join(repo, "edge", "hub.html"),
+      path.join(repo, "edge", "static", "visits-reporting.js"),
       path.join(repo, "edge", "inbound-engine.spec"),
       path.join(repo, "edge", "build_sidecar.py"),
       path.join(repo, "edge", "static", "supabase.js"),

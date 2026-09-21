@@ -54,3 +54,29 @@ edge/.env
 dataset/
 runs/
 supabase/
+
+# AI Agent Instructions, Architecture Laws & Audit Reports
+SYSTEM_ARCHITECTURE_LAWS.md
+AGENTS.md
+CLAUDE.md
+docs/SYSTEM_ARCHITECTURE_AUDIT_AND_UNTANGLE_REPORT.md
+.agents/rules/SYSTEM_ARCHITECTURE_LAWS.md
+*.errors.txt
+kernel.errors.txt
+
+# Runtime captures, avatars & audio
+edge/avatars/
+avatars/
+edge/complaints/
+complaints/
+edge/negatives/
+negatives/
+
+# General logs and test caches
+*.log
+*.log.*
+.pytest_cache/
+.coverage
+htmlcov/
+Thumbs.db
+

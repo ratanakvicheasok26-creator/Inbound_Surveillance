@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any
 
-from workplaces import parse_workplace_id
+from workplaces import DEFAULT_RECEPTION_ROI, parse_workplace_id, parse_zone_kind
 
 NODE_PORTS: dict[str, dict[str, tuple[str, ...]]] = {
     "camera": {"inputs": (), "outputs": ("frames",)},
@@ -117,12 +117,14 @@ def compile_to_config(graph: dict[str, Any]) -> dict[str, Any]:
         data = _data(node)
         if kind == "zone":
             roi = data.get("roi")
+            zone_kind = parse_zone_kind(data.get("zoneKind"), workplace)
+            placeholder = list(DEFAULT_RECEPTION_ROI) if zone_kind == "reception" else list(DEFAULT_ZONE_ROI)
             zones.append(
                 {
                     "id": str(node.get("id")),
                     "name": str(data.get("zoneName") or data.get("label") or node.get("id")),
-                    "type": str(data.get("zoneKind") or ("treatment_room" if workplace == "massage" else "vehicle_bay")),
-                    "roi": list(roi) if isinstance(roi, list) and len(roi) == 4 else list(DEFAULT_ZONE_ROI),
+                    "type": zone_kind,
+                    "roi": list(roi) if isinstance(roi, list) and len(roi) == 4 else placeholder,
                 }
             )
         if kind == "alertRule" and data.get("cooldownSec") is not None:
@@ -150,7 +152,6 @@ def compile_to_config(graph: dict[str, Any]) -> dict[str, Any]:
     }
     if cooldown is not None:
         patch["cooldown_seconds"] = cooldown
-        patch["absent_seconds"] = cooldown
     if zones:
         patch["bays"] = zones
     return patch
@@ -208,3 +209,16 @@ def pipeline_runtime_flags(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "persist": bool(cfg.get("persist_events", True)),
         "complaint_intake": bool(cfg.get("complaint_intake", defaults["complaint_intake"])),
     }
+
+
+def complaint_monitoring_wanted(cfg: dict[str, Any] | None = None) -> bool:
+    """Whether the audio complaint pipeline should run.
+
+    Explicit ``complaint_monitoring.enabled`` wins. Otherwise massage
+    workplaces and graphs that include a Complaint intake node turn it on.
+    """
+    cfg = cfg or {}
+    cmp_cfg = cfg.get("complaint_monitoring") if isinstance(cfg.get("complaint_monitoring"), dict) else {}
+    if "enabled" in cmp_cfg:
+        return bool(cmp_cfg.get("enabled"))
+    return bool(pipeline_runtime_flags(cfg).get("complaint_intake"))

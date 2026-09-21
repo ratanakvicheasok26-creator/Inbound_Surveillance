@@ -84,6 +84,56 @@ export type EngineBay = {
   state?: string;
 };
 
+export type DetailedVisitSummary = {
+  total_unique: number;
+  today_unique: number;
+  week_unique: number;
+  today_visits: number;
+  week_visits: number;
+  total_visits: number;
+  avg_dwell_seconds: number;
+  returning_rate: number;
+  active_now_count: number;
+};
+
+export type VisitorProfile = {
+  subject_id: string;
+  alias?: string | null;
+  avatar_path?: string | null;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  total_visits: number;
+  today_visits: number;
+  week_visits: number;
+  avg_dwell_seconds: number;
+  total_dwell_seconds: number;
+  last_dwell_seconds?: number | null;
+  is_active_now?: boolean;
+};
+
+export type OpenSessionItem = {
+  subject_id: string;
+  zone_id: string;
+  zone_name?: string;
+  started_at?: string;
+  dwell_seconds?: number;
+  avatar_url?: string;
+};
+
+export type DetailedVisitReport = {
+  summary: DetailedVisitSummary;
+  visitors: VisitorProfile[];
+  recent_visits: Array<{
+    id?: string;
+    subject_id?: string;
+    zone_id?: string;
+    started_at?: string;
+    ended_at?: string;
+    duration_seconds?: number;
+  }>;
+  open_sessions: OpenSessionItem[];
+};
+
 export type VisitCounts = {
   today_unique: number;
   today_visits: number;
@@ -94,6 +144,8 @@ export type VisitCounts = {
     zone_id: string;
     zone_name?: string;
     started_at?: string;
+    dwell_seconds?: number;
+    avatar_url?: string;
   }>;
 };
 

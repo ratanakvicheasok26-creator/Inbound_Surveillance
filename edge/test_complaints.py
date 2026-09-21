@@ -193,6 +193,7 @@ class TestComplaintFeature(unittest.TestCase):
             telegram_out=None,
             get_camera_frame_fn=lambda: mock_frame,
             enabled=True,
+            data_root=Path(self.temp_dir.name),
         )
 
         # Mock STT, Translator, and Auditor
@@ -245,6 +246,7 @@ class TestComplaintFeature(unittest.TestCase):
             get_camera_frame_fn=lambda: mock_frame,
             enabled=True,
             dedup_window_seconds=60.0,
+            data_root=Path(self.temp_dir.name),
         )
         service.stt.transcribe = MagicMock(return_value="ឡាន់នៅតែក៏ខ្វក់")
         service.translator.translate_km_to_en = MagicMock(return_value="The car is still dirty.")
@@ -291,6 +293,7 @@ class TestComplaintFeature(unittest.TestCase):
             telegram_out=mock_tg,
             get_camera_frame_fn=lambda: mock_frame,
             enabled=True,
+            data_root=Path(self.temp_dir.name),
         )
         service.stt.transcribe = MagicMock(return_value="អរគុណច្រើនបង")
         service.translator.translate_km_to_en = MagicMock(return_value="Thank you very much, brother.")

@@ -12,8 +12,12 @@ WORKPLACE_IDS = ("garage", "massage")
 SUBJECT_KINDS = ("employee", "customer")
 MONITOR_IDS = ("employee_labor", "customer_visits")
 GARAGE_ZONE_KINDS = ("vehicle_bay", "tool_area")
-MASSAGE_ZONE_KINDS = ("entrance", "waiting", "treatment_room")
+MASSAGE_ZONE_KINDS = ("entrance", "waiting", "treatment_room", "reception")
+VISIT_ZONE_KINDS = ("entrance", "waiting", "treatment_room")
 ALL_ZONE_KINDS = GARAGE_ZONE_KINDS + MASSAGE_ZONE_KINDS
+STAFF_LABEL = "Staff"
+STAFF_ID_PREFIX = "staff_"
+DEFAULT_RECEPTION_ROI = [0.38, 0.06, 0.14, 0.14]
 
 UNKNOWN_PERSON_LABEL = {
     "garage": "Employee",
@@ -29,7 +33,21 @@ DEFAULT_MASSAGE_ZONES: list[dict[str, Any]] = [
     {"id": "entrance", "name": "Entrance", "roi": [0.05, 0.15, 0.25, 0.70], "type": "entrance"},
     {"id": "waiting", "name": "Waiting", "roi": [0.35, 0.20, 0.28, 0.55], "type": "waiting"},
     {"id": "room_1", "name": "Treatment Room 1", "roi": [0.68, 0.18, 0.28, 0.62], "type": "treatment_room"},
+    {
+        "id": "reception",
+        "name": "Reception",
+        "roi": list(DEFAULT_RECEPTION_ROI),
+        "type": "reception",
+    },
 ]
+
+
+def is_visit_zone_kind(kind: object) -> bool:
+    return str(kind or "") in VISIT_ZONE_KINDS
+
+
+def is_staff_id(value: object) -> bool:
+    return str(value or "").startswith(STAFF_ID_PREFIX)
 
 
 def parse_workplace_id(raw: object) -> str:
@@ -69,7 +87,7 @@ def normalize_workplace_zones(
     """Normalize zone geometry for the active workplace.
 
     Garage delegates to occupancy.normalize_bays so existing garage tests keep
-    their seeded Lift Bay defaults. Massage uses entrance/waiting/room kinds.
+    their seeded Lift Bay defaults. Massage uses entrance/waiting/room/reception kinds.
     """
     workplace_id = parse_workplace_id(workplace)
     if workplace_id == "garage":

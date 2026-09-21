@@ -57,6 +57,15 @@ VIDEOS_DIR = DATA_DIR / "videos"
 log_boot_banner()
 
 
+def complaint_asset_path(kind: str, name: str) -> Path:
+    """Resolve a complaint WAV/JPEG from AppData first, then the source tree."""
+    safe = Path(name).name
+    primary = DATA_DIR / "proofs" / "complaints" / kind / safe
+    if primary.is_file():
+        return primary
+    return Path(__file__).parent / "proofs" / "complaints" / kind / safe
+
+
 def resolve_static_asset(url_path: str) -> Path | None:
     """Resolve ``/static/...`` to a bundled file. Drops ``..`` so Windows
     mixed separators cannot walk out of the static folder.
@@ -257,8 +266,9 @@ try:
         normalize_bays,
         roi_to_pixels,
     )
-    from workplaces import normalize_workplace_zones, parse_workplace_id
+    from workplaces import STAFF_LABEL, normalize_workplace_zones, parse_workplace_id
     from workplaces.customer_visits import CustomerVisitMonitor
+    from workplaces.staff_memory import StaffMemory
     from bay_zoom import occupancy_hints, zoom_empty_bays
     from corroborate import veto_vehicle_interior
     from liveness import LivenessProbe
@@ -362,7 +372,11 @@ def read_config() -> dict[str, Any]:
     data["telegram_bot_username"] = str(data.get("telegram_bot_username") or "")
 
     data["workplace_type"] = parse_workplace_id(data.get("workplace_type"))
-    data["cameras"] = _normalize_cameras(data.get("cameras"), workplace=data["workplace_type"])
+    data["cameras"] = _normalize_cameras(
+        data.get("cameras"),
+        workplace=data["workplace_type"],
+        default_absent=data.get("absent_seconds"),
+    )
     data["active_camera_id"] = str(data.get("active_camera_id") or "")
     data["garage_name"] = str(data.get("garage_name") or data.get("venue") or "Demo Garage")
     data["venue"] = str(data.get("venue") or data["garage_name"])
@@ -434,6 +448,7 @@ def save_config(updates: dict[str, Any]) -> dict[str, Any]:
         current["cameras"] = _normalize_cameras(
             current.get("cameras"),
             workplace=current.get("workplace_type"),
+            default_absent=current.get("absent_seconds"),
         )
     with target.open("w", encoding="utf-8") as f:
         yaml.safe_dump(current, f, sort_keys=False)
@@ -454,11 +469,33 @@ def _normalize_xaddrs(value: Any) -> list[str]:
     return out
 
 
-def _normalize_cameras(raw: Any, workplace: Any = None) -> list[dict[str, Any]]:
+def clamp_absent_seconds(value: Any, fallback: float = 10.0) -> float:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        try:
+            n = float(fallback)
+        except (TypeError, ValueError):
+            n = 10.0
+    return max(5.0, min(600.0, n))
+
+
+def camera_absent_seconds(cfg: dict[str, Any] | None, camera_id: Any = None) -> float:
+    cfg = cfg or {}
+    fallback = clamp_absent_seconds(cfg.get("absent_seconds"), 10.0)
+    cid = str(camera_id if camera_id is not None else cfg.get("active_camera_id") or "").strip()
+    for cam in cfg.get("cameras") or []:
+        if isinstance(cam, dict) and str(cam.get("id") or "").strip() == cid:
+            return clamp_absent_seconds(cam.get("absent_seconds"), fallback)
+    return fallback
+
+
+def _normalize_cameras(raw: Any, workplace: Any = None, default_absent: Any = None) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    fallback = clamp_absent_seconds(default_absent, 10.0)
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -499,14 +536,20 @@ def _normalize_cameras(raw: Any, workplace: Any = None) -> list[dict[str, Any]]:
                 "roi": cam_roi,
                 "bays": cam_bays,
                 "enabled": bool(item.get("enabled", True)),
+                "ml_enabled": bool(item.get("ml_enabled", True)),
                 "trigger_mode": str(item.get("trigger_mode") or "roi_state_change"),
+                "absent_seconds": clamp_absent_seconds(item.get("absent_seconds"), fallback),
             }
         )
     return out
 
 
 def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
-    cameras = _normalize_cameras(cfg.get("cameras"), workplace=cfg.get("workplace_type"))
+    cameras = _normalize_cameras(
+        cfg.get("cameras"),
+        workplace=cfg.get("workplace_type"),
+        default_absent=cfg.get("absent_seconds"),
+    )
     cid = str(fields.get("id") or "").strip() or f"cam-{int(time.time() * 1000)}"
     name = str(fields.get("name") or "").strip() or "Untitled camera"
     existing: dict[str, Any] = {}
@@ -539,7 +582,7 @@ def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]
     rotate = fields.get("rotate", existing.get("rotate", cfg.get("rotate", "auto")))
     bays_val = fields.get("bays") if "bays" in fields else existing.get("bays")
     if bays_val and isinstance(bays_val, list):
-        bays = parse_bays(bays_val, fallback_roi=roi, seed_if_empty=False)
+        bays = parse_bays(bays_val, fallback_roi=roi, seed_if_empty=False, workplace=cfg.get("workplace_type"))
     else:
         bays = list(existing.get("bays") or [])
     trigger_mode = str(
@@ -547,6 +590,16 @@ def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]
         or existing.get("trigger_mode")
         or "roi_state_change"
     )
+    if "absent_seconds" in fields:
+        absent = clamp_absent_seconds(
+            fields.get("absent_seconds"),
+            existing.get("absent_seconds") or cfg.get("absent_seconds") or 10,
+        )
+    else:
+        absent = clamp_absent_seconds(
+            existing.get("absent_seconds"),
+            cfg.get("absent_seconds") or 10,
+        )
     entry = {
         "id": cid,
         "name": name,
@@ -563,6 +616,7 @@ def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]
         "enabled": bool(fields.get("enabled", existing.get("enabled", True))),
         "ml_enabled": bool(fields.get("ml_enabled", existing.get("ml_enabled", True))),
         "trigger_mode": trigger_mode,
+        "absent_seconds": absent,
     }
     for i, cam in enumerate(cameras):
         if cam["id"] == cid:
@@ -818,6 +872,7 @@ class CameraStreamWorker:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self.latest_jpeg: bytes | None = None
+        # 0.0 means "no frame published yet". Never treat that as a unix-epoch stall.
         self.latest_ts: float = 0.0
         self.latest_packet: FramePacket | None = None
         self.is_active_ai: bool = False
@@ -886,6 +941,31 @@ class CameraStreamWorker:
         )
         self._thread.start()
 
+    def _should_reconnect(self, now: float | None = None) -> bool:
+        """True when this worker should open a new adapter.
+
+        In-progress CONNECTING opens must not be torn down: `_adapter` is None
+        until connect() returns, and latest_ts stays 0 until the first JPEG.
+        The previous stall check treated unix-time minus 0 as a 3.5s freeze
+        and killed RTSP/webcam opens after 2.5s.
+        """
+        now = time.time() if now is None else float(now)
+        state = str(self.grabber.connection_state or "")
+        if state == "CONNECTING":
+            return False
+        if state in ("FAILED", "STANDBY"):
+            return True
+        last_frame = float(self.latest_ts or 0.0)
+        if last_frame <= 0:
+            return False
+        return (now - last_frame) >= 3.5
+
+    def _maybe_reconnect(self, now: float, last_reconnect_time: float) -> float:
+        if self._should_reconnect(now) and (now - last_reconnect_time) >= 2.5:
+            self._reconnect()
+            return now
+        return last_reconnect_time
+
     def stop(self) -> None:
         self._stop_event.set()
         self.grabber.stop()
@@ -899,13 +979,7 @@ class CameraStreamWorker:
         last_packet_ts = 0.0
         while not self._stop_event.is_set():
             now = time.time()
-            if (
-                self.grabber.connection_state in ("FAILED", "STANDBY", "RECONNECTING")
-                or getattr(self.grabber, "_adapter", None) is None
-                or (now - self.latest_ts >= 3.5 and self.grabber.connection_state != "CONNECTED")
-            ) and (now - last_reconnect_time >= 2.5):
-                last_reconnect_time = now
-                self._reconnect()
+            last_reconnect_time = self._maybe_reconnect(now, last_reconnect_time)
 
             packet = self.grabber.peek_latest_frame()
             if packet is None:
@@ -1129,44 +1203,57 @@ class LiveStreamEngine:
             ai_auditor=self.ai_auditor,
             under_car_grace_seconds=resolve_under_car_grace_seconds(self.cfg),
         )
+        wp = parse_workplace_id(self.cfg.get("workplace_type"))
         self.visit_monitor = CustomerVisitMonitor(
             self.cfg.get("bays"),
+            workplace=wp,
             confirm_seconds=float(self.cfg.get("occupy_confirm_seconds") or 1.0),
             clear_seconds=float(self.cfg.get("occupy_clear_seconds") or 4.0),
         )
+        self.staff_memory = StaffMemory(self.cfg.get("bays"), workplace=wp)
+        self.visit_monitor.staff_memory = self.staff_memory
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
-        cmp_cfg = self.cfg.get("complaint_monitoring") or {}
-        active_source = str(self.cfg.get("source") or "")
-        active_proto = str(self.cfg.get("protocol") or "")
-        is_video_source = (
-            active_proto == "video"
-            or ingest_kind(active_source, active_proto) == "video"
-            or str(cmp_cfg.get("audio_source_type", "")).lower() == "video"
-        )
-        audio_src_type = "video" if is_video_source and active_source else str(cmp_cfg.get("audio_source_type", "laptop"))
+        self.complaint_service = None
+        cmp_cfg = self.cfg.get("complaint_monitoring") if isinstance(self.cfg.get("complaint_monitoring"), dict) else {}
+        from graph.compile import complaint_monitoring_wanted, pipeline_runtime_flags
 
-        self.complaint_service = ComplaintMonitoringService(
-            db_conn=connect(DATA_DIR / "events.db", check_same_thread=False),
-            telegram_out=self.bot,
-            get_camera_frame_fn=lambda: self.current_frame_bgr,
-            audio_source_type=audio_src_type,
-            video_path=active_source if is_video_source else None,
-            video_loop=bool(cmp_cfg.get("video_loop", False)),
-            device_index=cmp_cfg.get("device_index"),
-            whisper_model=resolve_khmer_stt_model(
-                str(cmp_cfg.get("stt_model_size") or self.cfg.get("whisper_model") or "sengtha/whisper-base-khmer")
-            ),
-            ollama_model=str(cmp_cfg.get("ollama_model") or self.cfg.get("ollama_model") or "qwen2.5:3b"),
-            ollama_host=str(cmp_cfg.get("ollama_host") or "http://localhost:11434"),
-            vad_threshold=float(cmp_cfg.get("vad_threshold", 0.35)),
-            vad_min_speech_duration_ms=int(cmp_cfg.get("vad_min_speech_duration_ms", 400)),
-            vad_max_speech_duration_s=float(cmp_cfg.get("vad_max_speech_duration_s", 30.0)),
-            dedup_window_seconds=float(cmp_cfg.get("dedup_window_seconds", 60.0)),
-            telegram_min_severity=str(cmp_cfg.get("telegram_min_severity", "low")).lower(),
-            telegram_alert_enabled=bool(cmp_cfg.get("telegram_alert_enabled", True)),
-            enabled=bool(cmp_cfg.get("enabled", self.cfg.get("complaint_monitoring_enabled", True))),
-        )
+        flags = pipeline_runtime_flags(self.cfg)
+        if complaint_monitoring_wanted(self.cfg):
+            active_source = str(self.cfg.get("source") or "")
+            active_proto = str(self.cfg.get("protocol") or "")
+            is_video_source = (
+                active_proto == "video"
+                or ingest_kind(active_source, active_proto) == "video"
+                or str(cmp_cfg.get("audio_source_type", "")).lower() == "video"
+            )
+            audio_src_type = "video" if is_video_source and active_source else str(cmp_cfg.get("audio_source_type", "laptop"))
+            try:
+                self.complaint_service = ComplaintMonitoringService(
+                    db_conn=connect(DATA_DIR / "events.db", check_same_thread=False),
+                    telegram_out=self.bot,
+                    get_camera_frame_fn=lambda: self.current_frame_bgr,
+                    audio_source_type=audio_src_type,
+                    video_path=active_source if is_video_source else None,
+                    video_loop=bool(cmp_cfg.get("video_loop", False)),
+                    device_index=cmp_cfg.get("device_index"),
+                    whisper_model=resolve_khmer_stt_model(
+                        str(cmp_cfg.get("stt_model_size") or self.cfg.get("whisper_model") or "sengtha/whisper-base-khmer")
+                    ),
+                    ollama_model=str(cmp_cfg.get("ollama_model") or self.cfg.get("ollama_model") or "qwen2.5:3b"),
+                    ollama_host=str(cmp_cfg.get("ollama_host") or "http://localhost:11434"),
+                    vad_threshold=float(cmp_cfg.get("vad_threshold", 0.35)),
+                    vad_min_speech_duration_ms=int(cmp_cfg.get("vad_min_speech_duration_ms", 400)),
+                    vad_max_speech_duration_s=float(cmp_cfg.get("vad_max_speech_duration_s", 30.0)),
+                    dedup_window_seconds=float(cmp_cfg.get("dedup_window_seconds", 60.0)),
+                    telegram_min_severity=str(cmp_cfg.get("telegram_min_severity", "low")).lower(),
+                    telegram_alert_enabled=bool(cmp_cfg.get("telegram_alert_enabled", True)) and bool(flags.get("telegram", True)),
+                    enabled=True,
+                    data_root=DATA_DIR,
+                )
+            except Exception as exc:
+                print(f"[complaint_service] init failed: {exc}", flush=True)
+                self.complaint_service = None
 
 
     @property
@@ -1271,10 +1358,11 @@ class LiveStreamEngine:
             if self.is_streaming:
                 self.camera_pool.sync_cameras(list(self.cfg.get("cameras") or []))
             self.wifi.start()
-            try:
-                self.complaint_service.start()
-            except Exception as exc:
-                print(f"[complaint_service] start failed: {exc}", flush=True)
+            if self.complaint_service is not None:
+                try:
+                    self.complaint_service.start()
+                except Exception as exc:
+                    print(f"[complaint_service] start failed: {exc}", flush=True)
             self.thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.thread.start()
 
@@ -1299,10 +1387,11 @@ class LiveStreamEngine:
             self._drop_gateway_stream()
         self._fallback_grabber.stop()
         self.camera_pool.stop()
-        try:
-            self.complaint_service.stop()
-        except Exception:
-            pass
+        if self.complaint_service is not None:
+            try:
+                self.complaint_service.stop()
+            except Exception:
+                pass
         try:
             self.wifi.stop()
         except Exception:
@@ -1445,6 +1534,7 @@ class LiveStreamEngine:
         if not isinstance(creds, dict):
             creds = {}
         password = str(payload.pop("password", "") or creds.get("password") or "")
+        absent_raw = payload.pop("absent_seconds", None)
         camera_fields = {
             "id": cid,
             "name": cam_name,
@@ -1453,6 +1543,10 @@ class LiveStreamEngine:
             "username": str(payload.pop("username", "") or creds.get("username") or ""),
             "enabled": True,
         }
+        if absent_raw is not None:
+            camera_fields["absent_seconds"] = clamp_absent_seconds(
+                absent_raw, self.cfg.get("absent_seconds") or 10
+            )
         if "roi" in payload:
             camera_fields["roi"] = payload.pop("roi")
         if "main_source" in payload:
@@ -1537,12 +1631,23 @@ class LiveStreamEngine:
             active_bays = list(active.get("bays") or [])
             if not active_bays:
                 active_roi = parse_roi(active.get("roi")) or parse_roi(self.cfg.get("roi")) or [0.30, 0.20, 0.40, 0.60]
-                active_bays = parse_bays(None, fallback_roi=active_roi, seed_if_empty=True)
+                active_bays = parse_bays(
+                    None,
+                    fallback_roi=active_roi,
+                    seed_if_empty=True,
+                    workplace=self.cfg.get("workplace_type"),
+                )
                 active["bays"] = active_bays
             self.cfg["bays"] = active_bays
             roi = list(parse_roi(active.get("roi")) or self.cfg.get("roi") or (active_bays[0]["roi"] if active_bays else [0.30, 0.20, 0.40, 0.60]))
             self.cfg["roi"] = roi
-            self.bay_manager.set_bays(active_bays)
+            try:
+                self.bay_manager.set_bays(active_bays)
+                wp = parse_workplace_id(self.cfg.get("workplace_type"))
+                self.visit_monitor.set_zones(active_bays, workplace=wp)
+                self.staff_memory.set_zones(active_bays, workplace=wp)
+            except Exception as zone_err:
+                print(f"[connect_camera] zone wiring failed: {zone_err}", flush=True)
             self.bay_telemetry = self.bay_manager.telemetry()
             bays = list(self.cfg.get("bays") or DEFAULT_BAYS)
             rotate = self.cfg.get("rotate", 0)
@@ -1764,9 +1869,27 @@ class LiveStreamEngine:
             }
         if "absent_seconds" in payload:
             try:
-                updates["absent_seconds"] = max(5.0, min(600.0, float(payload.get("absent_seconds"))))
+                seconds = max(5.0, min(600.0, float(payload.get("absent_seconds"))))
             except (TypeError, ValueError):
                 return {"success": False, "error": "absent_seconds must be a number."}
+            camera_id = str(payload.get("camera_id") or "").strip()
+            if camera_id:
+                cameras = _normalize_cameras(
+                    self.cfg.get("cameras"),
+                    workplace=self.cfg.get("workplace_type"),
+                    default_absent=self.cfg.get("absent_seconds"),
+                )
+                found = False
+                for cam in cameras:
+                    if cam["id"] == camera_id:
+                        cam["absent_seconds"] = seconds
+                        found = True
+                        break
+                if not found:
+                    return {"success": False, "error": "Camera not found."}
+                updates["cameras"] = cameras
+            else:
+                updates["absent_seconds"] = seconds
         if "cooldown_seconds" in payload:
             try:
                 updates["cooldown_seconds"] = max(5.0, min(600.0, float(payload.get("cooldown_seconds"))))
@@ -1799,6 +1922,8 @@ class LiveStreamEngine:
         snapshot["telegram_bot_configured"] = bool(str(self.cfg.get("telegram_bot_token") or "").strip())
         snapshot["telegram_bot_username"] = self.telegram_links.status().get("bot_username") or ""
         snapshot["telegram_bot_token"] = ""
+        snapshot["cameras"] = list(self.cfg.get("cameras") or [])
+        snapshot["active_camera_id"] = self.cfg.get("active_camera_id") or ""
         return snapshot
 
     def save_camera(self, fields: dict[str, Any]) -> dict[str, Any]:
@@ -1828,6 +1953,8 @@ class LiveStreamEngine:
             mapped["ml_enabled"] = bool(fields.get("ml_enabled"))
         if "trigger_mode" in fields:
             mapped["trigger_mode"] = str(fields.get("trigger_mode") or "roi_state_change")
+        if "absent_seconds" in fields:
+            mapped["absent_seconds"] = fields.get("absent_seconds")
         with self.lock:
             entry = upsert_camera(self.cfg, mapped)
             save_config(self.cfg)
@@ -1956,7 +2083,11 @@ class LiveStreamEngine:
             return {"success": False, "error": "ROI must be [x, y, width, height] fractions."}
         with self.lock:
             self.cfg["roi"] = parsed
-            bays = parse_bays(self.cfg.get("bays"), fallback_roi=parsed)
+            bays = parse_bays(
+                self.cfg.get("bays"),
+                fallback_roi=parsed,
+                workplace=self.cfg.get("workplace_type"),
+            )
             if bays:
                 bays[0] = {**bays[0], "roi": parsed}
             self.cfg["bays"] = bays
@@ -1998,7 +2129,9 @@ class LiveStreamEngine:
                     break
             self.cfg["cameras"] = cameras
             self.bay_manager.set_bays(parsed)
-            self.visit_monitor.set_zones(parsed)
+            wp = parse_workplace_id(self.cfg.get("workplace_type"))
+            self.visit_monitor.set_zones(parsed, workplace=wp)
+            self.staff_memory.set_zones(parsed, workplace=wp)
             self.bay_telemetry = self.bay_manager.telemetry()
             cfg_to_save = dict(self.cfg)
             roi = list(self.cfg.get("roi") or [0.30, 0.20, 0.40, 0.60])
@@ -2051,7 +2184,12 @@ class LiveStreamEngine:
             src_bays = src_cam.get("bays") or []
             if not src_bays:
                 src_roi = src_cam.get("roi") or [0.30, 0.20, 0.40, 0.60]
-                src_bays = parse_bays(None, fallback_roi=src_roi, seed_if_empty=True)
+                src_bays = parse_bays(
+                    None,
+                    fallback_roi=src_roi,
+                    seed_if_empty=True,
+                    workplace=self.cfg.get("workplace_type"),
+                )
 
             cloned = []
             for b in src_bays:
@@ -2517,6 +2655,7 @@ class LiveStreamEngine:
         }
 
     def workplace_telemetry(self) -> dict[str, Any]:
+        """Live zone/bay snapshots for HTTP polls. No SQLite — worker conn is thread-bound."""
         data = self.garage_telemetry()
         workplace = parse_workplace_id(self.cfg.get("workplace_type"))
         data["workplace_type"] = workplace
@@ -2524,10 +2663,116 @@ class LiveStreamEngine:
         if workplace == "massage":
             data["bays"] = self.visit_monitor.telemetry()
             data["zones"] = data["bays"]
-            counts = customer_visit_counts(self.conn)
-            counts["open_sessions"] = self.visit_monitor.open_sessions()
-            data["visits"] = counts
+            data["open_sessions"] = self.visit_monitor.open_sessions()
         return data
+
+    def visit_scorecard(self) -> dict[str, Any]:
+        """HTTP-only visit counts. Opens its own SQLite read — never uses worker self.conn."""
+        empty: dict[str, Any] = {
+            "today_unique": 0,
+            "today_visits": 0,
+            "week_unique": 0,
+            "week_visits": 0,
+            "recent": [],
+            "open_sessions": [],
+        }
+        try:
+            sessions = self.visit_monitor.open_sessions()
+        except Exception as exc:
+            print(f"[visit_scorecard] open_sessions: {exc}", flush=True)
+            sessions = []
+        conn = None
+        try:
+            conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+            counts = customer_visit_counts(conn)
+            counts["open_sessions"] = sessions
+            return counts
+        except Exception as exc:
+            print(f"[visit_scorecard] {exc}", flush=True)
+            empty["open_sessions"] = sessions
+            return empty
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def visit_detailed_report(self, filter_range: str = "today") -> dict[str, Any]:
+        """In-depth customer visit report with live sessions, averages, and avatars."""
+        empty: dict[str, Any] = {
+            "summary": {
+                "total_unique": 0,
+                "today_unique": 0,
+                "week_unique": 0,
+                "today_visits": 0,
+                "week_visits": 0,
+                "total_visits": 0,
+                "avg_dwell_seconds": 0.0,
+                "returning_rate": 0.0,
+                "active_now_count": 0,
+            },
+            "visitors": [],
+            "recent_visits": [],
+            "open_sessions": [],
+        }
+        try:
+            sessions = self.visit_monitor.open_sessions()
+        except Exception as exc:
+            print(f"[visit_detailed_report] open_sessions: {exc}", flush=True)
+            sessions = []
+        conn = None
+        try:
+            conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+            from db import get_detailed_visits_report
+
+            data = get_detailed_visits_report(conn, filter_range=filter_range)
+            data["open_sessions"] = sessions
+            data["summary"]["active_now_count"] = len(sessions)
+            active_ids = {s.get("subject_id") for s in sessions if s.get("subject_id")}
+            for v in data.get("visitors", []):
+                v["is_active_now"] = v.get("subject_id") in active_ids
+            return data
+        except Exception as exc:
+            print(f"[visit_detailed_report] error: {exc}", flush=True)
+            empty["open_sessions"] = sessions
+            return empty
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def reset_visits(self) -> dict[str, Any]:
+        """Purge all customer visits from database and reset in-memory monitors."""
+        try:
+            self.visit_monitor.reset()
+        except Exception as exc:
+            print(f"[reset_visits] monitor reset error: {exc}", flush=True)
+        conn = None
+        try:
+            conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+            from db import reset_all_customer_visits
+
+            reset_all_customer_visits(conn)
+            avatars_dir = DATA_DIR / "avatars" / "visitors"
+            if avatars_dir.exists():
+                for f in avatars_dir.glob("*.jpg"):
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+            return {"ok": True, "message": "All visits successfully reset."}
+        except Exception as exc:
+            print(f"[reset_visits] db error: {exc}", flush=True)
+            return {"ok": False, "error": str(exc)}
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _vehicle_weights_path(self) -> Path:
         path = get_resource_path("yolo11n_improved.pt")
@@ -2574,16 +2819,32 @@ class LiveStreamEngine:
         existing_bays = [b for b in (self.cfg.get("bays") or []) if isinstance(b, dict)]
         existing_by_id = {str(b.get("id")): b for b in existing_bays}
         existing_by_name = {str(b.get("name")): b for b in existing_bays}
+        active_id_for_merge = str(self.cfg.get("active_camera_id") or "")
+        for cam in self.cfg.get("cameras") or []:
+            if not isinstance(cam, dict) or str(cam.get("id") or "") != active_id_for_merge:
+                continue
+            for prev_bay in cam.get("bays") or []:
+                if not isinstance(prev_bay, dict):
+                    continue
+                existing_by_id[str(prev_bay.get("id"))] = prev_bay
+                existing_by_name[str(prev_bay.get("name"))] = prev_bay
+            break
         compiled_bays = patch.get("bays")
         if isinstance(compiled_bays, list):
+            from graph.compile import DEFAULT_ZONE_ROI
+            from workplaces import DEFAULT_RECEPTION_ROI
+
             merged: list[dict[str, Any]] = []
             for zone in compiled_bays:
                 if not isinstance(zone, dict):
                     continue
                 prev = existing_by_id.get(str(zone.get("id"))) or existing_by_name.get(str(zone.get("name")))
                 if prev:
-                    compiled_roi = list(zone.get("roi") or [])
-                    if compiled_roi == [0.2, 0.2, 0.3, 0.4] and prev.get("roi"):
+                    compiled_roi = [float(v) for v in (zone.get("roi") or [])]
+                    placeholder = [float(v) for v in DEFAULT_ZONE_ROI]
+                    if str(zone.get("type") or "") == "reception":
+                        placeholder = [float(v) for v in DEFAULT_RECEPTION_ROI]
+                    if compiled_roi == placeholder and prev.get("roi"):
                         zone = {**zone, "roi": list(prev["roi"])}
                     if prev.get("polygon") and not zone.get("polygon"):
                         zone = {**zone, "polygon": prev.get("polygon")}
@@ -2599,16 +2860,33 @@ class LiveStreamEngine:
                 seed_if_empty=False,
                 workplace=patch.get("workplace_type"),
             )
+            cameras = _normalize_cameras(
+                self.cfg.get("cameras"),
+                workplace=patch.get("workplace_type") or self.cfg.get("workplace_type"),
+            )
+            active = str(self.cfg.get("active_camera_id") or "")
             if parsed:
                 self.cfg["bays"] = parsed
+                self.cfg["roi"] = list(parsed[0]["roi"])
+                for cam in cameras:
+                    if cam["id"] == active:
+                        cam["roi"] = self.cfg.get("roi")
+                        cam["bays"] = parsed
+                        break
+                self.cfg["cameras"] = cameras
                 self.bay_manager.set_bays(parsed)
-                self.visit_monitor.set_zones(parsed)
+                wp = parse_workplace_id(self.cfg.get("workplace_type"))
+                self.visit_monitor.set_zones(parsed, workplace=wp)
+                self.staff_memory.set_zones(parsed, workplace=wp)
             cfg_to_save = dict(self.cfg)
         self._sync_pipeline_models()
         save_config(cfg_to_save)
         return {
             "ok": True,
             "pipeline_valid": True,
+            "bays": parsed,
+            "cameras": cameras,
+            "active_camera_id": active,
             "config": {
                 "workplace_type": patch.get("workplace_type"),
                 "person_detect": patch.get("person_detect"),
@@ -2765,7 +3043,12 @@ class LiveStreamEngine:
             new_flip = self.cfg.get("flip")
 
             if bays is not None:
-                parsed_bays = parse_bays(bays, fallback_roi=parse_roi(roi), seed_if_empty=False)
+                parsed_bays = parse_bays(
+                    bays,
+                    fallback_roi=parse_roi(roi),
+                    seed_if_empty=False,
+                    workplace=self.cfg.get("workplace_type"),
+                )
                 self.cfg["bays"] = parsed_bays
                 if parsed_bays:
                     self.cfg["roi"] = list(parsed_bays[0]["roi"])
@@ -2776,7 +3059,11 @@ class LiveStreamEngine:
                 self.bay_manager.set_bays(self.cfg["bays"])
                 self.bay_telemetry = self.bay_manager.telemetry()
             elif (new_rotate != old_rotate or new_flip != old_flip):
-                cur_bays = parse_bays(self.cfg.get("bays"), seed_if_empty=False)
+                cur_bays = parse_bays(
+                    self.cfg.get("bays"),
+                    seed_if_empty=False,
+                    workplace=self.cfg.get("workplace_type"),
+                )
                 if cur_bays:
                     def _safe_rot(r):
                         try:
@@ -2878,6 +3165,7 @@ class LiveStreamEngine:
         print("[LiveStreamEngine] Loading person pose model...")
         self.conn = connect(DATA_DIR / "events.db")
         self.visit_monitor.conn = self.conn
+        self.staff_memory.set_conn(self.conn)
         self.runtime_profile = resolve_runtime(self.cfg)
         weights_path = resolve_weights_file(self.cfg, get_resource_path, DATA_DIR)
         veh_weights_path = get_resource_path("yolo11n_improved.pt")
@@ -3007,7 +3295,7 @@ class LiveStreamEngine:
                 session_gen = generation
                 self._last_worker_cam_id = active_cid
                 source = parse_source(cfg.get("source", 0))
-                absent = float(cfg.get("absent_seconds") or 10)
+                absent = camera_absent_seconds(cfg, active_cid)
                 cooldown = float(cfg.get("cooldown_seconds") or 30)
                 detect_fps = max(0.5, float(cfg.get("detect_fps") or 8.0))
                 interval = 1.0 / detect_fps
@@ -3217,13 +3505,24 @@ class LiveStreamEngine:
                         prev_conn = self.visit_monitor.conn
                         if not flags["persist"]:
                             self.visit_monitor.conn = None
+                            self.staff_memory.conn = None
                         try:
-                            visit_snaps = self.visit_monitor.update(last_accepted, w, h, now)
+                            visit_snaps = self.visit_monitor.update(
+                                last_accepted, w, h, now, frame=frame
+                            )
                         finally:
                             self.visit_monitor.conn = prev_conn
+                            self.staff_memory.conn = prev_conn
                         self.person_count = len(last_accepted)
-                        self.identities = [det.identity or "Visitor" for det in last_accepted]
-                        self.staff_names = []
+                        self.identities = [
+                            STAFF_LABEL
+                            if getattr(det, "is_staff", False)
+                            else (det.identity or "Visitor")
+                            for det in last_accepted
+                        ]
+                        self.staff_names = [
+                            STAFF_LABEL for det in last_accepted if getattr(det, "is_staff", False)
+                        ]
                         occupied_zones = [s for s in visit_snaps if s.occupied]
                         self.status_text = (
                             f"VISITORS [{len(occupied_zones)} zones]"
@@ -3242,7 +3541,8 @@ class LiveStreamEngine:
                         if self.tracker is not None:
                             # Spare still workers in an active bay from the inanimate sweep.
                             self.tracker.protected_ids = self.bay_manager.protected_track_ids()
-                        ghost.absent_seconds = float(cfg.get("absent_seconds") or 10)
+                        absent = camera_absent_seconds(cfg, active_cid)
+                        ghost.absent_seconds = absent
                         ghost.cooldown_seconds = float(cfg.get("cooldown_seconds") or 30)
                         any_occupied = any(
                             getattr(s, "person_present", False)
@@ -3798,7 +4098,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     content = None
             if content is not None and asset is not None:
                 suffix = asset.suffix.lower()
-                content_type = "application/javascript" if suffix == ".js" else "application/octet-stream"
+                content_type = {
+                    ".js": "application/javascript; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".woff2": "font/woff2",
+                    ".woff": "font/woff",
+                    ".ttf": "font/ttf",
+                    ".otf": "font/otf",
+                    ".svg": "image/svg+xml",
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".json": "application/json",
+                }.get(suffix, "application/octet-stream")
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Cache-Control", "public, max-age=86400")
@@ -3948,10 +4260,67 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json(GLOBAL_ENGINE.garage_scorecard())
 
         elif parsed.path == "/api/workplace/visits":
-            data = GLOBAL_ENGINE.workplace_telemetry().get("visits") or customer_visit_counts(
-                GLOBAL_ENGINE.conn
-            )
-            self._send_json(data)
+            try:
+                self._send_json(GLOBAL_ENGINE.visit_scorecard())
+            except Exception as exc:
+                print(f"[API /api/workplace/visits] {exc}", flush=True)
+                self._send_json(
+                    {
+                        "today_unique": 0,
+                        "today_visits": 0,
+                        "week_unique": 0,
+                        "week_visits": 0,
+                        "recent": [],
+                        "open_sessions": [],
+                    }
+                )
+
+        elif parsed.path == "/api/workplace/visits/detailed":
+            try:
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                filter_range = str((qs.get("range") or ["today"])[0] or "today")
+                self._send_json(GLOBAL_ENGINE.visit_detailed_report(filter_range=filter_range))
+            except Exception as exc:
+                print(f"[API /api/workplace/visits/detailed] {exc}", flush=True)
+                self._send_json(
+                    {
+                        "summary": {
+                            "total_unique": 0,
+                            "today_unique": 0,
+                            "week_unique": 0,
+                            "today_visits": 0,
+                            "week_visits": 0,
+                            "total_visits": 0,
+                            "avg_dwell_seconds": 0.0,
+                            "returning_rate": 0.0,
+                            "active_now_count": 0,
+                        },
+                        "visitors": [],
+                        "recent_visits": [],
+                        "open_sessions": [],
+                    }
+                )
+
+        elif parsed.path.startswith("/api/workplace/avatar/"):
+            subject_id = parsed.path.split("/")[-1].replace(".jpg", "").replace(".png", "")
+            safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", subject_id)
+            av_file = DATA_DIR / "avatars" / "visitors" / f"{safe_id}.jpg"
+            if av_file.is_file():
+                try:
+                    with av_file.open("rb") as f:
+                        content = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(content)))
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                except Exception:
+                    pass
+            self.send_response(404)
+            self.end_headers()
+            return
 
         elif parsed.path == "/api/telegram/status":
             qs = urllib.parse.parse_qs(parsed.query or "")
@@ -4151,12 +4520,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     conn.close()
             except Exception as e:
                 print(f"[API /api/complaints error] {e}", flush=True)
-            self._send_json({"complaints": complaints})
+            self._send_json({
+                "complaints": complaints,
+                "enabled": GLOBAL_ENGINE.complaint_service is not None,
+                "listening": bool(
+                    GLOBAL_ENGINE.complaint_service is not None
+                    and getattr(GLOBAL_ENGINE.complaint_service, "_is_running", False)
+                ),
+            })
 
         elif parsed.path.startswith("/api/complaints/audio/"):
             rel_name = parsed.path[len("/api/complaints/audio/"):].lstrip("/")
             safe_name = Path(rel_name).name
-            audio_file = Path(__file__).parent / "proofs" / "complaints" / "audio" / safe_name
+            audio_file = complaint_asset_path("audio", safe_name)
             if audio_file.exists() and audio_file.is_file():
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/wav")
@@ -4170,7 +4546,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         elif parsed.path.startswith("/api/complaints/stills/"):
             rel_name = parsed.path[len("/api/complaints/stills/"):].lstrip("/")
             safe_name = Path(rel_name).name
-            still_file = Path(__file__).parent / "proofs" / "complaints" / "stills" / safe_name
+            still_file = complaint_asset_path("stills", safe_name)
             if still_file.exists() and still_file.is_file():
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
@@ -4216,6 +4592,31 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if self._handle_identities_write(parts, "POST", payload, files):
             return
 
+        if parsed.path == "/api/workplace/visits/reset":
+            res = GLOBAL_ENGINE.reset_visits()
+            self._send_json(res)
+            return
+
+        if parsed.path == "/api/workplace/visits/alias":
+            subject_id = str(payload.get("subject_id") or "").strip()
+            alias = str(payload.get("alias") or "").strip()
+            conn = None
+            try:
+                conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+                from db import update_subject_alias
+
+                update_subject_alias(conn, subject_id, alias)
+                self._send_json({"ok": True, "subject_id": subject_id, "alias": alias})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            return
+
         if parsed.path == "/api/garage/jobs/complete":
             job_id = str(payload.get("job_id") or "").strip()
             ok = complete_vehicle_job(GLOBAL_ENGINE.conn, job_id)
@@ -4251,8 +4652,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 stamp_str = now.strftime("%Y-%m-%d_%H%M%S")
                 uid = f"CMP-{int(time.time()*1000)%1000000:06d}"
                 audio_filename = f"complaint_{stamp_str}_{uid}.wav"
-                audio_path = Path(__file__).parent / "proofs" / "complaints" / "audio" / audio_filename
-                audio_path.parent.mkdir(parents=True, exist_ok=True)
+                from complaint_service import complaints_proof_dirs
+                audio_dir, stills_dir = complaints_proof_dirs(DATA_DIR)
+                audio_path = audio_dir / audio_filename
                 
                 # Write sample audio WAV
                 sample_rate = 16000
@@ -4261,8 +4663,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 sf.write(str(audio_path), fake_audio, sample_rate, subtype="PCM_16")
                 
                 screenshot_filename = f"complaint_{stamp_str}_{uid}.jpg"
-                screenshot_dest = Path(__file__).parent / "proofs" / "complaints" / "stills" / screenshot_filename
-                screenshot_dest.parent.mkdir(parents=True, exist_ok=True)
+                screenshot_dest = stills_dir / screenshot_filename
                 
                 with GLOBAL_ENGINE.lock:
                     frame = GLOBAL_ENGINE.current_frame_bgr
@@ -4319,22 +4720,27 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     conn.close()
                     
                 if record.is_complaint and GLOBAL_ENGINE.bot.enabled:
-                    tg_ok = GLOBAL_ENGINE.bot.send_complaint_alert(
-                        complaint=record.as_dict(),
-                        audio_path=audio_path,
-                        photo_path=screenshot_dest,
-                    )
-                    record.telegram_sent = tg_ok
-                    conn = connect(DATA_DIR / "events.db", check_same_thread=False)
-                    try:
-                        update_complaint_telegram_status(conn, record.complaint_id, sent=tg_ok)
-                    finally:
-                        conn.close()
+                    from graph.compile import pipeline_runtime_flags
+                    if pipeline_runtime_flags(GLOBAL_ENGINE.cfg).get("telegram", True):
+                        tg_ok = GLOBAL_ENGINE.bot.send_complaint_alert(
+                            complaint=record.as_dict(),
+                            audio_path=audio_path,
+                            photo_path=screenshot_dest,
+                        )
+                        record.telegram_sent = tg_ok
+                        conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+                        try:
+                            update_complaint_telegram_status(conn, record.complaint_id, sent=tg_ok)
+                        finally:
+                            conn.close()
                         
                 self._send_json({"ok": True, "complaint": record.as_dict()})
                 return
             else:
-                self._send_json({"ok": False, "error": "Complaint service not initialized"}, 500)
+                self._send_json({
+                    "ok": False,
+                    "error": "Complaint intake is off. Add the Complaint intake node (or set complaint_monitoring.enabled) and reconnect.",
+                }, 400)
                 return
 
 

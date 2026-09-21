@@ -1,6 +1,8 @@
 # Inbound Surveillance — Architecture & Project Structure
 
-> **Inbound Surveillance** (also referred to as *Inbound Garage*) is an agentic computer vision and operations platform designed for commercial venues and auto shops. It transforms standard CCTV IP cameras, USB webcams, and mobile video feeds into proactive edge agents for real-time bay occupancy monitoring, technician wrench-time analysis, automated Face ID attendance, and instant Telegram alert dispatching.
+> **CRITICAL ARCHITECTURAL CONTRACT:** All developers and AI agents must comply with [SYSTEM_ARCHITECTURE_LAWS.md](file:///home/george/Documents/Inbound-Surveillance/SYSTEM_ARCHITECTURE_LAWS.md) and the [System Architecture Audit & Untangle Report](file:///home/george/Documents/Inbound-Surveillance/docs/SYSTEM_ARCHITECTURE_AUDIT_AND_UNTANGLE_REPORT.md).
+
+> **Inbound Surveillance** (also referred to as *Inbound Garage*) is an agentic computer vision and operations platform designed for commercial venues and auto shops. It transforms standard CCTV IP cameras, USB webcams, and mobile video feeds into proactive edge agents for real-time bay occupancy monitoring, technician wrench-time analysis, automated Face ID attendance, audio complaint monitoring, and instant Telegram alert dispatching.
 
 ---
 

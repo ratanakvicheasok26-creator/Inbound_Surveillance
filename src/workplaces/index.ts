@@ -9,7 +9,8 @@ export type ZoneKind =
   | "tool_area"
   | "entrance"
   | "waiting"
-  | "treatment_room";
+  | "treatment_room"
+  | "reception";
 
 export type ConsoleViewId =
   | "live"
@@ -76,6 +77,7 @@ export const MASSAGE_ZONE_KINDS: ZoneKindOption[] = [
   { id: "entrance", label: "Entrance" },
   { id: "waiting", label: "Waiting" },
   { id: "treatment_room", label: "Treatment room" },
+  { id: "reception", label: "Reception" },
 ];
 
 export const ALL_ZONE_KINDS: ZoneKind[] = [

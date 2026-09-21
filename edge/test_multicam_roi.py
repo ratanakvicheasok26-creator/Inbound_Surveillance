@@ -24,7 +24,7 @@ class TestMultiCamRoiTracking(unittest.TestCase):
         self.engine.active_roi_cameras.clear()
 
     def test_toggle_camera_ml(self):
-        with patch("edge.launcher.save_config"):
+        with patch("launcher.save_config"):
             # Toggle cam-2 from True -> False
             res = self.engine.toggle_camera_ml("cam-2", False)
             self.assertTrue(res["success"])

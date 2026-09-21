@@ -1,7 +1,7 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 type WorkplaceType = "garage" | "massage";
-type ZoneKind = "vehicle_bay" | "tool_area" | "entrance" | "waiting" | "treatment_room";
+type ZoneKind = "vehicle_bay" | "tool_area" | "entrance" | "waiting" | "treatment_room" | "reception";
 type CameraProtocol = "webcam" | "rtsp" | "phone" | "onvif" | "tapo" | "webrtc";
 type ComplaintStatus = "open" | "in_progress" | "resolved";
 type ComplaintChannel = "in_app" | "telegram" | "import";

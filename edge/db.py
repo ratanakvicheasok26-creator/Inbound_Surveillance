@@ -158,6 +158,40 @@ def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connect
     )
     conn.execute(
         """
+        CREATE INDEX IF NOT EXISTS customer_visits_subject_idx
+        ON customer_visits (subject_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS anon_subjects_last_seen_idx
+        ON anonymous_subjects (last_seen_at)
+        """
+    )
+    try:
+        cols_anon = {r["name"] for r in conn.execute("PRAGMA table_info(anonymous_subjects)").fetchall()}
+        if "alias" not in cols_anon:
+            conn.execute("ALTER TABLE anonymous_subjects ADD COLUMN alias TEXT")
+        if "avatar_path" not in cols_anon:
+            conn.execute("ALTER TABLE anonymous_subjects ADD COLUMN avatar_path TEXT")
+        cols_vis = {r["name"] for r in conn.execute("PRAGMA table_info(customer_visits)").fetchall()}
+        if "duration_seconds" not in cols_vis:
+            conn.execute("ALTER TABLE customer_visits ADD COLUMN duration_seconds REAL")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS staff_memory (
+            id TEXT PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS customer_complaints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             complaint_id TEXT UNIQUE NOT NULL,
@@ -923,11 +957,224 @@ def end_customer_visit(
 ) -> None:
     if conn is None or not visit_id:
         return
+    stamp_dt = _as_datetime(timestamp)
+    stamp = _iso(stamp_dt)
+    duration: float | None = None
+    try:
+        row = conn.execute("SELECT started_at FROM customer_visits WHERE id = ?", (visit_id,)).fetchone()
+        if row and row["started_at"]:
+            try:
+                start_dt = datetime.fromisoformat(row["started_at"])
+                duration = max(0.0, (stamp_dt - start_dt).total_seconds())
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if duration is not None:
+        conn.execute(
+            "UPDATE customer_visits SET ended_at = ?, duration_seconds = ? WHERE id = ? AND ended_at IS NULL",
+            (stamp, round(duration, 1), visit_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE customer_visits SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+            (stamp, visit_id),
+        )
+    conn.commit()
+
+
+def reset_all_customer_visits(conn: sqlite3.Connection | None) -> None:
+    """Reset every single customer visit and anonymous subject in the database."""
+    if conn is None:
+        return
+    conn.execute("DELETE FROM customer_visits")
+    conn.execute("DELETE FROM anonymous_subjects")
+    conn.commit()
+
+
+def update_subject_alias(
+    conn: sqlite3.Connection | None,
+    subject_id: str,
+    alias: str | None,
+) -> None:
+    """Assign a human-friendly nickname or alias to an anonymous customer."""
+    if conn is None or not subject_id:
+        return
+    val = alias.strip() if alias and alias.strip() else None
     conn.execute(
-        "UPDATE customer_visits SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
-        (_iso(_as_datetime(timestamp)), visit_id),
+        "UPDATE anonymous_subjects SET alias = ? WHERE id = ?",
+        (val, subject_id),
     )
     conn.commit()
+
+
+def save_subject_avatar(
+    conn: sqlite3.Connection | None,
+    subject_id: str,
+    avatar_path: str,
+) -> None:
+    """Store the local thumbnail avatar path for a customer."""
+    if conn is None or not subject_id:
+        return
+    conn.execute(
+        "UPDATE anonymous_subjects SET avatar_path = ? WHERE id = ?",
+        (avatar_path, subject_id),
+    )
+    conn.commit()
+
+
+def get_detailed_visits_report(
+    conn: sqlite3.Connection | None,
+    filter_range: str = "today",
+    now: datetime | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """In-depth customer report with avatars, frequencies, stay durations, and journey logs."""
+    empty: dict[str, Any] = {
+        "summary": {
+            "total_unique": 0,
+            "today_unique": 0,
+            "week_unique": 0,
+            "today_visits": 0,
+            "week_visits": 0,
+            "total_visits": 0,
+            "avg_dwell_seconds": 0.0,
+            "returning_rate": 0.0,
+            "active_now_count": 0,
+        },
+        "visitors": [],
+        "recent_visits": [],
+    }
+    if conn is None:
+        return empty
+
+    try:
+        stamp = now or datetime.now()
+        today_str = stamp.date().isoformat()
+        week_start_str = (stamp - timedelta(days=7)).isoformat(timespec="seconds")
+
+        t_uniq_row = conn.execute("SELECT COUNT(DISTINCT subject_id) FROM customer_visits WHERE started_at LIKE ?", (f"{today_str}%",)).fetchone()
+        t_uniq = int(t_uniq_row[0] if t_uniq_row and t_uniq_row[0] else 0)
+
+        t_vis_row = conn.execute("SELECT COUNT(*) FROM customer_visits WHERE started_at LIKE ?", (f"{today_str}%",)).fetchone()
+        t_vis = int(t_vis_row[0] if t_vis_row and t_vis_row[0] else 0)
+
+        w_uniq_row = conn.execute("SELECT COUNT(DISTINCT subject_id) FROM customer_visits WHERE started_at >= ?", (week_start_str,)).fetchone()
+        w_uniq = int(w_uniq_row[0] if w_uniq_row and w_uniq_row[0] else 0)
+
+        w_vis_row = conn.execute("SELECT COUNT(*) FROM customer_visits WHERE started_at >= ?", (week_start_str,)).fetchone()
+        w_vis = int(w_vis_row[0] if w_vis_row and w_vis_row[0] else 0)
+
+        tot_uniq_row = conn.execute("SELECT COUNT(DISTINCT subject_id) FROM customer_visits").fetchone()
+        tot_uniq = int(tot_uniq_row[0] if tot_uniq_row and tot_uniq_row[0] else 0)
+
+        tot_vis_row = conn.execute("SELECT COUNT(*) FROM customer_visits").fetchone()
+        tot_vis = int(tot_vis_row[0] if tot_vis_row and tot_vis_row[0] else 0)
+
+        avg_row = conn.execute("SELECT AVG(duration_seconds) FROM customer_visits WHERE duration_seconds IS NOT NULL AND duration_seconds > 0").fetchone()
+        avg_dwell = float(avg_row[0]) if (avg_row and avg_row[0] is not None) else 0.0
+
+        mult_visits_row = conn.execute(
+            "SELECT COUNT(*) FROM (SELECT subject_id FROM customer_visits GROUP BY subject_id HAVING COUNT(*) > 1)"
+        ).fetchone()
+        mult_visits = int(mult_visits_row[0] if mult_visits_row and mult_visits_row[0] else 0)
+        returning_rate = round((mult_visits / max(tot_uniq, 1)) * 100.0, 1) if tot_uniq > 0 else 0.0
+
+        limit_val = max(1, min(int(limit or 100), 500))
+        subject_rows = conn.execute(
+            """
+            SELECT 
+                s.id AS subject_id,
+                s.alias,
+                s.avatar_path,
+                s.first_seen_at,
+                s.last_seen_at,
+                COUNT(v.id) AS total_visits,
+                SUM(CASE WHEN v.started_at LIKE ? THEN 1 ELSE 0 END) AS today_visits,
+                SUM(CASE WHEN v.started_at >= ? THEN 1 ELSE 0 END) AS week_visits,
+                AVG(CASE WHEN v.duration_seconds IS NOT NULL THEN v.duration_seconds ELSE NULL END) AS avg_dwell,
+                SUM(CASE WHEN v.duration_seconds IS NOT NULL THEN v.duration_seconds ELSE 0 END) AS total_dwell
+            FROM anonymous_subjects s
+            LEFT JOIN customer_visits v ON s.id = v.subject_id
+            GROUP BY s.id
+            ORDER BY s.last_seen_at DESC
+            LIMIT ?
+            """,
+            (f"{today_str}%", week_start_str, limit_val),
+        ).fetchall()
+
+        visitors: list[dict[str, Any]] = []
+        if subject_rows:
+            subject_ids = [r["subject_id"] for r in subject_rows]
+            placeholders = ",".join("?" for _ in subject_ids)
+            recent_rows = conn.execute(
+                f"""
+                SELECT id, subject_id, zone_id, started_at, ended_at, duration_seconds
+                FROM customer_visits
+                WHERE subject_id IN ({placeholders})
+                ORDER BY started_at DESC
+                """,
+                subject_ids,
+            ).fetchall()
+            recent_by_subj: dict[str, list[dict[str, Any]]] = {}
+            for row in recent_rows:
+                sid = row["subject_id"]
+                if sid not in recent_by_subj:
+                    recent_by_subj[sid] = []
+                if len(recent_by_subj[sid]) < 5:
+                    recent_by_subj[sid].append(dict(row))
+
+            for r in subject_rows:
+                sid = r["subject_id"]
+                last_v = recent_by_subj.get(sid, [])
+                last_dwell = None
+                if last_v and last_v[0].get("duration_seconds") is not None:
+                    last_dwell = float(last_v[0]["duration_seconds"])
+
+                visitors.append({
+                    "subject_id": sid,
+                    "alias": r["alias"],
+                    "avatar_path": r["avatar_path"],
+                    "first_seen_at": r["first_seen_at"],
+                    "last_seen_at": r["last_seen_at"],
+                    "total_visits": int(r["total_visits"] or 0),
+                    "today_visits": int(r["today_visits"] or 0),
+                    "week_visits": int(r["week_visits"] or 0),
+                    "avg_dwell_seconds": round(float(r["avg_dwell"] or 0.0), 1),
+                    "total_dwell_seconds": round(float(r["total_dwell"] or 0.0), 1),
+                    "last_dwell_seconds": last_dwell,
+                    "recent_visits": last_v,
+                })
+
+        recents = conn.execute(
+            """
+            SELECT v.id, v.subject_id, s.alias, s.avatar_path, v.zone_id, v.started_at, v.ended_at, v.duration_seconds
+            FROM customer_visits v
+            LEFT JOIN anonymous_subjects s ON v.subject_id = s.id
+            ORDER BY v.started_at DESC
+            LIMIT 30
+            """
+        ).fetchall()
+
+        return {
+            "summary": {
+                "total_unique": tot_uniq,
+                "today_unique": t_uniq,
+                "week_unique": w_uniq,
+                "today_visits": t_vis,
+                "week_visits": w_vis,
+                "total_visits": tot_vis,
+                "avg_dwell_seconds": round(avg_dwell, 1),
+                "returning_rate": returning_rate,
+                "active_now_count": 0,
+            },
+            "visitors": visitors,
+            "recent_visits": [dict(r) for r in recents],
+        }
+    except Exception as exc:
+        print(f"[get_detailed_visits_report] {exc}", flush=True)
+        return empty
 
 
 def customer_visit_counts(
@@ -977,6 +1224,79 @@ def customer_visit_counts(
         "week_visits": int(week_visits["n"] if week_visits else 0),
         "recent": [dict(r) for r in recent],
     }
+
+
+def upsert_staff_memory(
+    conn: sqlite3.Connection | None,
+    staff_id: str,
+    embedding: Any,
+    timestamp: float | datetime,
+) -> None:
+    """Persist an opaque staff id + appearance embedding. No name or photo."""
+    if conn is None or not staff_id:
+        return
+    if hasattr(embedding, "tobytes"):
+        blob = bytes(embedding.astype("float32").tobytes())  # type: ignore[union-attr]
+        dim = int(getattr(embedding, "size", 0) or 0)
+    elif isinstance(embedding, (bytes, bytearray)):
+        blob = bytes(embedding)
+        dim = max(0, len(blob) // 4)
+    else:
+        return
+    if not blob:
+        return
+    stamp = _iso(_as_datetime(timestamp))
+    row = conn.execute("SELECT id FROM staff_memory WHERE id = ?", (staff_id,)).fetchone()
+    if row is None:
+        conn.execute(
+            """
+            INSERT INTO staff_memory (id, embedding, dim, created_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (staff_id, blob, dim, stamp, stamp),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE staff_memory
+            SET embedding = ?, dim = ?, last_seen_at = ?
+            WHERE id = ?
+            """,
+            (blob, dim, stamp, staff_id),
+        )
+    conn.commit()
+
+
+def list_staff_memory(conn: sqlite3.Connection | None) -> list[dict[str, Any]]:
+    if conn is None:
+        return []
+    rows = conn.execute(
+        "SELECT id, embedding, dim, created_at, last_seen_at FROM staff_memory"
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        blob = bytes(row["embedding"] or b"")
+        dim = int(row["dim"] or 0)
+        embedding = None
+        if blob:
+            try:
+                import numpy as np
+
+                embedding = np.frombuffer(blob, dtype=np.float32).copy()
+                if dim and embedding.size != dim:
+                    embedding = embedding[:dim] if embedding.size > dim else embedding
+            except Exception:
+                embedding = None
+        out.append(
+            {
+                "id": str(row["id"]),
+                "embedding": embedding,
+                "dim": dim,
+                "created_at": row["created_at"],
+                "last_seen_at": row["last_seen_at"],
+            }
+        )
+    return out
 
 
 def insert_customer_complaint(

@@ -1008,7 +1008,14 @@ def draw_detection(
         else:
             color = (80, 220, 80) if in_roi else (170, 170, 170)
             if det.identity and det.is_staff:
-                label = f"[Staff: {det.identity}]{time_badge} {det.conf:.2f}"
+                from workplaces import STAFF_ID_PREFIX, STAFF_LABEL
+
+                staff_name = STAFF_LABEL if str(det.identity).startswith(STAFF_ID_PREFIX) else det.identity
+                label = (
+                    f"[{STAFF_LABEL}]{time_badge} {det.conf:.2f}"
+                    if staff_name == STAFF_LABEL
+                    else f"[Staff: {staff_name}]{time_badge} {det.conf:.2f}"
+                )
                 color = (50, 240, 50) if in_roi else (100, 200, 100)
             elif det.identity:
                 label = f"[{det.identity}]{time_badge} {det.conf:.2f}"

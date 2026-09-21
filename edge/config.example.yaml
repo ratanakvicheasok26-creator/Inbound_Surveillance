@@ -90,6 +90,7 @@ track_iou_threshold: 0.3
 track_low_thresh: 0.10
 
 # Product default is 180. Use ~10 so mentors do not wait.
+# Per-camera idle-bay wait lives on cameras[].absent_seconds; this global is the fallback.
 absent_seconds: 10
 cooldown_seconds: 30
 sample_fps: 30
@@ -117,11 +118,12 @@ telegram_bot_token: "8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU"
 telegram_chat_id: ""
 
 # Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.
+# Default: on for massage / a deployed "Complaint intake" pipeline node.
+# Set enabled: true|false to override that. Garage stays off unless you opt in.
 # audio_source_type: laptop | usb | camera | video
 # video_loop: true = keep monitoring an uploaded clip's audio (loops).
 # stt_model_size: fine-tuned Khmer model id or legacy size ("base" -> sengtha/whisper-base-khmer).
 complaint_monitoring:
-  enabled: true
   audio_source_type: laptop
   device_index: null
   vad_threshold: 0.35

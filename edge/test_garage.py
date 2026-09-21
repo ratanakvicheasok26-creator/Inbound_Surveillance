@@ -903,6 +903,49 @@ class GarageApiTests(unittest.TestCase):
         self.assertIn("bays", card)
         self.assertIn("attendance_logs", card)
 
+    def test_workplace_visits_api_survives_worker_thread_conn(self):
+        """HTTP thread must not use the camera-loop sqlite connection (check_same_thread)."""
+        from launcher import GLOBAL_ENGINE
+
+        prev_wp = GLOBAL_ENGINE.cfg.get("workplace_type")
+        prev_conn = GLOBAL_ENGINE.conn
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        # Same-thread = True: any query from the HTTP server thread would raise.
+        worker_conn = connect(Path(tmp.name) / "worker_events.db", check_same_thread=True)
+        self.addCleanup(worker_conn.close)
+        GLOBAL_ENGINE.conn = worker_conn
+        GLOBAL_ENGINE.cfg["workplace_type"] = "massage"
+        try:
+            status, body = self._get("/api/workplace/visits")
+            self.assertEqual(status, 200, body[:200] if body else "")
+            data = json.loads(body)
+            self.assertIn("today_unique", data)
+            self.assertIn("today_visits", data)
+            self.assertIn("week_unique", data)
+            self.assertIn("week_visits", data)
+            self.assertIn("open_sessions", data)
+            self.assertIsInstance(data["open_sessions"], list)
+
+            # Telemetry poll must also stay SQLite-free in massage mode.
+            status, body = self._get("/api/garage/telemetry")
+            self.assertEqual(status, 200, body[:200] if body else "")
+            tel = json.loads(body)
+            self.assertEqual(tel.get("workplace_type"), "massage")
+            self.assertIn("bays", tel)
+            self.assertIn("open_sessions", tel)
+
+            # Direct call must not touch GLOBAL_ENGINE.conn either.
+            live = GLOBAL_ENGINE.workplace_telemetry()
+            self.assertNotIn("visits", live)
+            self.assertIn("open_sessions", live)
+        finally:
+            GLOBAL_ENGINE.conn = prev_conn
+            if prev_wp is None:
+                GLOBAL_ENGINE.cfg.pop("workplace_type", None)
+            else:
+                GLOBAL_ENGINE.cfg["workplace_type"] = prev_wp
+
     def _post(self, path: str, payload: dict):
         body = json.dumps(payload).encode("utf-8")
         conn = HTTPConnection("127.0.0.1", self.port, timeout=2)
@@ -1013,6 +1056,42 @@ class GarageApiTests(unittest.TestCase):
         self.assertEqual(len(updated["bays"]), 1)
         self.assertEqual(updated["bays"][0]["id"], "bay_a")
         self.assertEqual(len(cfg["cameras"][1]["bays"]), 2)
+
+    def test_per_camera_absent_seconds(self):
+        from launcher import _normalize_cameras, upsert_camera, camera_absent_seconds
+
+        raw_cameras = [
+            {"id": "cam-1", "name": "Camera 1", "source": "0", "absent_seconds": 20},
+            {"id": "cam-2", "name": "Camera 2", "source": "1", "absent_seconds": 10},
+            {"id": "cam-3", "name": "Camera 3", "source": "2", "absent_seconds": 5},
+        ]
+        normalized = _normalize_cameras(raw_cameras, default_absent=30)
+        self.assertEqual(normalized[0]["absent_seconds"], 20)
+        self.assertEqual(normalized[1]["absent_seconds"], 10)
+        self.assertEqual(normalized[2]["absent_seconds"], 5)
+
+        inherited = _normalize_cameras(
+            [{"id": "cam-new", "name": "New", "source": "3"}],
+            default_absent=15,
+        )
+        self.assertEqual(inherited[0]["absent_seconds"], 15)
+
+        cfg = {"cameras": normalized, "active_camera_id": "cam-1", "absent_seconds": 30}
+        self.assertEqual(camera_absent_seconds(cfg, "cam-1"), 20)
+        self.assertEqual(camera_absent_seconds(cfg, "cam-2"), 10)
+        self.assertEqual(camera_absent_seconds(cfg, "cam-3"), 5)
+        self.assertEqual(camera_absent_seconds(cfg), 20)
+
+        updated = upsert_camera(cfg, {"id": "cam-2", "name": "Camera 2 Renamed", "source": "1"})
+        self.assertEqual(updated["absent_seconds"], 10)
+        self.assertEqual(cfg["cameras"][0]["absent_seconds"], 20)
+        self.assertEqual(cfg["cameras"][2]["absent_seconds"], 5)
+
+        changed = upsert_camera(
+            cfg,
+            {"id": "cam-3", "name": "Camera 3", "source": "2", "absent_seconds": 8},
+        )
+        self.assertEqual(changed["absent_seconds"], 8)
 
     def test_import_bays(self):
         from launcher import LiveStreamEngine

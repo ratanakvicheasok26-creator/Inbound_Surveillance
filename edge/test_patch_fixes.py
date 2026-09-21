@@ -152,6 +152,28 @@ class TestFrozenPathSplit(unittest.TestCase):
         if escaped is not None:
             self.assertEqual(escaped.parent.name, "static")
 
+    def test_hub_ui_assets_are_local(self):
+        hub = (ROOT / "hub.html").read_text(encoding="utf-8")
+        for needle in (
+            "cdn.tailwindcss.com",
+            "fonts.googleapis.com",
+            "fonts.gstatic.com",
+            "cdn.jsdelivr.net",
+            "unpkg.com",
+        ):
+            self.assertNotIn(needle, hub)
+        tailwind = resolve_static_asset("/static/vendor/tailwind.js")
+        fonts = resolve_static_asset("/static/vendor/fonts.css")
+        self.assertIsNotNone(tailwind)
+        self.assertIsNotNone(fonts)
+        self.assertTrue(tailwind.is_file())
+        self.assertTrue(fonts.is_file())
+        self.assertGreater(tailwind.stat().st_size, 50_000)
+        css = fonts.read_text(encoding="utf-8")
+        self.assertIn("Material Symbols Outlined", css)
+        self.assertIn("/static/vendor/fonts/", css)
+        self.assertNotIn("fonts.gstatic.com", css)
+
 
 if __name__ == "__main__":
     unittest.main()
