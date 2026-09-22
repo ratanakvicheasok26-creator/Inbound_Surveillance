@@ -7,12 +7,15 @@ anyone else is labeled Customer. Runs fully offline via cv2.dnn.
 from __future__ import annotations
 
 import re
+import secrets
 import shutil
 import threading
+import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -35,6 +38,202 @@ class FaceMatch:
     confidence: float
     is_staff: bool
     bbox: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
+    is_customer: bool = False
+    customer_id: Optional[str] = None
+    embedding: Optional[np.ndarray] = None
+    camera_id: Optional[str] = None
+
+
+@dataclass
+class CustomerProfile:
+    customer_id: str
+    customer_num: int
+    embeddings: List[np.ndarray] = field(default_factory=list)
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    visit_count: int = 1
+    avatar_path: Optional[str] = None
+
+    @property
+    def display_name(self) -> str:
+        return f"Customer #{self.customer_num}"
+
+
+class CustomerFaceGallery:
+    """Persistent gallery of customer face embeddings.
+    
+    Anchors customer identity to invariant facial features across days, visits,
+    and multiple cameras (Parking, Entrance, Reception) regardless of outfit.
+    """
+
+    def __init__(self, threshold: float = 0.38, max_per_id: int = 10, conn: Any | None = None) -> None:
+        self.threshold = threshold
+        self.max_per_id = max_per_id
+        self.conn = conn
+        self.profiles: Dict[str, CustomerProfile] = {}
+        self._load_from_db()
+
+    def _normalize_vec(self, vec: np.ndarray | None) -> np.ndarray | None:
+        if vec is None:
+            return None
+        arr = np.asarray(vec, dtype=np.float32).flatten()
+        if arr.size == 0:
+            return None
+        norm = float(np.linalg.norm(arr))
+        if norm <= 1e-6:
+            return None
+        return arr / norm
+
+    def _load_from_db(self) -> None:
+        if self.conn is None:
+            return
+        try:
+            from db import list_customer_face_embeddings
+
+            stored = list_customer_face_embeddings(self.conn)
+            try:
+                rows = self.conn.execute(
+                    "SELECT id, alias, first_seen_at, last_seen_at, avatar_path, visit_count FROM anonymous_subjects"
+                ).fetchall()
+            except Exception:
+                rows = self.conn.execute(
+                    "SELECT id, alias, first_seen_at, last_seen_at, avatar_path FROM anonymous_subjects"
+                ).fetchall()
+            for r in rows:
+                sid = str(r["id"])
+                alias = str(r["alias"] or "")
+                num = len(self.profiles) + 1
+                if alias and "#" in alias:
+                    try:
+                        num = int(alias.split("#")[-1])
+                    except Exception:
+                        pass
+                visit_count = 1
+                try:
+                    visit_count = int(r["visit_count"] or 1)
+                except (IndexError, KeyError):
+                    pass
+                embs = []
+                for vec in stored.get(sid) or []:
+                    normed = self._normalize_vec(vec)
+                    if normed is not None:
+                        embs.append(normed)
+                if not embs and not sid.startswith("customer_"):
+                    continue
+                prof = CustomerProfile(
+                    customer_id=sid,
+                    customer_num=num,
+                    embeddings=embs,
+                    first_seen=float(datetime.fromisoformat(r["first_seen_at"]).timestamp()) if r["first_seen_at"] else time.time(),
+                    last_seen=float(datetime.fromisoformat(r["last_seen_at"]).timestamp()) if r["last_seen_at"] else time.time(),
+                    visit_count=max(1, visit_count),
+                    avatar_path=r["avatar_path"],
+                )
+                self.profiles[sid] = prof
+        except Exception:
+            pass
+
+    def _persist_profile(self, prof: CustomerProfile, now: float) -> None:
+        if self.conn is None:
+            return
+        try:
+            from db import replace_customer_face_embeddings
+
+            replace_customer_face_embeddings(
+                self.conn,
+                prof.customer_id,
+                list(prof.embeddings),
+                alias=prof.display_name,
+                visit_count=prof.visit_count,
+                timestamp=now,
+            )
+        except Exception:
+            pass
+
+    def match(self, embedding: np.ndarray | None, threshold: float | None = None) -> Tuple[Optional[CustomerProfile], float]:
+        vec = self._normalize_vec(embedding)
+        if vec is None or not self.profiles:
+            return None, 0.0
+        thresh = threshold if threshold is not None else self.threshold
+        best_prof: Optional[CustomerProfile] = None
+        best_score = thresh
+
+        for prof in self.profiles.values():
+            # 1. Best of template bucket
+            for ref in prof.embeddings:
+                score = float(np.dot(ref, vec))
+                if score > best_score:
+                    best_score = score
+                    best_prof = prof
+            # 2. Mean prototype comparison
+            if len(prof.embeddings) > 1:
+                proto = np.mean(np.stack(prof.embeddings, axis=0), axis=0)
+                norm_proto = self._normalize_vec(proto)
+                if norm_proto is not None:
+                    proto_score = float(np.dot(norm_proto, vec))
+                    if proto_score > best_score:
+                        best_score = proto_score
+                        best_prof = prof
+
+        return best_prof, float(best_score) if best_prof is not None else 0.0
+
+
+    def match_or_enroll(
+        self,
+        embedding: np.ndarray | None,
+        now: float | None = None,
+        avatar_crop: np.ndarray | None = None,
+        threshold: float | None = None,
+    ) -> Tuple[CustomerProfile, bool, float]:
+        """Match existing customer face or enroll new customer. Returns (profile, is_new, score)."""
+        now = time.time() if now is None else float(now)
+        vec = self._normalize_vec(embedding)
+        if vec is None:
+            # Empty embedding fallback
+            dummy = CustomerProfile(
+                customer_id=f"customer_{secrets.token_hex(4)}",
+                customer_num=len(self.profiles) + 1,
+                first_seen=now,
+                last_seen=now,
+            )
+            return dummy, True, 0.0
+
+        prof, score = self.match(vec, threshold=threshold)
+        if prof is not None:
+            # Check if this is a new visit session (e.g. seen again after > 10 mins or next day)
+            dt = now - prof.last_seen
+            if dt > 600.0:  # 10 minutes session gap
+                prof.visit_count += 1
+            prof.last_seen = now
+            # Prototype updating with angle diversity
+            sims = [float(np.dot(e, vec)) for e in prof.embeddings]
+            if sims and max(sims) > 0.96:
+                idx = int(np.argmax(sims))
+                updated = self._normalize_vec(0.85 * prof.embeddings[idx] + 0.15 * vec)
+                if updated is not None:
+                    prof.embeddings[idx] = updated
+            else:
+                prof.embeddings.append(vec)
+                if len(prof.embeddings) > self.max_per_id:
+                    del prof.embeddings[0 : len(prof.embeddings) - self.max_per_id]
+            self._persist_profile(prof, now)
+            return prof, False, score
+
+        # New customer auto-enrollment
+        new_id = f"customer_{secrets.token_hex(4)}"
+        new_num = len(self.profiles) + 1
+        new_prof = CustomerProfile(
+            customer_id=new_id,
+            customer_num=new_num,
+            embeddings=[vec],
+            first_seen=now,
+            last_seen=now,
+            visit_count=1,
+        )
+        self.profiles[new_id] = new_prof
+        self._persist_profile(new_prof, now)
+        return new_prof, True, 1.0
+
 
 
 def ensure_model_files(models_dir: Path) -> Tuple[Path, Path]:
@@ -90,16 +289,22 @@ def resolve_face_paths(cfg: dict) -> tuple[Path, Path]:
     return faces, models
 
 
-def try_create_face_recognizer(cfg: dict) -> FaceRecognizer | None:
+def try_create_face_recognizer(cfg: dict, conn: Any | None = None) -> FaceRecognizer | None:
     if not bool(cfg.get("enable_face_id", True)):
         return None
     faces_dir, models_dir = resolve_face_paths(cfg)
-    thresh = float(cfg.get("face_match_threshold") or 0.60)
+    thresh = float(cfg.get("face_match_threshold") or 0.38)
+    workplace = str(cfg.get("workplace_type") or "garage").lower()
+    enable_customer = bool(cfg.get("enable_customer_face", workplace == "massage"))
+    customer_gallery = CustomerFaceGallery(threshold=thresh, conn=conn) if enable_customer else None
     try:
         return FaceRecognizer(
             faces_dir=faces_dir,
             models_dir=models_dir,
             match_threshold=thresh,
+            customer_gallery=customer_gallery,
+            conn=conn,
+            enable_customer_gallery=enable_customer,
         )
     except Exception as exc:
         print(f"[FaceID] Disabled: {exc}")
@@ -118,33 +323,37 @@ def till_status_label(
         return f"EMPTY {empty_elapsed:.0f}/{absent:.0f}s"
     if not face_id_enabled:
         return "STAFF IN ROI"
-    staff = [
-        det.identity
-        for det in detections
-        if getattr(det, "is_staff", False) and getattr(det, "identity", None)
-    ]
-    if staff:
-        shown = ", ".join(dict.fromkeys(staff))
-        return f"STAFF [{shown}] IN ROI"
-    if any(getattr(det, "identity", None) for det in detections):
-        return "EMPLOYEE IN ROI"
-    return "PERSON IN ROI"
+    for det in detections:
+        if getattr(det, "is_staff", False):
+            return f"STAFF: {det.identity}"
+    return "STAFF IN ROI"
 
 
 class FaceRecognizer:
+    """Offline face recognition using OpenCV DNN YuNet + SFace."""
+
     def __init__(
         self,
         faces_dir: str | Path = "faces",
         models_dir: str | Path = "models",
         score_threshold: float = 0.60,
         nms_threshold: float = 0.30,
-        match_threshold: float = 0.60,
+        match_threshold: float = 0.38,
+        customer_gallery: Optional[CustomerFaceGallery] = None,
+        conn: Any | None = None,
+        enable_customer_gallery: bool = True,
     ) -> None:
         self.faces_dir = Path(faces_dir)
         self.models_dir = Path(models_dir)
         self.score_threshold = score_threshold
         self.nms_threshold = nms_threshold
         self.match_threshold = match_threshold
+        if customer_gallery is not None:
+            self.customer_gallery = customer_gallery
+        elif enable_customer_gallery:
+            self.customer_gallery = CustomerFaceGallery(threshold=match_threshold, conn=conn)
+        else:
+            self.customer_gallery = None
 
         yunet_path, sface_path = ensure_model_files(self.models_dir)
         self.yunet_path = str(yunet_path)
@@ -153,8 +362,10 @@ class FaceRecognizer:
         self._lock = threading.Lock()
         self._reload_lock = threading.Lock()
         self._embedding_cache: Dict[Tuple[str, float], np.ndarray] = {}
+        self._track_matches: Dict[int, Tuple[FaceMatch, float]] = {}
 
         self.detector = self._create_detector(self.yunet_path)
+
         self.recognizer = self._create_recognizer(self.sface_path)
 
         self._reload_detector: cv2.FaceDetectorYN | None = None
@@ -312,6 +523,8 @@ class FaceRecognizer:
         self,
         frame: np.ndarray,
         crop_box: Optional[Tuple[int, int, int, int]] = None,
+        camera_id: Optional[str] = None,
+        auto_enroll_customer: bool = True,
     ) -> FaceMatch:
         """Detect and recognize a face in the full frame or a person bounding box."""
         if crop_box is not None:
@@ -320,7 +533,7 @@ class FaceRecognizer:
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w_f, x2), min(h_f, y2)
             if x2 <= x1 or y2 <= y1:
-                return FaceMatch(UNKNOWN_LABEL, 0.0, False)
+                return FaceMatch(UNKNOWN_LABEL, 0.0, False, camera_id=camera_id)
             sub_img = frame[y1:y2, x1:x2]
             offset_x, offset_y = x1, y1
         else:
@@ -329,16 +542,16 @@ class FaceRecognizer:
 
         h, w = sub_img.shape[:2]
         if h < 20 or w < 20:
-            return FaceMatch(UNKNOWN_LABEL, 0.0, False)
+            return FaceMatch(UNKNOWN_LABEL, 0.0, False, camera_id=camera_id)
 
         with self._lock:
             self.detector.setInputSize((w, h))
             _, faces = self.detector.detect(sub_img)
 
             if faces is None or len(faces) == 0:
-                return FaceMatch(UNKNOWN_LABEL, 0.0, False)
+                return FaceMatch(UNKNOWN_LABEL, 0.0, False, camera_id=camera_id)
 
-            face = faces[0]
+            face = max(faces, key=lambda row: float(row[2]) * float(row[3]))
             fx, fy, fw, fh = map(int, face[:4])
             global_bbox = (offset_x + fx, offset_y + fy, fw, fh)
 
@@ -362,22 +575,101 @@ class FaceRecognizer:
                         best_name = name
 
             is_staff = best_score >= self.match_threshold
-            final_name = best_name if is_staff else UNKNOWN_LABEL
+            if is_staff:
+                return FaceMatch(
+                    name=best_name,
+                    confidence=best_score,
+                    is_staff=True,
+                    is_customer=False,
+                    bbox=global_bbox,
+                    embedding=embedding,
+                    camera_id=camera_id,
+                )
+
+            # Not staff: match or auto-enroll in customer face gallery
+            if self.customer_gallery is not None and auto_enroll_customer:
+                prof, is_new, cust_score = self.customer_gallery.match_or_enroll(
+                    embedding,
+                    avatar_crop=aligned_face,
+                    threshold=self.match_threshold,
+                )
+                return FaceMatch(
+                    name=prof.display_name,
+                    confidence=cust_score,
+                    is_staff=False,
+                    is_customer=True,
+                    customer_id=prof.customer_id,
+                    bbox=global_bbox,
+                    embedding=embedding,
+                    camera_id=camera_id,
+                )
 
             return FaceMatch(
-                name=final_name,
+                name=UNKNOWN_LABEL,
                 confidence=best_score,
-                is_staff=is_staff,
+                is_staff=False,
+                is_customer=False,
                 bbox=global_bbox,
+                embedding=embedding,
+                camera_id=camera_id,
             )
 
-    def annotate_detections(self, frame: np.ndarray, detections: list) -> None:
+    def annotate_detections(
+        self,
+        frame: np.ndarray,
+        detections: list,
+        camera_id: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> None:
+        """Annotate detections with high-efficiency tracklet caching."""
+        current_time = time.time() if now is None else float(now)
+        if not hasattr(self, "_track_matches"):
+            self._track_matches: Dict[int, Tuple[FaceMatch, float]] = {}
+
+        # Periodically prune dead tracks from cache
+        if len(self._track_matches) > 60:
+            self._track_matches = {
+                tid: (m, t) for tid, (m, t) in self._track_matches.items()
+                if (current_time - t) < 8.0
+            }
+
         for det in detections:
-            crop_box = (int(det.x1), int(det.y1), int(det.x2), int(det.y2))
-            match = self.recognize_in_crop(frame, crop_box)
+            track_id = int(getattr(det, "track_id", 0) or 0)
+            x1, y1 = int(getattr(det, "x1", 0)), int(getattr(det, "y1", 0))
+            x2, y2 = int(getattr(det, "x2", 0)), int(getattr(det, "y2", 0))
+            bw, bh = x2 - x1, y2 - y1
+
+            # 1. Reuse verified tracklet identity within 1.5 seconds (0 ms CPU cost!)
+            if track_id > 0 and track_id in self._track_matches:
+                cached_match, last_t = self._track_matches[track_id]
+                if (current_time - last_t) < 1.5 and (cached_match.is_staff or cached_match.is_customer):
+                    det.identity = cached_match.name
+                    det.identity_conf = cached_match.confidence
+                    det.is_staff = cached_match.is_staff
+                    det.is_customer = getattr(cached_match, "is_customer", False)
+                    det.customer_id = getattr(cached_match, "customer_id", None)
+                    det.face_embedding = getattr(cached_match, "embedding", None)
+                    continue
+
+            # 2. Skip distant/tiny bounding boxes to save CPU
+            if bw < 25 or bh < 40:
+                det.identity = getattr(det, "identity", UNKNOWN_LABEL) or UNKNOWN_LABEL
+                continue
+
+            # 3. Run facial recognition
+            crop_box = (x1, y1, x2, y2)
+            match = self.recognize_in_crop(frame, crop_box, camera_id=camera_id)
             det.identity = match.name
             det.identity_conf = match.confidence
             det.is_staff = match.is_staff
+            det.is_customer = getattr(match, "is_customer", False)
+            det.customer_id = getattr(match, "customer_id", None)
+            det.face_embedding = getattr(match, "embedding", None)
+
+            if track_id > 0:
+                self._track_matches[track_id] = (match, current_time)
+
+
 
 
 def sanitize_identity_name(name: str) -> str:

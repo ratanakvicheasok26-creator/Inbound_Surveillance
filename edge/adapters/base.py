@@ -168,7 +168,8 @@ def unwrap_local_video_source(source: Any) -> str | None:
     if not host or not path:
         return None
     if len(host) == 1 and host.isalpha():
-        drive = f"{host.upper()}:{path.replace('/', '\\') if sys.platform == 'win32' else path}"
+        win_path = path.replace("/", "\\") if sys.platform == "win32" else path
+        drive = f"{host.upper()}:{win_path}"
         if source_has_video_ext(drive):
             return drive
     candidate = "/" + host + path
