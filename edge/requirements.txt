@@ -1,0 +1,15 @@
+opencv-python>=4.10.0
+ultralytics>=8.3.0
+PyYAML>=6.0.2
+requests>=2.32.0
+zeroconf>=0.132.0
+onnxruntime>=1.18.0
+onnx>=1.16.0
+rtmlib>=0.0.13
+tqdm>=4.66.0
+sounddevice>=0.5.1
+soundfile>=0.12.1
+# Optional Khmer STT / Silero VAD (complaint intake). Do not add silero-vad
+# here without --no-deps: its torchaudio pin upgrades CPU Torch to CUDA.
+#   pip install silero-vad --no-deps
+#   pip install transformers faster-whisper

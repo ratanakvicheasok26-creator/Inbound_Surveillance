@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inbound Surveillance — Agentic Vision Platform for Commercial Venues</title>
+  <meta name="description" content="An Agentic Vision Platform that turns legacy CCTV cameras into proactive safety and operations agents for commercial venues in emerging markets." />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/vendor/fonts.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="page-bg" class="page-bg" aria-hidden="true"></canvas>
+
+  <header class="topbar" id="nav">
+    <a class="brand" href="#home">
+      <span class="brand__mark" aria-hidden="true">
+        <img src="/inb_surveillance.png" alt="Inbound Surveillance" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-surveillance-green, #00FF66);" />
+      </span>
+      <span>Inbound Surveillance</span>
+    </a>
+
+    <div class="topbar__cluster">
+      <nav class="glass-nav" aria-label="Primary">
+        <div class="glass-nav__sheen" aria-hidden="true"></div>
+        <a href="#home">Home</a>
+        <a href="#solutions">Solutions</a>
+        <a href="#about">About</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#contact">Contact</a>
+        <a href="/dashboard.html">Sign in</a>
+      </nav>
+      <a class="btn btn--glass btn--sm" href="/dashboard.html?mode=signup">Create account</a>
+      <button class="nav__toggle" type="button" aria-label="Open menu" aria-expanded="false" data-menu-toggle>
+        <span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobile-menu" hidden>
+    <nav aria-label="Mobile">
+      <a href="#home">Home</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#about">About</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#contact">Contact</a>
+      <a href="/dashboard.html">Sign in</a>
+    </nav>
+    <a class="btn btn--glass btn--block" href="/dashboard.html?mode=signup">Create account</a>
+  </div>
+
+  <main id="main">
+    <section class="hero" id="home">
+      <div class="hero__art" id="hero-art" aria-hidden="true"></div>
+      <div class="container hero__grid">
+        <div class="hero__copy">
+          <p class="badge badge--glass">
+            <span class="badge__dot" aria-hidden="true"></span>
+            Zero-CapEx intelligence for cameras you already own
+          </p>
+          <h1>
+            Your cameras already see everything.
+            <span>Now make them act.</span>
+          </h1>
+          <p class="lede">An Agentic Vision Platform that turns legacy CCTV cameras into proactive safety and operations agents for commercial venues in emerging markets.</p>
+          <div class="hero__cta">
+            <a class="btn btn--primary" href="/dashboard.html?mode=signup">Create account</a>
+            <a class="btn btn--ghost" href="/dashboard.html">Sign in</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="strip" id="trust">
+      <div class="container strip__inner">
+        <p>Mid-market commercial real estate, supermarket chains, and private venues across <strong>Cambodia, Vietnam, and the Philippines</strong> still run fragmented legacy CCTV — with no intelligence layer. We add one, without replacing the cameras.</p>
+      </div>
+    </section>
+
+    <section class="section" id="solutions">
+      <div class="container">
+        <header class="section__head">
+          <p class="eyebrow">Solutions</p>
+          <h2>One engine. Three ways to act.</h2>
+        </header>
+
+        <div class="cards">
+          <article class="card" id="safety">
+            <div class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M5 19c1.2-3 3.6-4.5 7-4.5s5.8 1.5 7 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Safety Wedge</h3>
+            <p>Ephemeral facial search for missing-person response. Search connected feeds when an incident is reported, then expire the temporary search data once it is resolved. Potential matches always require human verification.</p>
+            <a class="card__more" href="#about">See More →</a>
+          </article>
+
+          <article class="card" id="loss">
+            <div class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="7" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 7V6a4 4 0 0 1 8 0v1" stroke="currentColor" stroke-width="1.5"/></svg>
+            </div>
+            <h3>Loss Prevention</h3>
+            <p>Authorized loss-prevention intelligence for retail, including possible shoplifter alerts and a private threat exchange across participating locations. Turns camera infrastructure into a profit center.</p>
+            <a class="card__more" href="#pricing">See More →</a>
+          </article>
+
+          <article class="card" id="ops">
+            <div class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="1.5"/><path d="M12 8.5v4l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Operational Insights</h3>
+            <p>Automate everyday operational awareness. Monitor conditions such as cashier absence, restricted backroom access, and idle staff presence — then dispatch an alert for human action.</p>
+            <a class="card__more" href="#how">See More →</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--about" id="about">
+      <div class="container about">
+        <div class="about__copy">
+          <p class="badge">About Us</p>
+          <h2>A software layer for the cameras already in place.</h2>
+          <p>We build an Agentic Vision Platform that turns existing, legacy CCTV into proactive safety and operations agents. No hardware bundles. No rip-and-replace. Connect RTSP streams, run inference at the edge, and dispatch action through Telegram.</p>
+        </div>
+
+        <div class="about__grid">
+          <article class="mini">
+            <div class="mini__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16M12 4v16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="1.5"/></svg>
+            </div>
+            <h3>Zero-CapEx</h3>
+            <p>Hook into existing RTSP streams. No camera replacement required.</p>
+          </article>
+          <article class="mini">
+            <div class="mini__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="14" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Edge AI</h3>
+            <p>Local 128D/512D vector embeddings. Payload under 1 KB. Raw video stays on site unless a match is triggered.</p>
+          </article>
+          <article class="mini">
+            <div class="mini__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h6l2-3 3 6 2-3h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/></svg>
+            </div>
+            <h3>Instant Alerts</h3>
+            <p>Detection is not the end of the loop. Events go to humans over Telegram for verification and action.</p>
+          </article>
+          <article class="mini">
+            <div class="mini__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 16l5-5 3 3 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 8h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Scalable Margin</h3>
+            <p>Land with a free or subsidized safety wedge, then expand into recurring intelligence.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="how">
+      <div class="container">
+        <header class="section__head">
+          <p class="eyebrow">How it works</p>
+          <h2>From existing CCTV to human action.</h2>
+        </header>
+
+        <ol class="steps">
+          <li>
+            <span>01</span>
+            <h3>RTSP Ingestion</h3>
+            <p>Connect existing CCTV camera streams. No hardware upgrade.</p>
+          </li>
+          <li>
+            <span>02</span>
+            <h3>Edge Inference</h3>
+            <p>Process video locally and extract lightweight 128D/512D vector embeddings.</p>
+          </li>
+          <li>
+            <span>03</span>
+            <h3>Vector / Rule Match</h3>
+            <p>Match embeddings or operational rules against configured intelligence.</p>
+          </li>
+          <li>
+            <span>04</span>
+            <h3>Telegram Dispatch</h3>
+            <p>Send actionable alerts through Telegram for human response.</p>
+          </li>
+        </ol>
+
+        <p class="note">90%+ potential cloud infrastructure cost reduction compared with traditional cloud-streaming video analytics. Auto-calibration is designed to reduce venue onboarding toward under 60 minutes — a design target, not a guarantee.</p>
+      </div>
+    </section>
+
+    <section class="section section--pricing" id="pricing">
+      <div class="container">
+        <header class="section__head">
+          <p class="eyebrow">Pricing</p>
+          <h2>Land with safety. Expand with intelligence.</h2>
+        </header>
+
+        <div class="pricing">
+          <article class="price-card">
+            <p class="price-card__tier">Tier 1</p>
+            <h3>Emergency / Amber Alert</h3>
+            <p class="price-card__amount">Free or subsidized</p>
+            <p>Eliminate sales friction and secure institutional integration. Safety is the entry point.</p>
+          </article>
+          <article class="price-card price-card--featured">
+            <p class="price-card__tier">Tier 2</p>
+            <h3>Loss Prevention &amp; Operations</h3>
+            <p class="price-card__amount">$15–$25 <small>/ camera / month</small></p>
+            <p>Recurring software intelligence on cameras already in place, including possible threat alerts and operational rules.</p>
+          </article>
+        </div>
+
+        <p class="note">Projected gross margins of 75–80%. Under 6 months projected CAC payback for mid-market retail accounts. These figures are projected, not current results.</p>
+      </div>
+    </section>
+
+    <section class="section section--contact" id="contact">
+      <div class="container contact">
+        <div class="contact__copy">
+          <p class="badge">Contact Us</p>
+          <h2>Tell us your goals.</h2>
+          <p>Connect existing CCTV infrastructure to proactive safety and operations intelligence. Book a demo or request a pilot integration.</p>
+        </div>
+
+        <form class="form" id="contact-form">
+          <label>
+            Name
+            <input type="text" name="name" required autocomplete="name" />
+          </label>
+          <label>
+            Email
+            <input type="email" name="email" required autocomplete="email" />
+          </label>
+          <label>
+            Phone
+            <input type="tel" name="phone" autocomplete="tel" />
+          </label>
+          <label>
+            Message
+            <textarea name="message" rows="4" required></textarea>
+          </label>
+          <button class="btn btn--primary btn--block" type="submit">Submit</button>
+          <p class="form__done" id="form-done" hidden>Request recorded.</p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div>
+        <strong>Inbound Surveillance</strong>
+        <p>Agentic Vision Platform for Commercial Venues</p>
+      </div>
+      <nav aria-label="Footer">
+        <a href="#home">Home</a>
+        <a href="#solutions">Solutions</a>
+        <a href="#about">About</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#contact">Contact</a>
+        <a href="/dashboard.html">Sign in</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/main.tsx"></script>
+  <script src="/script.js"></script>
+</body>
+</html>

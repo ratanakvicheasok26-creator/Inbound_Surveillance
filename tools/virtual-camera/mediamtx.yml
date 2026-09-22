@@ -1,0 +1,34 @@
+# MediaMTX Configuration for Virtual Camera Streamer
+
+# General settings
+logLevel: info
+logDestinations: [stdout]
+
+# API for stats / metrics
+api: yes
+apiAddress: :9997
+
+# RTSP Server
+rtsp: yes
+protocols: [tcp, udp]
+rtspAddress: :8554
+rtspsAddress: :8322
+rtpAddress: :8000
+rtcpAddress: :8001
+
+# WebRTC Server (for low-latency browser preview)
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+
+# HLS Server (for fallback browser preview)
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes
+
+# RTMP Server
+rtmp: no
+
+# Path settings
+paths:
+  all_others:

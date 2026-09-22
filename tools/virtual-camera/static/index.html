@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inbound Virtual Camera Streamer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="bg-[#0b0f17] text-slate-100 min-h-screen font-['Plus_Jakarta_Sans',sans-serif] selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Top Navbar -->
+  <header class="border-b border-slate-800/80 bg-[#0f1422]/90 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            Inbound Virtual Camera Hub
+            <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">RTSP SIMULATOR</span>
+          </h1>
+          <p class="text-xs text-slate-400">Stream online & local videos as real-time hardware IP cameras for Machine Learning</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <div class="hidden sm:flex items-center gap-2 text-xs font-mono bg-slate-900/90 px-3 py-1.5 rounded-md border border-slate-800">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-slate-400">RTSP Port:</span>
+          <span id="nav-rtsp-port" class="text-cyan-400 font-semibold">8556</span>
+        </div>
+        <button onclick="generateSample()" class="text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-md border border-slate-700 transition flex items-center gap-1.5 cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          Quick Demo Clip
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- Active Streams Grid -->
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            Active Camera Channels
+            <span id="active-streams-badge" class="text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">1 Live</span>
+          </h2>
+          <p class="text-xs text-slate-400">These stream continuously in real-time. Copy the RTSP URL into Inbound Surveillance.</p>
+        </div>
+      </div>
+
+      <div id="streams-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Rendered by app.js -->
+      </div>
+    </section>
+
+    <!-- Ingest Section: Upload Local or Download URL -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- Option A: Local File Upload -->
+      <div class="bg-[#111726] border border-slate-800 rounded-xl p-6 shadow-xl relative overflow-hidden">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-7 h-7 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+          </div>
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider">1. Upload Video File</h3>
+        </div>
+        <p class="text-xs text-slate-400 mb-4">Upload recorded garage, parking, or car footage (MP4, MKV, MOV, AVI).</p>
+
+        <div id="dropzone" class="border-2 border-dashed border-slate-700 hover:border-cyan-500/50 bg-slate-900/40 hover:bg-slate-900/70 rounded-xl p-6 text-center transition cursor-pointer flex flex-col items-center justify-center">
+          <input type="file" id="file-input" class="hidden" accept="video/*,.mp4,.mkv,.mov,.avi,.webm">
+          <svg class="w-10 h-10 text-slate-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          <p class="text-sm text-slate-200 font-medium">Click to browse or drag video here</p>
+          <p class="text-xs text-slate-500 mt-1">Supports up to 2GB files</p>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="upload-progress-card" class="hidden mt-4 bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+          <div class="flex justify-between text-xs mb-1.5 font-medium">
+            <span id="upload-filename" class="text-slate-300 truncate max-w-[200px]">filename.mp4</span>
+            <span id="upload-pct" class="text-cyan-400 font-mono">0%</span>
+          </div>
+          <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+            <div id="upload-bar" class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full transition-all duration-150" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Option B: Online Video URL Downloader -->
+      <div class="bg-[#111726] border border-slate-800 rounded-xl p-6 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-7 h-7 rounded-md bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+            </div>
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider">2. Download Online Video URL</h3>
+          </div>
+          <p class="text-xs text-slate-400 mb-4">Paste any YouTube or direct MP4 URL. Automatically downloaded and converted for streaming.</p>
+
+          <form id="url-form" onsubmit="handleUrlSubmit(event)" class="space-y-3">
+            <div>
+              <input type="url" id="online-url-input" placeholder="https://www.youtube.com/watch?v=... or direct .mp4 link" required
+                class="w-full bg-slate-900 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-lg px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 outline-none transition font-mono">
+            </div>
+            <button type="submit" id="btn-download-url"
+              class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium text-xs py-2.5 px-4 rounded-lg shadow-md shadow-purple-600/20 transition flex items-center justify-center gap-2 cursor-pointer">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+              Download & Add to Library
+            </button>
+          </form>
+        </div>
+
+        <!-- Download status log -->
+        <div id="downloads-list" class="mt-4 space-y-2">
+          <!-- Rendered by app.js -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Section: Video Library & Inbound Surveillance Quick Setup Guide -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Video Library (2 cols) -->
+      <div class="lg:col-span-2 bg-[#111726] border border-slate-800 rounded-xl p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+            </svg>
+            Video Library
+          </h3>
+          <button onclick="fetchVideos()" class="text-xs text-slate-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+
+        <div id="video-list-container" class="divide-y divide-slate-800/80 max-h-[360px] overflow-y-auto">
+          <!-- Rendered by app.js -->
+        </div>
+      </div>
+
+      <!-- Inbound Surveillance Quick Setup Guide (1 col) -->
+      <div class="bg-gradient-to-b from-[#141b2d] to-[#0f1422] border border-cyan-500/20 rounded-xl p-6 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400"></span>
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Inbound Surveillance Setup</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed mb-4">
+            Connect the simulated camera into Inbound Surveillance's command dashboard in seconds:
+          </p>
+
+          <ol class="space-y-3 text-xs text-slate-300 font-sans">
+            <li class="flex items-start gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-slate-800 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[11px]">1</span>
+              <span>Open the <strong class="text-white">Inbound Surveillance Hub</strong> (<code class="bg-slate-900 px-1 py-0.5 rounded text-cyan-300 font-mono">edge/hub.html</code> or desktop app).</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-slate-800 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[11px]">2</span>
+              <span>In <strong class="text-white">Camera Config</strong>, select Protocol: <strong class="text-cyan-400">RTSP</strong>.</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-slate-800 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[11px]">3</span>
+              <div>
+                <span>Paste the Stream URL:</span>
+                <div class="mt-1 bg-slate-900/90 border border-slate-700/80 rounded px-2 py-1 flex items-center justify-between font-mono text-[11px] text-emerald-400">
+                  <span id="guide-rtsp-url">rtsp://127.0.0.1:8556/garage</span>
+                  <button onclick="copyGuideUrl()" class="text-slate-400 hover:text-white transition ml-2 cursor-pointer" title="Copy">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-slate-800 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[11px]">4</span>
+              <span>Click <strong class="text-white">Connect Stream</strong>. The ML model starts detecting vehicles and mechanics live!</span>
+            </li>
+          </ol>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+          <span>Continuous Infinite Loop</span>
+          <span class="text-emerald-400 font-semibold font-mono">Real-time 1.0x</span>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Inbound Surveillance uses the camera to monitor the store floor.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Camera backends on macOS may request microphone access; Inbound Surveillance does not record audio.</string>
+</dict>
+</plist>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Digital Overwatch — Scan and Go Loader Preview</title>
+  <link rel="stylesheet" href="/vendor/fonts.css" />
+  <style>
+    :root {
+      --color-bg-base: #000000;
+      --color-surface-charcoal: #121212;
+      --color-surface-elevated: #1a1a1a;
+      --color-surveillance-green: #00ff66;
+      --color-stealth-green: #0b833a;
+      --color-crisp-white: #fafafa;
+      --color-text-muted: #8e9297;
+      --glow-laser: 0 0 14px rgba(0, 255, 102, 0.65), 0 0 28px rgba(11, 131, 58, 0.45);
+      --glow-stealth: 0 0 16px rgba(11, 131, 58, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--color-bg-base);
+      color: var(--color-crisp-white);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+      max-width: 720px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--color-surveillance-green);
+      margin-bottom: 8px;
+      padding: 4px 12px;
+      background: rgba(0, 255, 102, 0.1);
+      border-radius: 999px;
+      border: 1px solid rgba(0, 255, 102, 0.3);
+    }
+
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      color: var(--color-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .palette-strip {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 36px;
+    }
+
+    .swatch {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--color-surface-charcoal);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    .swatch-chip {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .preview-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: radial-gradient(circle at center, #0d1a12 0%, #000000 70%);
+      border: 1px solid rgba(11, 131, 58, 0.35);
+      box-shadow: var(--glow-stealth);
+      border-radius: 24px;
+      padding: 36px 24px;
+      max-width: 520px;
+      width: 100%;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn-tab {
+      background: var(--color-surface-charcoal);
+      color: var(--color-crisp-white);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-tab:hover, .btn-tab.active {
+      border-color: var(--color-surveillance-green);
+      color: var(--color-surveillance-green);
+      box-shadow: 0 0 10px rgba(0, 255, 102, 0.3);
+    }
+
+    /* SVG Keyframes */
+    @keyframes scan-laser-sweep {
+      0% { transform: translateY(0px); opacity: 0.2; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { transform: translateY(56px); opacity: 0.2; }
+    }
+    @keyframes iris-rotate-cw {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes iris-rotate-ccw {
+      0% { transform: rotate(360deg); }
+      100% { transform: rotate(0deg); }
+    }
+    @keyframes iris-pulse-glow {
+      0%, 100% { filter: drop-shadow(0 0 4px rgba(0, 255, 102, 0.5)); }
+      50% { filter: drop-shadow(0 0 12px rgba(0, 255, 102, 0.95)) drop-shadow(0 0 20px rgba(11, 131, 58, 0.6)); }
+    }
+    @keyframes hud-bracket-pulse {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.05); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="eyebrow">Design System Showcase</div>
+    <h1>"Digital Overwatch" & Scan and Go Mascot</h1>
+    <p class="subtitle">High-contrast palette featuring Crisp White mascot contours, Surveillance Green active iris optics, Stealth Green trailing glow shadows, and 5 versatile general business scanning targets.</p>
+  </header>
+
+  <div class="palette-strip">
+    <div class="swatch">
+      <div class="swatch-chip" style="background:#000000;"></div>
+      <span>Absolute Black (#000000)</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-chip" style="background:#121212;"></div>
+      <span>Surface Charcoal (#121212)</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-chip" style="background:#00FF66;"></div>
+      <span style="color:#00FF66;">Surveillance Green (#00FF66)</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-chip" style="background:#0B833A;"></div>
+      <span>Stealth Green (#0B833A)</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-chip" style="background:#FAFAFA;"></div>
+      <span>Crisp White (#FAFAFA)</span>
+    </div>
+  </div>
+
+  <div class="preview-stage">
+    <!-- SVG Loader -->
+    <svg id="mascotSvg" viewBox="0 0 300 300" width="300" height="300">
+      <defs>
+        <linearGradient id="scanBeamGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#00FF66" stopOpacity="0.8" />
+          <stop offset="30%" stopColor="#0B833A" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#0B833A" stopOpacity="0" />
+        </linearGradient>
+        <filter id="surveillanceGlow">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur1" />
+          <feMerge>
+            <feMergeNode in="blur1" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        <clipPath id="lensClip">
+          <circle cx="0" cy="0" r="28" />
+        </clipPath>
+      </defs>
+
+      <!-- Mascot Outline (Crisp White / Absolute Black) -->
+      <g id="mascot-chassis">
+        <path d="M 45 140 C 35 125 38 95 55 85 C 70 75 75 90 75 110" fill="#121212" stroke="#FAFAFA" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 255 140 C 265 125 262 95 245 85 C 230 75 225 90 225 110" fill="#121212" stroke="#FAFAFA" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 55 90 C 80 40 220 40 245 90" fill="none" stroke="#FAFAFA" stroke-width="4" stroke-linecap="round"/>
+        <path d="M 70 85 C 100 48 200 48 230 85" fill="none" stroke="#0B833A" stroke-width="2" stroke-dasharray="4 6"/>
+        <path d="M 80 110 C 80 65 220 65 220 110 C 235 155 220 220 150 225 C 80 220 65 155 80 110 Z" fill="#000000" stroke="#FAFAFA" stroke-width="3.5" stroke-linejoin="round"/>
+        <path d="M 95 105 L 150 120 L 205 105 L 195 90 L 105 90 Z" fill="#121212" stroke="#FAFAFA" stroke-width="2"/>
+        <path d="M 105 175 C 105 155 120 150 150 150 C 180 150 195 155 195 175 C 195 210 175 218 150 218 C 125 218 105 210 105 175 Z" fill="#121212" stroke="#FAFAFA" stroke-width="2.5"/>
+        <ellipse cx="140" cy="180" rx="3" ry="4.5" fill="#FAFAFA" transform="rotate(-15 140 180)" />
+        <ellipse cx="160" cy="180" rx="3" ry="4.5" fill="#FAFAFA" transform="rotate(15 160 180)" />
+        <path d="M 135 200 Q 150 206 165 200" stroke="#00FF66" stroke-width="2" stroke-linecap="round" fill="none"/>
+      </g>
+
+      <!-- Optical Iris Reticle -->
+      <g id="optical-iris" transform="translate(150, 125)">
+        <circle cx="0" cy="0" r="48" fill="rgba(11, 131, 58, 0.15)" stroke="#0B833A" stroke-width="1.5" stroke-dasharray="6 4" />
+        
+        <!-- Rotating Outer Ring -->
+        <g style="transform-origin: 0 0; animation: iris-rotate-cw 12s linear infinite;">
+          <circle cx="0" cy="0" r="42" fill="none" stroke="#00FF66" stroke-width="1.5" stroke-dasharray="28 14 8 14" opacity="0.9" />
+          <circle cx="0" cy="-42" r="2.5" fill="#00FF66" />
+          <circle cx="0" cy="42" r="2.5" fill="#00FF66" />
+        </g>
+
+        <!-- Counter-Rotating Inner Ring -->
+        <g style="transform-origin: 0 0; animation: iris-rotate-ccw 8s linear infinite;">
+          <circle cx="0" cy="0" r="36" fill="none" stroke="#0B833A" stroke-width="2" stroke-dasharray="6 12 18 12" />
+          <line x1="-36" y1="0" x2="-30" y2="0" stroke="#00FF66" stroke-width="1.5" />
+          <line x1="36" y1="0" x2="30" y2="0" stroke="#00FF66" stroke-width="1.5" />
+          <line x1="0" y1="-36" x2="0" y2="-30" stroke="#00FF66" stroke-width="1.5" />
+          <line x1="0" y1="36" x2="0" y2="30" stroke="#00FF66" stroke-width="1.5" />
+        </g>
+
+        <circle cx="0" cy="0" r="28" fill="#000000" stroke="#00FF66" stroke-width="2" style="animation: iris-pulse-glow 3s ease-in-out infinite;" />
+
+        <!-- 4 HUD Lock Brackets -->
+        <g style="transform-origin: 0 0; animation: hud-bracket-pulse 2s ease-in-out infinite;">
+          <path d="M -24 -16 L -24 -24 L -16 -24" fill="none" stroke="#00FF66" stroke-width="2" />
+          <path d="M 16 -24 L 24 -24 L 24 -16" fill="none" stroke="#00FF66" stroke-width="2" />
+          <path d="M -24 16 L -24 24 L -16 24" fill="none" stroke="#00FF66" stroke-width="2" />
+          <path d="M 16 24 L 24 24 L 24 16" fill="none" stroke="#00FF66" stroke-width="2" />
+        </g>
+
+        <!-- Dynamic Icon Target Layer -->
+        <g id="targetIconContainer">
+          <!-- Populated by JavaScript -->
+        </g>
+
+        <!-- Laser Scanline -->
+        <g clip-path="url(#lensClip)">
+          <g style="animation: scan-laser-sweep 1.8s ease-in-out infinite alternate;">
+            <line x1="-35" y1="-28" x2="35" y2="-28" stroke="#00FF66" stroke-width="2.5" filter="url(#surveillanceGlow)" />
+            <rect x="-35" y="-42" width="70" height="14" fill="url(#scanBeamGrad)" />
+          </g>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Telemetry Status readout -->
+    <div style="text-align: center; margin-top: 16px;">
+      <div id="targetTitle" style="font-family: monospace; font-size: 0.95rem; font-weight: 700; color: #FAFAFA; letter-spacing: 0.05em;">
+        ▶ COMMERCIAL VENUE
+      </div>
+      <div id="targetCode" style="font-family: monospace; font-size: 0.75rem; color: #00FF66; margin-top: 4px;">
+        LOC: SECTOR-01 // STOREFRONT
+      </div>
+      <div id="targetDetail" style="font-size: 0.72rem; color: #8E9297; margin-top: 2px;">
+        Scanning entrance gates & perimeter clearance
+      </div>
+    </div>
+
+    <!-- Interactive Icon Selector Buttons -->
+    <div class="controls">
+      <button class="btn-tab active" onclick="setSector(0)">1. Storefront</button>
+      <button class="btn-tab" onclick="setSector(1)">2. Logistics Box</button>
+      <button class="btn-tab" onclick="setSector(2)">3. Crowd Occupancy</button>
+      <button class="btn-tab" onclick="setSector(3)">4. Edge Server</button>
+      <button class="btn-tab" onclick="setSector(4)">5. Verified Shield</button>
+    </div>
+  </div>
+
+  <script>
+    const sectors = [
+      {
+        title: "▶ COMMERCIAL VENUE",
+        code: "LOC: SECTOR-01 // STOREFRONT",
+        detail: "Scanning entrance gates & perimeter clearance",
+        svg: `<g stroke="#FAFAFA" stroke-width="1.8" fill="none">
+          <path d="M -14 16 L -14 -8 L 14 -8 L 14 16 Z" fill="#121212" />
+          <path d="M -18 -8 L 0 -17 L 18 -8 Z" fill="#121212" stroke="#00FF66" />
+          <line x1="-8" y1="-2" x2="-2" y2="-2" stroke="#00FF66" />
+          <line x1="2" y1="-2" x2="8" y2="-2" stroke="#00FF66" />
+          <line x1="-8" y1="4" x2="-2" y2="4" stroke="#00FF66" />
+          <line x1="2" y1="4" x2="8" y2="4" stroke="#00FF66" />
+          <rect x="-4" y="9" width="8" height="7" stroke="#FAFAFA" fill="#00FF66" fill-opacity="0.3" />
+          <circle cx="0" cy="-17" r="2.5" fill="#00FF66" stroke="#FAFAFA" stroke-width="1" />
+        </g>`
+      },
+      {
+        title: "▶ ASSET LOGISTICS",
+        code: "SKU: 884-INB // OPTICAL TRACK",
+        detail: "Verifying parcel barcodes & bay clearance",
+        svg: `<g stroke="#FAFAFA" stroke-width="1.8" fill="none">
+          <path d="M 0 -14 L 14 -6 L 0 2 L -14 -6 Z" fill="#1A1A1A" stroke="#00FF66" />
+          <path d="M -14 -6 L 0 2 L 0 16 L -14 8 Z" fill="#121212" />
+          <path d="M 14 -6 L 0 2 L 0 16 L 14 8 Z" fill="#121212" />
+          <line x1="-10" y1="2" x2="-7" y2="4" stroke="#00FF66" stroke-width="1.4" />
+          <line x1="-5" y1="5" x2="-3" y2="6" stroke="#00FF66" stroke-width="1.4" />
+          <line x1="-1" y1="7" x2="0" y2="8" stroke="#00FF66" stroke-width="1.4" />
+          <circle cx="7" cy="6" r="2" fill="#00FF66" />
+        </g>`
+      },
+      {
+        title: "▶ CROWD OCCUPANCY",
+        code: "TGT: DENSITY // 98.4% CONF",
+        detail: "Tracking pedestrian lanes & dwell thresholds",
+        svg: `<g stroke="#FAFAFA" stroke-width="1.8" fill="none">
+          <rect x="-15" y="-16" width="30" height="32" stroke="#00FF66" stroke-width="1.2" stroke-dasharray="4 2" fill="rgba(0, 255, 102, 0.08)" />
+          <circle cx="0" cy="-8" r="4.5" fill="#FAFAFA" stroke="#00FF66" />
+          <path d="M -7 9 C -7 2 -4 -1 0 -1 C 4 -1 7 2 7 9" fill="#121212" stroke="#FAFAFA" />
+          <circle cx="0" cy="4" r="1.5" fill="#00FF66" />
+        </g>`
+      },
+      {
+        title: "▶ EDGE AI COMPUTE",
+        code: "NODE: RTSP-ONVIF // 30 FPS",
+        detail: "Synchronizing YOLO weights & RTSP feed",
+        svg: `<g stroke="#FAFAFA" stroke-width="1.8" fill="none">
+          <rect x="-13" y="-15" width="26" height="30" rx="2" fill="#121212" stroke="#FAFAFA" />
+          <line x1="-13" y1="-6" x2="13" y2="-6" stroke="#FAFAFA" stroke-width="1.2" />
+          <circle cx="-8" cy="-10" r="1.5" fill="#00FF66" />
+          <line x1="-3" y1="-10" x2="8" y2="-10" stroke="#00FF66" stroke-width="1.2" />
+          <line x1="-13" y1="4" x2="13" y2="4" stroke="#FAFAFA" stroke-width="1.2" />
+          <circle cx="-8" cy="-1" r="1.5" fill="#00FF66" />
+          <line x1="-3" y1="-1" x2="8" y2="-1" stroke="#00FF66" stroke-width="1.2" />
+          <circle cx="-8" cy="9" r="1.5" fill="#00FF66" />
+          <line x1="-3" y1="9" x2="8" y2="9" stroke="#00FF66" stroke-width="1.2" />
+        </g>`
+      },
+      {
+        title: "▶ ANOMALY RESOLVED",
+        code: "STATUS: MATRIX SECURE [OK]",
+        detail: "0 Active breaches // Telegram alert idle",
+        svg: `<g stroke="#00FF66" stroke-width="2" fill="none">
+          <path d="M -13 -13 L 0 -17 L 13 -13 C 13 4 8 13 0 17 C -8 13 -13 4 -13 -13 Z" fill="#121212" stroke="#00FF66" />
+          <path d="M -6 -1 L -2 4 L 7 -5" stroke="#FAFAFA" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        </g>`
+      }
+    ];
+
+    let current = 0;
+    let autoTimer = null;
+
+    function renderSector(index) {
+      const s = sectors[index];
+      document.getElementById('targetIconContainer').innerHTML = s.svg;
+      document.getElementById('targetTitle').innerText = s.title;
+      document.getElementById('targetCode').innerText = s.code;
+      document.getElementById('targetDetail').innerText = s.detail;
+
+      const buttons = document.querySelectorAll('.btn-tab');
+      buttons.forEach((btn, idx) => {
+        btn.classList.toggle('active', idx === index);
+      });
+    }
+
+    function setSector(index) {
+      current = index;
+      renderSector(current);
+      clearInterval(autoTimer);
+      startAutoCycle();
+    }
+
+    function startAutoCycle() {
+      autoTimer = setInterval(() => {
+        current = (current + 1) % sectors.length;
+        renderSector(current);
+      }, 2500);
+    }
+
+    renderSector(0);
+    startAutoCycle();
+  </script>
+</body>
+</html>

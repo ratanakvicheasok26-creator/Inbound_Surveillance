@@ -1,0 +1,136 @@
+/**
+ * Digital Overwatch Theme Stylesheet
+ * High-contrast dark theme with Surveillance Green accents & Stealth Green glow.
+ */
+
+:root {
+  /* Digital Overwatch Core Palette */
+  --color-bg-base: #000000;
+  --color-surface-charcoal: #121212;
+  --color-surface-elevated: #1a1a1a;
+  --color-surface-hover: #222222;
+
+  --color-surveillance-green: #00ff66;
+  --color-stealth-green: #0b833a;
+  --color-crisp-white: #fafafa;
+  --color-text-muted: #8e9297;
+
+  /* Alpha Channels & Gradients */
+  --color-surveillance-soft: rgba(0, 255, 102, 0.12);
+  --color-surveillance-glow: rgba(0, 255, 102, 0.65);
+  --color-stealth-soft: rgba(11, 131, 58, 0.2);
+  --color-stealth-glow: rgba(11, 131, 58, 0.45);
+
+  /* Shadows & Glows */
+  --glow-laser: 0 0 14px var(--color-surveillance-glow), 0 0 28px var(--color-stealth-glow);
+  --glow-stealth: 0 0 16px var(--color-stealth-glow);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.85);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-stealth: rgba(11, 131, 58, 0.35);
+  --border-active: var(--color-surveillance-green);
+}
+
+/* Base Theme Utilities */
+.theme-digital-overwatch {
+  background-color: var(--color-bg-base);
+  color: var(--color-crisp-white);
+}
+
+.theme-digital-overwatch .surface-card {
+  background-color: var(--color-surface-charcoal);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
+.theme-digital-overwatch .surface-card:hover {
+  border-color: var(--border-stealth);
+  box-shadow: var(--glow-stealth);
+}
+
+/* Scan & Go Loader Keyframe Animations */
+@keyframes scan-laser-sweep {
+  0% {
+    transform: translateY(0px);
+    opacity: 0.1;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(140px);
+    opacity: 0.1;
+  }
+}
+
+@keyframes iris-rotate-cw {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes iris-rotate-ccw {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes iris-pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(0, 255, 102, 0.5)) drop-shadow(0 0 12px rgba(11, 131, 58, 0.3));
+    opacity: 0.85;
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(0, 255, 102, 0.95)) drop-shadow(0 0 20px rgba(11, 131, 58, 0.6));
+    opacity: 1;
+  }
+}
+
+@keyframes hud-bracket-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+@keyframes telemetry-flicker {
+  0%, 100% { opacity: 1; }
+  45% { opacity: 1; }
+  50% { opacity: 0.3; }
+  55% { opacity: 1; }
+  80% { opacity: 0.6; }
+  85% { opacity: 1; }
+}
+
+@keyframes icon-fade-in-scale {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}

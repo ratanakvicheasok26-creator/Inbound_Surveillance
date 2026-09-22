@@ -1,0 +1,26 @@
+services:
+  virtual-camera:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inbound-virtual-camera
+    restart: unless-stopped
+    ports:
+      # Web UI & REST API
+      - "${WEB_PORT:-8090}:8090"
+      # RTSP Streaming Port (Host:Container)
+      # Mapped to 8556 on host to prevent conflict with Inbound Surveillance's go2rtc on 8554
+      - "${RTSP_PORT:-8556}:8554"
+      # WebRTC (WHEP) preview
+      - "${WEBRTC_PORT:-8889}:8889"
+      # HLS stream preview
+      - "8888:8888"
+    volumes:
+      # Persist videos across container restarts
+      - ./videos:/app/videos
+    environment:
+      - VIDEOS_DIR=/app/videos
+      - RTSP_INTERNAL_PORT=8554
+      - EXTERNAL_RTSP_PORT=${RTSP_PORT:-8556}
+      - EXTERNAL_WEBRTC_PORT=${WEBRTC_PORT:-8889}
+      - EXTERNAL_HOST=${EXTERNAL_HOST:-localhost}

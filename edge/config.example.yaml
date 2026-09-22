@@ -1,0 +1,143 @@
+# Copy to config.yaml (gitignored) and fill Telegram fields,
+# or set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the environment.
+#
+# source: 0 = default webcam. Or an RTSP URL from the NVR, e.g.
+#   rtsp://USER:PASS@192.168.1.64:554/Streaming/Channels/101
+#   rtsp://USER:PASS@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
+# Phone (IP Webcam) — same Wi-Fi as this PC. Use the video path, not the web page:
+#   http://PHONE_IP:8080/video
+# If the app has a username/password, fill those fields. IP Webcam uses HTTP Digest
+# (browsers handle it; a raw OpenCV URL does not).
+
+venue: Demo Garage
+garage_name: Demo Garage
+workplace_type: garage
+source: 0
+
+# Named cameras added in the hub. Empty until the operator saves one.
+cameras: []
+# Example dual-stream camera (AI sub-stream + evidence main stream):
+# cameras:
+#   - id: cam-01
+#     name: Front Lift Bay
+#     source: rtsp://USER:PASS@192.168.1.64:554/Streaming/Channels/102
+#     main_source: rtsp://USER:PASS@192.168.1.64:554/Streaming/Channels/101
+#     protocol: rtsp
+#     vendor: hikvision
+active_camera_id: ""
+
+# Degrees clockwise. auto = 90 for phone HTTP (IP Webcam), 0 for PC webcam / RTSP.
+# Or set 0 / 90 / 180 / 270. Live: press o to cycle this session.
+rotate: auto
+# none | h | v  (selfie / front-camera mirror if needed). Live: press m.
+flip: none
+
+# Legacy single ROI (kept in sync with bays[0]). Prefer the bays list below.
+roi: [0.10, 0.20, 0.35, 0.60]
+
+# Named service-bay ROIs as fractions of the frame: [x, y, width, height]
+# Drag boxes on the live feed to create, move, or resize bays.
+bays:
+  - {id: bay_1, name: Lift Bay 1, roi: [0.10, 0.20, 0.35, 0.60], type: vehicle_bay}
+  - {id: bay_2, name: Bay 2 (Brakes/Tires), roi: [0.55, 0.20, 0.35, 0.60], type: vehicle_bay}
+  - {id: tools, name: Tool Station, roi: [0.42, 0.05, 0.16, 0.20], type: tool_area}
+
+# Mechanic phones on garage Wi-Fi (MAC and/or static IP from the ARP table).
+wifi_devices: []
+
+# Person detector — RTMPose (YOLOX person boxes + COCO-17 skeletons).
+# Staff = connected kinematic skeleton OR a close-up face (laptop webcam).
+# Shoes, bags, and jackets fail: no head/torso tree. Blankets still fail.
+# detect_fps caps inference; the preview still follows the camera.
+# Dual-target runtime: cpu | openvino | cuda | tensorrt
+# imgsz 960 keeps far 1080p workers large enough; set 1280 on cuda/tensorrt.
+runtime: cpu
+# Pose backend: "rtmpose" (OpenMMLab RTMPose via rtmlib), "yolo" (YOLO11n-pose),
+# or "tinypose" (PP-TinyPose). Vehicle boxes still use Ultralytics YOLO.
+pose_engine: rtmpose
+# lightweight = YOLOX-tiny+RTMPose-s (CPU). balanced = YOLOX-m+RTMPose-m.
+rtmpose_mode: lightweight
+weights: yolo11n-pose.pt  # Fallback if RTMPose cannot load; yolo11n_improved.pt is detect-only
+server_weights: yolo11s-pose.pt
+person_conf: 0.25
+imgsz: 960
+min_person_height: 0.05
+min_aspect: 1.1
+min_keypoints: 3
+kpt_conf: 0.35  # Joint floor for RTMPose / YOLO-pose. Omit this key for TinyPose (defaults to 0.12).
+# Zoom empty vehicle bays (SAHI-style crop) when full-frame YOLO misses a crouch.
+bay_zoom: true
+bay_zoom_pad: 0.08
+detect_fps: 15
+# Decouple vehicle YOLO cadence from person pose (seconds between vehicle checks)
+vehicle_infer_interval: 1.0
+occupy_confirm_seconds: 1.0
+occupy_clear_seconds: 5.0
+# Keep WORKING while a mechanic ducks under a car; then ON_BREAK.
+under_car_grace_seconds: 30
+idle_stationary_seconds: 120
+clock_out_seconds: 600
+
+# ByteTrack-style identity continuity (head turns / brief occlusion).
+enable_reid: true
+reid_match_threshold: 0.50
+# Set true to fetch OSNet ONNX on first run (needs internet). Otherwise a
+# local clothing-histogram embedding is used until you drop the file in models/.
+reid_download: false
+track_max_age: 90
+track_min_hits: 3
+track_iou_threshold: 0.3
+track_low_thresh: 0.10
+
+# Product default is 180. Use ~10 so mentors do not wait.
+# Per-camera idle-bay wait lives on cameras[].absent_seconds; this global is the fallback.
+absent_seconds: 10
+cooldown_seconds: 30
+sample_fps: 30
+
+# Shop operating hours (local time) for utilization % and open/closed badge.
+open_time: "08:00"
+close_time: "18:00"
+operating_hours:
+  open: "08:00"
+  close: "18:00"
+
+# Pipeline graph IR from the dashboard editor. When present, node kinds gate
+# person/vehicle/face/re-ID, monitors, persist, and Telegram dispatch.
+# Invalid graphs do not start inference.
+# pipeline_graph: {}
+
+# Local face ID (YuNet + SFace). Put staff photos in faces/<Name>/*.jpg
+# (several angles help). Unknown people overlay as Customer.
+enable_face_id: true
+faces_dir: "faces"
+models_dir: "models"
+face_match_threshold: 0.60
+
+telegram_bot_token: "8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU"
+telegram_chat_id: ""
+
+# Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.
+# Default: on for massage / a deployed "Complaint intake" pipeline node.
+# Set enabled: true|false to override that. Garage stays off unless you opt in.
+# audio_source_type: laptop | usb | camera | video
+# video_loop: true = keep monitoring an uploaded clip's audio (loops).
+# stt_model_size: fine-tuned Khmer model id or legacy size ("base" -> sengtha/whisper-base-khmer).
+complaint_monitoring:
+  audio_source_type: laptop
+  device_index: null
+  vad_threshold: 0.35
+  vad_min_speech_duration_ms: 400
+  vad_max_speech_duration_s: 30.0
+  stt_model_size: sengtha/whisper-base-khmer
+  stt_language: km
+  ollama_model: qwen2.5:3b
+  ollama_host: http://localhost:11434
+  telegram_alert_enabled: true
+  telegram_min_severity: low
+  video_loop: true
+  dedup_window_seconds: 60
+
+# Tier 2 AI Auditor (Fireworks VLM)
+fireworks_api_key: ""
+fireworks_model: "accounts/fireworks/models/deepseek-v4-flash-vision-exp"

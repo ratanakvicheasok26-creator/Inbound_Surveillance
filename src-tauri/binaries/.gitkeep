@@ -1,0 +1,3 @@
+# Placeholder so git keeps this directory.
+# Sidecar binaries (inbound-engine-<target-triple>, go2rtc-<target-triple>)
+# are produced by `python edge/build_sidecar.py` and must not be committed.

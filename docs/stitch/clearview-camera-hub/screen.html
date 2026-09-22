@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ClearView Camera Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#A8C7FA',
+                        'on-primary': '#062E6F',
+                        'primary-container': '#27478B',
+                        'on-primary-container': '#D6E3FF',
+                        secondary: '#C2C6D5',
+                        'on-secondary': '#2C303E',
+                        'secondary-container': '#434756',
+                        'on-secondary-container': '#DEE2F2',
+                        tertiary: '#E2BBDB',
+                        'on-tertiary': '#432740',
+                        'tertiary-container': '#5B3D57',
+                        'on-tertiary-container': '#FFD6F7',
+                        error: '#FFB4AB',
+                        'on-error': '#690005',
+                        'error-container': '#93000A',
+                        'on-error-container': '#FFDAD6',
+                        background: '#111318',
+                        'on-background': '#E2E2E9',
+                        surface: '#111318',
+                        'on-surface': '#E2E2E9',
+                        'surface-variant': '#44474E',
+                        'on-surface-variant': '#C4C6D0',
+                        outline: '#8E9099',
+                        'outline-variant': '#44474E',
+                        'surface-container-lowest': '#0C0E13',
+                        'surface-container-low': '#1A1B20',
+                        'surface-container': '#1E1F25',
+                        'surface-container-high': '#282A2F',
+                        'surface-container-highest': '#33353A',
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"]
+                    },
+                    fontSize: {
+                        'label-small': ['11px', '16px'],
+                        'label-medium': ['12px', '16px'],
+                        'label-large': ['14px', '20px'],
+                        'body-small': ['12px', '16px'],
+                        'body-medium': ['14px', '20px'],
+                        'body-large': ['16px', '24px'],
+                        'title-small': ['14px', '20px'],
+                        'title-medium': ['16px', '24px'],
+                        'title-large': ['22px', '28px'],
+                        'headline-small': ['24px', '32px'],
+                        'headline-medium': ['28px', '36px'],
+                        'headline-large': ['32px', '40px'],
+                        'display-small': ['36px', '44px'],
+                        'display-medium': ['45px', '52px'],
+                        'display-large': ['57px', '64px'],
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings:
+            'FILL' 0,
+            'wght' 400,
+            'GRAD' 0,
+            'opsz' 24
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<nav class="bg-surface-container-highest dark:bg-surface-container-highest flex justify-between items-center px-4 h-16 w-full border-b border-outline-variant dark:border-outline-variant">
+<div class="flex items-center gap-4">
+<span class="text-headline-small font-display font-black tracking-tight text-on-surface dark:text-on-surface">ClearView</span>
+<span class="text-title-medium font-medium text-on-surface-variant tracking-wide">Camera Hub</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 bg-surface-container py-1.5 px-3 rounded-full border border-outline-variant">
+<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+<span class="text-label-medium font-medium text-on-surface">Live Engine</span>
+</div>
+<div class="flex items-center gap-2 hover:bg-surface-container-high transition-colors p-1.5 rounded-full cursor-pointer">
+<span class="material-symbols-outlined text-on-surface-variant">account_circle</span>
+</div>
+</div>
+</nav>
+<!-- Main Content -->
+<div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+<!-- Left Column: Video Monitoring Stage -->
+<main class="flex-1 flex flex-col p-4 gap-4 overflow-y-auto bg-surface-container-lowest">
+<!-- Video Viewport -->
+<div class="flex-1 min-h-[400px] bg-black rounded-xl border border-outline-variant relative overflow-hidden flex flex-col shadow-lg">
+<!-- Top HUD -->
+<div class="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10 pointer-events-none">
+<div class="flex gap-2">
+<div class="bg-surface-container-highest/80 backdrop-blur-sm border border-outline-variant px-3 py-1 rounded text-label-medium text-on-surface font-mono flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1; font-size: 16px;">group</span>
+                            Occupants: 3
+                        </div>
+</div>
+<div class="flex flex-col gap-2 items-end">
+<div class="bg-surface-container-highest/80 backdrop-blur-sm border border-outline-variant px-2 py-1 rounded text-label-small text-on-surface-variant font-mono">
+                            1920x1080
+                        </div>
+<div class="bg-surface-container-highest/80 backdrop-blur-sm border border-outline-variant px-2 py-1 rounded text-label-small text-on-surface-variant font-mono">
+                            30 FPS
+                        </div>
+</div>
+</div>
+<!-- Simulated Camera Feed -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<img class="w-full h-full object-cover opacity-60" data-alt="A high-contrast, black-and-white simulated CCTV camera feed of an empty modern retail checkout lane. The scene is brightly lit with overhead fluorescent lighting, casting stark shadows. The aesthetic is purely functional, operational, and slightly grainy, typical of a professional surveillance system. Minimalist architectural lines." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAsT61cVYLGxiugkCAE4m24TNZnK4V84y8GBfdelmBrATtJ6kZSCkv-vJQVv5VY-I3KRqUfmdJdoUJDpEMNIO6DSHMTBuAwWlLihM4aGr1UOmwZo2apI6Z3Tadla5FiiqMgq4_a-t-Rdn_IbhuNHG_rHUvjwxDUkW45c0UFu4l52wK0kgL1YCVjqnyilowetPw8XJKAznHJh3L3Wv9yDSQib6XltFQ7BQY4jmX2udDJPXuFTngpB0AOIbbxcKmWYluUqf5LeW-nZws"/>
+</div>
+<!-- Disconnected State (Hidden by default, shown for structure) -->
+<div class="hidden absolute inset-0 flex flex-col items-center justify-center bg-surface-container z-20">
+<span class="material-symbols-outlined text-4xl text-on-surface-variant mb-4">videocam_off</span>
+<h2 class="text-title-medium text-on-surface mb-2">No camera connected</h2>
+<p class="text-body-medium text-on-surface-variant text-center max-w-sm">Please select a source in the inspector to begin monitoring.</p>
+</div>
+<!-- ROI Overlay -->
+<div class="absolute inset-0 z-10 pointer-events-auto">
+<div class="absolute top-[30%] left-[20%] w-[40%] h-[50%] border-2 border-primary bg-primary/10 cursor-move group">
+<div class="absolute -top-6 left-0 bg-primary text-on-primary text-label-small px-2 py-0.5 font-medium shadow-sm">Till ROI</div>
+<!-- Resize Handles -->
+<div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-outline-variant cursor-nwse-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border border-outline-variant cursor-ns-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-outline-variant cursor-nesw-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border border-outline-variant cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border border-outline-variant cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border border-outline-variant cursor-nesw-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border border-outline-variant cursor-ns-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border border-outline-variant cursor-nwse-resize opacity-0 group-hover:opacity-100 transition-opacity"></div>
+</div>
+</div>
+<!-- Bottom Hint -->
+<div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-surface-container-highest/90 backdrop-blur-sm px-4 py-2 rounded-full border border-outline-variant text-label-medium text-on-surface z-10 shadow-md">
+                    Drag the box to set till ROI
+                </div>
+</div>
+<!-- Telemetry Grid -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="bg-surface-container p-4 rounded-xl border border-outline-variant flex flex-col gap-1">
+<span class="text-label-medium text-on-surface-variant font-medium uppercase tracking-wider">Till Status</span>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+<span class="text-title-large text-on-surface font-semibold font-mono">Active</span>
+</div>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-outline-variant flex flex-col gap-1">
+<span class="text-label-medium text-on-surface-variant font-medium uppercase tracking-wider">Empty Elapsed</span>
+<span class="text-title-large text-on-surface font-semibold font-mono">02:45</span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-outline-variant flex flex-col gap-1">
+<span class="text-label-medium text-on-surface-variant font-medium uppercase tracking-wider">Detections</span>
+<span class="text-title-large text-on-surface font-semibold font-mono">12</span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-outline-variant flex flex-col gap-1">
+<span class="text-label-medium text-on-surface-variant font-medium uppercase tracking-wider">Stream FPS</span>
+<span class="text-title-large text-on-surface font-semibold font-mono">29.8</span>
+</div>
+</div>
+</main>
+<!-- Right Column: Inspector Sidebar -->
+<aside class="w-full lg:w-96 bg-surface border-l border-outline-variant flex flex-col overflow-y-auto">
+<div class="p-4 border-b border-outline-variant flex items-center justify-between sticky top-0 bg-surface z-10">
+<h2 class="text-title-medium font-medium text-on-surface">Inspector</h2>
+<button class="text-on-surface-variant hover:text-on-surface p-1 rounded-full hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">refresh</span>
+</button>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<!-- Card 1: Stream Source -->
+<div class="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
+<div class="p-4 border-b border-outline-variant bg-surface-container-low flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px] text-on-surface-variant">router</span>
+<h3 class="text-title-small font-medium text-on-surface">Stream Source</h3>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<!-- Segmented Control -->
+<div class="flex p-1 bg-surface-container-highest rounded-lg border border-outline-variant">
+<button class="flex-1 py-1.5 text-label-medium font-medium text-on-surface bg-surface-container-low rounded shadow-sm border border-outline-variant">Webcam</button>
+<button class="flex-1 py-1.5 text-label-medium font-medium text-on-surface-variant hover:text-on-surface rounded">RTSP</button>
+<button class="flex-1 py-1.5 text-label-medium font-medium text-on-surface-variant hover:text-on-surface rounded">HTTP</button>
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Stream URL</label>
+<input class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow font-mono text-sm" type="text" value="rtsp://admin:pass@192.168.1.100:554/stream1"/>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Rotation</label>
+<select class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none">
+<option>0°</option>
+<option>90°</option>
+<option>180°</option>
+<option>270°</option>
+</select>
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Flip</label>
+<select class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none">
+<option>None</option>
+<option>Horizontal</option>
+<option>Vertical</option>
+<option>Both</option>
+</select>
+</div>
+</div>
+<button class="w-full bg-primary hover:bg-primary/90 text-on-primary font-medium py-2 rounded-full transition-colors mt-2 text-label-large">
+                            Connect Stream
+                        </button>
+</div>
+</div>
+<!-- Card 2: Store Rules -->
+<div class="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
+<div class="p-4 border-b border-outline-variant bg-surface-container-low flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px] text-on-surface-variant">rule</span>
+<h3 class="text-title-small font-medium text-on-surface">Store Rules</h3>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Venue Name</label>
+<input class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow" type="text" value="Terminal 04 - Checkstand 2"/>
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Operating Hours</label>
+<input class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow" type="time" value="08:00"/>
+</div>
+<div class="flex flex-col gap-2 pt-2">
+<div class="flex justify-between items-center">
+<label class="text-label-medium text-on-surface-variant">Absent-till threshold</label>
+<span class="text-label-medium text-primary font-mono">180s</span>
+</div>
+<input class="w-full accent-primary h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" max="600" min="0" type="range" value="180"/>
+<div class="flex justify-between text-label-small text-on-surface-variant">
+<span>0s</span>
+<span>600s</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 3: Alerts -->
+<div class="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
+<div class="p-4 border-b border-outline-variant bg-surface-container-low flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px] text-on-surface-variant">notifications_active</span>
+<h3 class="text-title-small font-medium text-on-surface">Alert Configuration</h3>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Telegram Bot Token</label>
+<input class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow font-mono text-sm" type="password" value="*************************"/>
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="text-label-medium text-on-surface-variant">Chat ID</label>
+<input class="w-full bg-surface-container-highest border border-outline-variant rounded-md px-3 py-2 text-body-medium text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow font-mono text-sm" type="text" value="-100123456789"/>
+</div>
+<button class="w-full bg-secondary-container hover:bg-secondary-container/80 text-on-secondary-container font-medium py-2 rounded-full transition-colors mt-2 text-label-large border border-outline-variant flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">photo_camera</span>
+                            Capture &amp; Send Test
+                        </button>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</body></html>
