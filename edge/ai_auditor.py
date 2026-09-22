@@ -228,6 +228,8 @@ class FireworksVLMClient:
         if not self.api_key:
             return self._mock_verdict(bay_id, technician_id)
 
+        history_block = f"- Recent Event History:\n{context_history}" if context_history else "- Recent Event History: None"
+
         prompt = f"""You are an expert workshop supervisor AI for automotive service bays.
 
 WORKSHOP KNOWLEDGE BASE:
@@ -239,7 +241,7 @@ WORKSHOP KNOWLEDGE BASE:
 CONTEXT & RECENT ACTIVITY:
 - Bay: {bay_id}
 - Technician: {technician_id}
-{f"- Recent Event History:\n{context_history}" if context_history else "- Recent Event History: None"}
+{history_block}
 
 TASK:
 Analyze the attached dual images (Image 1: close-up of hands/object, Image 2: wide body & bay context).

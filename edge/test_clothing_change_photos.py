@@ -151,7 +151,11 @@ def main() -> int:
     parser.add_argument("photo_b", nargs="?", default=str(DEFAULT_PHOTOS[1]))
     parser.add_argument("--threshold", type=float, default=0.60)
     args = parser.parse_args()
-    result = run_clothing_change_test(Path(args.photo_a), Path(args.photo_b), threshold=args.threshold)
+    pa, pb = Path(args.photo_a), Path(args.photo_b)
+    if not pa.is_file() or not pb.is_file():
+        print(f"[test_clothing_change_photos] Test photos not found ({pa}, {pb}). Skipping standalone test.")
+        return 0
+    result = run_clothing_change_test(pa, pb, threshold=args.threshold)
     print_result(result)
     return 0 if result["same_person"] else 1
 

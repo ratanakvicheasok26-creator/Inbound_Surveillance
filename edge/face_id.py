@@ -293,13 +293,18 @@ def try_create_face_recognizer(cfg: dict, conn: Any | None = None) -> FaceRecogn
     if not bool(cfg.get("enable_face_id", True)):
         return None
     faces_dir, models_dir = resolve_face_paths(cfg)
-    thresh = float(cfg.get("face_match_threshold") or 0.60)
+    thresh = float(cfg.get("face_match_threshold") or 0.38)
+    workplace = str(cfg.get("workplace_type") or "garage").lower()
+    enable_customer = bool(cfg.get("enable_customer_face", workplace == "massage"))
+    customer_gallery = CustomerFaceGallery(threshold=thresh, conn=conn) if enable_customer else None
     try:
         return FaceRecognizer(
             faces_dir=faces_dir,
             models_dir=models_dir,
             match_threshold=thresh,
+            customer_gallery=customer_gallery,
             conn=conn,
+            enable_customer_gallery=enable_customer,
         )
     except Exception as exc:
         print(f"[FaceID] Disabled: {exc}")
@@ -318,20 +323,15 @@ def till_status_label(
         return f"EMPTY {empty_elapsed:.0f}/{absent:.0f}s"
     if not face_id_enabled:
         return "STAFF IN ROI"
-    staff = [
-        det.identity
-        for det in detections
-        if getattr(det, "is_staff", False) and getattr(det, "identity", None)
-    ]
-    if staff:
-        shown = ", ".join(dict.fromkeys(staff))
-        return f"STAFF [{shown}] IN ROI"
-    if any(getattr(det, "identity", None) for det in detections):
-        return "EMPLOYEE IN ROI"
-    return "PERSON IN ROI"
+    for det in detections:
+        if getattr(det, "is_staff", False):
+            return f"STAFF: {det.identity}"
+    return "STAFF IN ROI"
 
 
 class FaceRecognizer:
+    """Offline face recognition using OpenCV DNN YuNet + SFace."""
+
     def __init__(
         self,
         faces_dir: str | Path = "faces",
@@ -341,14 +341,19 @@ class FaceRecognizer:
         match_threshold: float = 0.38,
         customer_gallery: Optional[CustomerFaceGallery] = None,
         conn: Any | None = None,
+        enable_customer_gallery: bool = True,
     ) -> None:
         self.faces_dir = Path(faces_dir)
         self.models_dir = Path(models_dir)
         self.score_threshold = score_threshold
         self.nms_threshold = nms_threshold
         self.match_threshold = match_threshold
-        self.customer_gallery = customer_gallery if customer_gallery is not None else CustomerFaceGallery(threshold=match_threshold, conn=conn)
-
+        if customer_gallery is not None:
+            self.customer_gallery = customer_gallery
+        elif enable_customer_gallery:
+            self.customer_gallery = CustomerFaceGallery(threshold=match_threshold, conn=conn)
+        else:
+            self.customer_gallery = None
 
         yunet_path, sface_path = ensure_model_files(self.models_dir)
         self.yunet_path = str(yunet_path)

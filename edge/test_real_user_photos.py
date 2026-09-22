@@ -23,6 +23,10 @@ def test_user_photos():
     print(" 📸 TESTING USER'S REAL PHOTOS WITH DIFFERENT CLOTHES")
     print("=" * 70)
 
+    if not IMG1_PATH.is_file() or not IMG2_PATH.is_file():
+        print(f"[test_real_user_photos] Test images not found ({IMG1_PATH}, {IMG2_PATH}). Skipping standalone test.")
+        return
+
     img1 = cv2.imread(str(IMG1_PATH))
     img2 = cv2.imread(str(IMG2_PATH))
 
