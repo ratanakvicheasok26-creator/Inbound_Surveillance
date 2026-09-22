@@ -223,19 +223,29 @@
       left: auto;
       right: 0;
     }
-    .roi-handle {
-      position: absolute; width: 8px; height: 8px;
-      background: #00FF66; z-index: 9;
-      pointer-events: auto;
+    .roi-svg-edge {
+      stroke: rgba(255, 255, 255, 0.001);
+      stroke-width: 14;
+      pointer-events: stroke;
+      cursor: grab;
+      transition: stroke 0.15s ease;
     }
-    .roi-handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
-    .roi-handle.n  { left: 50%; top: -4px; transform: translateX(-50%); cursor: ns-resize; }
-    .roi-handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
-    .roi-handle.e  { right: -5px; top: 50%; width: 10px; height: 28px; border-radius: 2px; transform: translateY(-50%); cursor: ew-resize; z-index: 45; }
-    .roi-handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
-    .roi-handle.s  { left: 50%; bottom: -4px; transform: translateX(-50%); cursor: ns-resize; }
-    .roi-handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
-    .roi-handle.w  { left: -5px; top: 50%; width: 10px; height: 28px; border-radius: 2px; transform: translateY(-50%); cursor: ew-resize; z-index: 45; }
+    .roi-svg-edge:hover {
+      stroke: rgba(255, 255, 255, 0.5);
+    }
+    .roi-svg-edge.edge-active {
+      stroke: #ffcc00;
+      cursor: grabbing;
+    }
+    .roi-rotate-mode, .roi-rotate-mode * {
+      cursor: crosshair !important;
+    }
+    .roi-rotate-mode .roi-svg-poly {
+      cursor: grab !important;
+    }
+    .roi-rotate-mode.is-rotating, .roi-rotate-mode.is-rotating * {
+      cursor: grabbing !important;
+    }
     .roi-svg-poly {
       cursor: move;
       transition: fill 0.15s ease, stroke-width 0.15s ease;
@@ -1010,7 +1020,7 @@
             <img id="live-camera-feed" alt="Live camera feed" onerror="handleStreamError()"/>
             <div id="roi-overlay" class="roi-overlay" onmousedown="onRoiDown(event)" oncontextmenu="onBayContextMenu(event)"></div>
             <div id="live-roi-hint" class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full z-20 pointer-events-none text-label-upper font-label-upper text-on-surface">
-              Side edges scale both vertices · Inside moves · Corners stretch angles · R rotates
+              Hover edge/corner to stretch angles · Drag inside to move · Press R to rotate (one-shot)
             </div>
           </div>
 
@@ -1509,6 +1519,7 @@
     let roiDragging = false;
     let roiMode = null;
     let roiCornerIdx = -1;
+    let roiEdgeIdx = -1;
     let roiHandle = null;
     let roiOrigin = [0, 0];
     let roiStartPoly = [];
@@ -5612,7 +5623,7 @@
       setHidden(util, massage);
       const hint = document.getElementById('live-roi-hint');
       if (hint) {
-        hint.textContent = 'Side edges scale both vertices · Inside moves · Corners stretch angles · R rotates';
+        hint.textContent = 'Hover edge/corner to stretch angles · Drag inside to move · Press R to rotate (one-shot)';
       }
       const rename = document.getElementById('ctx-rename-label');
       if (rename) rename.textContent = 'Rename ' + noun;
@@ -6044,23 +6055,27 @@
         }
       }
 
-      let sideBox = document.getElementById('roi-box-selected');
-      if (!sideBox) {
-        sideBox = document.createElement('div');
-        sideBox.id = 'roi-box-selected';
-        sideBox.className = 'roi-box selected';
-        ['e', 'w'].forEach((side) => {
-          const handle = document.createElement('div');
-          handle.className = 'roi-handle ' + side;
-          handle.dataset.roiSide = side;
-          handle.title = side === 'e'
-            ? 'Drag right edge to scale both vertices'
-            : 'Drag left edge to scale both vertices';
-          sideBox.appendChild(handle);
-        });
-        overlay.appendChild(sideBox);
+      // Edge lines for the selected bay to stretch angles/sides
+      const edgeCount = selBay ? ensureBayPolygon(selBay).length : 0;
+      for (let i = 0; i < Math.max(edgeCount, 8); i++) {
+        let edgeEl = document.getElementById('roi-edge-' + i);
+        if (i < edgeCount) {
+          if (!edgeEl) {
+            edgeEl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            edgeEl.id = 'roi-edge-' + i;
+            edgeEl.setAttribute('class', 'roi-svg-edge');
+            svg.appendChild(edgeEl);
+          }
+          edgeEl.style.display = 'block';
+          edgeEl.setAttribute('data-edge-idx', String(i));
+          edgeEl.setAttribute('title', 'Drag edge to stretch angle');
+        } else if (edgeEl) {
+          edgeEl.style.display = 'none';
+        }
       }
-      sideBox.style.display = selBay ? 'block' : 'none';
+
+      const oldSideBox = document.getElementById('roi-box-selected');
+      if (oldSideBox) oldSideBox.remove();
 
       if (selBay) liveRoi = selBay.roi.slice();
     }
@@ -6246,6 +6261,7 @@
       if (selBay) {
         const poly = ensureBayPolygon(selBay);
         const color = bayColor(selBay.id, liveBays.indexOf(selBay));
+        const n = poly.length;
         poly.forEach((pt, i) => {
           const handle = document.getElementById('roi-corner-' + i);
           if (handle) {
@@ -6253,18 +6269,15 @@
             handle.style.top = (pt[1] * 100) + '%';
             handle.style.background = color;
           }
+          const nextPt = poly[(i + 1) % n];
+          const edgeEl = document.getElementById('roi-edge-' + i);
+          if (edgeEl) {
+            edgeEl.setAttribute('x1', String(Math.round(pt[0] * 1000)));
+            edgeEl.setAttribute('y1', String(Math.round(pt[1] * 1000)));
+            edgeEl.setAttribute('x2', String(Math.round(nextPt[0] * 1000)));
+            edgeEl.setAttribute('y2', String(Math.round(nextPt[1] * 1000)));
+          }
         });
-        const [bx, by, bw, bh] = selBay.roi;
-        const sideBox = document.getElementById('roi-box-selected');
-        if (sideBox) {
-          sideBox.style.left = (bx * 100) + '%';
-          sideBox.style.top = (by * 100) + '%';
-          sideBox.style.width = (bw * 100) + '%';
-          sideBox.style.height = (bh * 100) + '%';
-          sideBox.querySelectorAll('.roi-handle').forEach((h) => {
-            h.style.background = color;
-          });
-        }
       }
     }
 
@@ -6294,12 +6307,20 @@
       return [cx + dx * cos - dy * sin, cy + dy * cos + dx * sin];
     }
 
-    function sideVertexIndices(poly, side) {
-      const indexed = poly.map((pt, i) => ({ i, x: Number(pt[0]) || 0 }));
-      indexed.sort((a, b) => a.x - b.x);
-      if (side === 'w') return [indexed[0].i, indexed[1] ? indexed[1].i : indexed[0].i];
-      const last = indexed.length - 1;
-      return [indexed[last].i, indexed[last - 1] ? indexed[last - 1].i : indexed[last].i];
+    function updateRoiRotateModeUI() {
+      const overlay = document.getElementById('roi-overlay');
+      if (overlay) {
+        overlay.classList.toggle('roi-rotate-mode', !!roiRotateArmed || roiMode === 'rotate');
+        overlay.classList.toggle('is-rotating', roiDragging && roiMode === 'rotate');
+      }
+      const hint = document.getElementById('live-roi-hint');
+      if (hint) {
+        if (roiRotateArmed || roiMode === 'rotate') {
+          hint.textContent = '🔄 Rotate Mode: Drag station to rotate · Release to lock';
+        } else {
+          hint.textContent = 'Hover edge/corner to stretch angles · Drag inside to move · Press R to rotate (one-shot)';
+        }
+      }
     }
 
     function beginRotateDrag(bay, nx, ny) {
@@ -6310,6 +6331,7 @@
       roiStartPoly = poly.map((p) => p.slice());
       roiCentroid = polygonCentroid(roiStartPoly);
       roiRotateArmed = false;
+      updateRoiRotateModeUI();
     }
 
     function onRoiDown(ev) {
@@ -6320,18 +6342,10 @@
       const [nx, ny] = clientToRoi(ev);
       roiLastPos = [nx, ny];
 
-      const side = ev.target.dataset ? ev.target.dataset.roiSide : undefined;
-      if (side === 'e' || side === 'w') {
+      if (roiRotateArmed) {
         const bay = selectedBay();
         if (bay) {
-          const poly = ensureBayPolygon(bay);
-          roiDragging = true;
-          roiMode = 'scale-side';
-          roiHandle = side;
-          roiOrigin = [nx, ny];
-          roiStartPoly = poly.map((p) => p.slice());
-          roiSideIndices = sideVertexIndices(roiStartPoly, side);
-          roiRotateArmed = false;
+          beginRotateDrag(bay, nx, ny);
           return;
         }
       }
@@ -6349,6 +6363,26 @@
             roiStartPoly = poly.map((p) => p.slice());
             roiRotateArmed = false;
             ev.target.classList.add('corner-active');
+            updateRoiRotateModeUI();
+            return;
+          }
+        }
+      }
+
+      const edgeIdxStr = ev.target.dataset ? ev.target.dataset.edgeIdx : undefined;
+      if (edgeIdxStr !== undefined) {
+        const bay = selectedBay();
+        if (bay) {
+          const poly = ensureBayPolygon(bay);
+          roiEdgeIdx = parseInt(edgeIdxStr, 10);
+          if (roiEdgeIdx >= 0 && roiEdgeIdx < poly.length) {
+            roiDragging = true;
+            roiMode = 'stretch-edge';
+            roiOrigin = [nx, ny];
+            roiStartPoly = poly.map((p) => p.slice());
+            roiRotateArmed = false;
+            ev.target.classList.add('edge-active');
+            updateRoiRotateModeUI();
             return;
           }
         }
@@ -6366,15 +6400,12 @@
       if (bay) {
         selectedBayId = bay.id;
         ensureBayPolygon(bay);
-        if (roiRotateArmed) {
-          beginRotateDrag(bay, nx, ny);
-        } else {
-          roiMode = 'move';
-          roiStartPoly = bay.polygon.map((p) => p.slice());
-          roiStart = bay.roi.slice();
-        }
+        roiMode = 'move';
+        roiStartPoly = bay.polygon.map((p) => p.slice());
+        roiStart = bay.roi.slice();
       } else {
         roiRotateArmed = false;
+        updateRoiRotateModeUI();
         roiMode = 'draw';
         const id = 'bay_' + Date.now();
         const created = {
@@ -6412,15 +6443,19 @@
         ensureBayPolygon(bay);
         bay.polygon[roiCornerIdx] = [clamp01(nx), clamp01(ny)];
         recomputeBayRoi(bay);
-      } else if (roiMode === 'scale-side' && roiStartPoly.length && roiSideIndices.length) {
+      } else if (roiMode === 'stretch-edge' && roiEdgeIdx >= 0 && roiStartPoly.length) {
         const dx = nx - roiOrigin[0];
         const dy = ny - roiOrigin[1];
+        const n = roiStartPoly.length;
+        const i1 = roiEdgeIdx;
+        const i2 = (roiEdgeIdx + 1) % n;
         bay.polygon = roiStartPoly.map((pt) => pt.slice());
-        roiSideIndices.forEach((idx) => {
-          const pt = roiStartPoly[idx];
-          if (!pt) return;
-          bay.polygon[idx] = [clamp01(pt[0] + dx), clamp01(pt[1] + dy)];
-        });
+        if (bay.polygon[i1]) {
+          bay.polygon[i1] = [clamp01(roiStartPoly[i1][0] + dx), clamp01(roiStartPoly[i1][1] + dy)];
+        }
+        if (bay.polygon[i2]) {
+          bay.polygon[i2] = [clamp01(roiStartPoly[i2][0] + dx), clamp01(roiStartPoly[i2][1] + dy)];
+        }
         recomputeBayRoi(bay);
       } else if (roiMode === 'rotate' && roiStartPoly.length) {
         const [cx, cy] = roiCentroid;
@@ -6460,12 +6495,17 @@
       document.querySelectorAll('.roi-corner-handle.corner-active').forEach((el) => {
         el.classList.remove('corner-active');
       });
+      document.querySelectorAll('.roi-svg-edge.edge-active').forEach((el) => {
+        el.classList.remove('edge-active');
+      });
       roiDragging = false;
       roiMode = null;
       roiCornerIdx = -1;
+      roiEdgeIdx = -1;
       roiHandle = null;
       roiSideIndices = [];
       roiRotateArmed = false;
+      updateRoiRotateModeUI();
       const bay = selectedBay();
       if (bay && wasDraw) {
         const [x, y, w, h] = bay.roi;
@@ -6797,8 +6837,14 @@
       if (!root) return;
       const util = document.getElementById('scorecard-util');
       if (util) util.textContent = '';
-      if (window.VisitsReportingComponent && typeof window.VisitsReportingComponent.render === 'function') {
-        window.VisitsReportingComponent.render(root);
+      if (window.VisitsReportingComponent) {
+        if (root.querySelector('#table-visitors-tbody')) {
+          if (typeof window.VisitsReportingComponent.pollNow === 'function') {
+            window.VisitsReportingComponent.pollNow();
+          }
+        } else if (typeof window.VisitsReportingComponent.render === 'function') {
+          window.VisitsReportingComponent.render(root);
+        }
         return;
       }
       const emptyData = { today_unique: 0, today_visits: 0, week_unique: 0, week_visits: 0, open_sessions: [] };
@@ -7057,6 +7103,7 @@
           hideBayContextMenu();
           cancelDiscoverConnect();
           roiRotateArmed = false;
+          updateRoiRotateModeUI();
           return;
         }
         const tag = ((ev.target && ev.target.tagName) || '').toLowerCase();
@@ -7073,6 +7120,7 @@
           } else {
             roiRotateArmed = true;
           }
+          updateRoiRotateModeUI();
           return;
         }
         if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;

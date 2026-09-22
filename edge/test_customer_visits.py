@@ -246,6 +246,103 @@ class CustomerVisitMonitorTests(unittest.TestCase):
         report2 = get_detailed_visits_report(self.conn)
         self.assertEqual(report2["visitors"][0]["alias"], "VIP Guest")
 
+    def test_merge_customer_subjects_in_db(self) -> None:
+        from db import (
+            get_detailed_visits_report,
+            merge_customer_subjects,
+            start_customer_visit,
+            update_subject_alias,
+            upsert_anonymous_subject,
+        )
+
+        upsert_anonymous_subject(self.conn, "subj_a", 1000.0)
+        update_subject_alias(self.conn, "subj_a", "Alice")
+        start_customer_visit(self.conn, "v1", "subj_a", "entrance", 1000.0)
+        start_customer_visit(self.conn, "v2", "subj_a", "entrance", 1050.0)
+
+        upsert_anonymous_subject(self.conn, "subj_b", 2000.0)
+        start_customer_visit(self.conn, "v3", "subj_b", "waiting", 2000.0)
+
+        ok = merge_customer_subjects(self.conn, "subj_a", "subj_b")
+        self.assertTrue(ok)
+
+        # Verify visits re-linked
+        rows = self.conn.execute("SELECT id, subject_id FROM customer_visits WHERE subject_id = 'subj_b'").fetchall()
+        self.assertEqual(len(rows), 3)
+
+        # Verify source deleted
+        src_row = self.conn.execute("SELECT id FROM anonymous_subjects WHERE id = 'subj_a'").fetchone()
+        self.assertIsNone(src_row)
+
+        # Verify target has combined metadata (Alice alias inherited)
+        tgt_row = self.conn.execute("SELECT alias, first_seen_at, last_seen_at FROM anonymous_subjects WHERE id = 'subj_b'").fetchone()
+        self.assertEqual(tgt_row["alias"], "Alice")
+
+    def test_merge_gallery_embeddings(self) -> None:
+        gallery = AnonymousVisitorGallery(threshold=0.5)
+        feat_a1 = _feat(10)
+        feat_a2 = _feat(11)
+        feat_b1 = _feat(20)
+
+        sid_a = gallery.enroll(feat_a1, "visitor_a")
+        gallery.enroll(feat_a2, sid_a)
+        sid_b = gallery.enroll(feat_b1, "visitor_b")
+
+        self.assertIn("visitor_a", gallery.entries)
+        self.assertIn("visitor_b", gallery.entries)
+        self.assertEqual(len(gallery.entries["visitor_a"].embeddings), 2)
+        self.assertEqual(len(gallery.entries["visitor_b"].embeddings), 1)
+
+        gallery.merge_entries("visitor_a", "visitor_b")
+        self.assertNotIn("visitor_a", gallery.entries)
+        self.assertIn("visitor_b", gallery.entries)
+        self.assertEqual(len(gallery.entries["visitor_b"].embeddings), 3)
+
+    def test_merge_in_monitor(self) -> None:
+        feat_a = _feat(10)
+        feat_b = _feat(20)
+        now = 1000.0
+
+        # Create active sessions
+        self._dwell([_det(10, 10, feat_a, track_id=1)], now)
+        self._dwell([_det(60, 60, feat_b, track_id=2)], now)
+
+        sessions = self.monitor.open_sessions()
+        sub_ids = {s["subject_id"] for s in sessions}
+        self.assertEqual(len(sub_ids), 2)
+
+        s_list = list(sub_ids)
+        src, tgt = s_list[0], s_list[1]
+        self.monitor.merge_subjects(src, tgt)
+
+        sessions_after = self.monitor.open_sessions()
+        sub_ids_after = {s["subject_id"] for s in sessions_after}
+        self.assertNotIn(src, sub_ids_after)
+        self.assertIn(tgt, sub_ids_after)
+
+    def test_get_visits_calendar_summary(self) -> None:
+        from db import get_visits_calendar_summary, start_customer_visit
+
+        # Two visits on 2026-09-20, one on 2026-09-21
+        self.conn.execute("INSERT INTO customer_visits (id, subject_id, zone_id, started_at) VALUES ('c1', 's1', 'z1', '2026-09-20T10:00:00')")
+        self.conn.execute("INSERT INTO customer_visits (id, subject_id, zone_id, started_at) VALUES ('c2', 's2', 'z1', '2026-09-20T14:00:00')")
+        self.conn.execute("INSERT INTO customer_visits (id, subject_id, zone_id, started_at) VALUES ('c3', 's1', 'z1', '2026-09-21T09:00:00')")
+        self.conn.commit()
+
+        summary = get_visits_calendar_summary(self.conn)
+        dates = {r["date"]: r for r in summary}
+        self.assertIn("2026-09-20", dates)
+        self.assertEqual(dates["2026-09-20"]["total_visits"], 2)
+        self.assertEqual(dates["2026-09-20"]["unique_visitors"], 2)
+        self.assertIn("2026-09-21", dates)
+        self.assertEqual(dates["2026-09-21"]["total_visits"], 1)
+
+        # Filter by month prefix
+        month_summary = get_visits_calendar_summary(self.conn, month_prefix="2026-09")
+        self.assertEqual(len(month_summary), 2)
+        empty_month = get_visits_calendar_summary(self.conn, month_prefix="2025-01")
+        self.assertEqual(len(empty_month), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

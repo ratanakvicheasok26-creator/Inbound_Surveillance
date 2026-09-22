@@ -1024,9 +1024,117 @@ def save_subject_avatar(
     conn.commit()
 
 
+def merge_customer_subjects(
+    conn: sqlite3.Connection | None,
+    source_id: str,
+    target_id: str,
+) -> bool:
+    """Merge source_id visitor profile into target_id visitor profile.
+    
+    Combines visit history, dwell times, first/last seen stamps, aliases, and deletes source_id.
+    """
+    if conn is None or not source_id or not target_id or source_id == target_id:
+        return False
+    try:
+        # Re-link all visits from source to target
+        conn.execute(
+            "UPDATE customer_visits SET subject_id = ? WHERE subject_id = ?",
+            (target_id, source_id),
+        )
+        # Fetch metadata from both subjects
+        src_row = conn.execute(
+            "SELECT alias, avatar_path, first_seen_at, last_seen_at FROM anonymous_subjects WHERE id = ?",
+            (source_id,),
+        ).fetchone()
+        tgt_row = conn.execute(
+            "SELECT alias, avatar_path, first_seen_at, last_seen_at FROM anonymous_subjects WHERE id = ?",
+            (target_id,),
+        ).fetchone()
+
+        if tgt_row is not None:
+            src_alias = (src_row["alias"] if src_row else None) or ""
+            tgt_alias = tgt_row["alias"] or ""
+            alias = tgt_alias if tgt_alias.strip() else src_alias
+
+            src_avatar = (src_row["avatar_path"] if src_row else None) or ""
+            tgt_avatar = tgt_row["avatar_path"] or ""
+            avatar = tgt_avatar if tgt_avatar.strip() else src_avatar
+
+            dates_first = [d for d in [tgt_row["first_seen_at"], src_row["first_seen_at"] if src_row else None] if d]
+            first_seen = min(dates_first) if dates_first else tgt_row["first_seen_at"]
+
+            dates_last = [d for d in [tgt_row["last_seen_at"], src_row["last_seen_at"] if src_row else None] if d]
+            last_seen = max(dates_last) if dates_last else tgt_row["last_seen_at"]
+
+            conn.execute(
+                """
+                UPDATE anonymous_subjects
+                SET alias = ?, avatar_path = ?, first_seen_at = ?, last_seen_at = ?
+                WHERE id = ?
+                """,
+                (alias or None, avatar or None, first_seen, last_seen, target_id),
+            )
+        elif src_row is not None:
+            conn.execute(
+                "UPDATE anonymous_subjects SET id = ? WHERE id = ?",
+                (target_id, source_id),
+            )
+
+        # Delete source subject
+        conn.execute("DELETE FROM anonymous_subjects WHERE id = ?", (source_id,))
+        conn.commit()
+        return True
+    except Exception as exc:
+        print(f"[merge_customer_subjects] Error: {exc}", flush=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def get_visits_calendar_summary(
+    conn: sqlite3.Connection | None,
+    month_prefix: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return visit counts and unique customers aggregated by date (YYYY-MM-DD)."""
+    if conn is None:
+        return []
+    try:
+        sql = """
+            SELECT 
+                SUBSTR(started_at, 1, 10) AS visit_date,
+                COUNT(*) AS total_visits,
+                COUNT(DISTINCT subject_id) AS unique_visitors,
+                ROUND(AVG(CASE WHEN duration_seconds IS NOT NULL AND duration_seconds > 0 THEN duration_seconds ELSE NULL END), 1) AS avg_dwell_seconds
+            FROM customer_visits
+            WHERE started_at IS NOT NULL
+        """
+        params: list[Any] = []
+        if month_prefix:
+            sql += " AND started_at LIKE ?"
+            params.append(f"{month_prefix}%")
+        sql += " GROUP BY SUBSTR(started_at, 1, 10) ORDER BY visit_date DESC"
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "date": r["visit_date"],
+                "total_visits": int(r["total_visits"] or 0),
+                "unique_visitors": int(r["unique_visitors"] or 0),
+                "avg_dwell_seconds": float(r["avg_dwell_seconds"] or 0.0),
+            }
+            for r in rows
+            if r["visit_date"]
+        ]
+    except Exception as exc:
+        print(f"[get_visits_calendar_summary] Error: {exc}", flush=True)
+        return []
+
+
 def get_detailed_visits_report(
     conn: sqlite3.Connection | None,
     filter_range: str = "today",
+    date_filter: str | None = None,
     now: datetime | None = None,
     limit: int = 100,
 ) -> dict[str, Any]:
@@ -1081,9 +1189,24 @@ def get_detailed_visits_report(
         mult_visits = int(mult_visits_row[0] if mult_visits_row and mult_visits_row[0] else 0)
         returning_rate = round((mult_visits / max(tot_uniq, 1)) * 100.0, 1) if tot_uniq > 0 else 0.0
 
+        date_uniq = 0
+        date_vis = 0
+        if date_filter:
+            d_u_row = conn.execute("SELECT COUNT(DISTINCT subject_id) FROM customer_visits WHERE started_at LIKE ?", (f"{date_filter}%",)).fetchone()
+            date_uniq = int(d_u_row[0] if d_u_row and d_u_row[0] else 0)
+            d_v_row = conn.execute("SELECT COUNT(*) FROM customer_visits WHERE started_at LIKE ?", (f"{date_filter}%",)).fetchone()
+            date_vis = int(d_v_row[0] if d_v_row and d_v_row[0] else 0)
+
         limit_val = max(1, min(int(limit or 100), 500))
+        where_clause = ""
+        subject_params: list[Any] = [f"{today_str}%", week_start_str]
+        if date_filter:
+            where_clause = "WHERE s.id IN (SELECT DISTINCT subject_id FROM customer_visits WHERE started_at LIKE ?)"
+            subject_params.append(f"{date_filter}%")
+        subject_params.append(limit_val)
+
         subject_rows = conn.execute(
-            """
+            f"""
             SELECT 
                 s.id AS subject_id,
                 s.alias,
@@ -1097,11 +1220,12 @@ def get_detailed_visits_report(
                 SUM(CASE WHEN v.duration_seconds IS NOT NULL THEN v.duration_seconds ELSE 0 END) AS total_dwell
             FROM anonymous_subjects s
             LEFT JOIN customer_visits v ON s.id = v.subject_id
+            {where_clause}
             GROUP BY s.id
             ORDER BY s.last_seen_at DESC
             LIMIT ?
             """,
-            (f"{today_str}%", week_start_str, limit_val),
+            subject_params,
         ).fetchall()
 
         visitors: list[dict[str, Any]] = []
@@ -1147,14 +1271,22 @@ def get_detailed_visits_report(
                     "recent_visits": last_v,
                 })
 
+        recent_where = ""
+        recent_params: list[Any] = []
+        if date_filter:
+            recent_where = "WHERE v.started_at LIKE ?"
+            recent_params.append(f"{date_filter}%")
+
         recents = conn.execute(
-            """
+            f"""
             SELECT v.id, v.subject_id, s.alias, s.avatar_path, v.zone_id, v.started_at, v.ended_at, v.duration_seconds
             FROM customer_visits v
             LEFT JOIN anonymous_subjects s ON v.subject_id = s.id
+            {recent_where}
             ORDER BY v.started_at DESC
             LIMIT 30
-            """
+            """,
+            recent_params,
         ).fetchall()
 
         return {
@@ -1168,6 +1300,9 @@ def get_detailed_visits_report(
                 "avg_dwell_seconds": round(avg_dwell, 1),
                 "returning_rate": returning_rate,
                 "active_now_count": 0,
+                "date_filter": date_filter,
+                "date_unique": date_uniq,
+                "date_visits": date_vis,
             },
             "visitors": visitors,
             "recent_visits": [dict(r) for r in recents],

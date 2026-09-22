@@ -187,6 +187,28 @@ class AnonymousVisitorGallery:
             return matched
         return self.enroll(feat)
 
+    def merge_entries(self, source_id: str, target_id: str) -> None:
+        """Merge appearance embeddings of source_id into target_id."""
+        if not source_id or not target_id or source_id == target_id:
+            return
+        src_entry = self.entries.pop(source_id, None)
+        if src_entry is None or not src_entry.embeddings:
+            return
+        tgt_entry = self.entries.get(target_id)
+        if tgt_entry is None:
+            self.entries[target_id] = _GalleryEntry(
+                subject_id=target_id,
+                embeddings=src_entry.embeddings[: self.max_per_id],
+            )
+            return
+        for emb in src_entry.embeddings:
+            sims = [float(np.dot(e, emb)) for e in tgt_entry.embeddings]
+            max_sim = max(sims) if sims else 0.0
+            if max_sim < 0.95:
+                tgt_entry.embeddings.append(emb)
+        if len(tgt_entry.embeddings) > self.max_per_id:
+            tgt_entry.embeddings = tgt_entry.embeddings[-self.max_per_id :]
+
 
 class CustomerVisitMonitor:
     def __init__(
@@ -217,6 +239,55 @@ class CustomerVisitMonitor:
         self._last_snapshots: list[VisitSnapshot] = []
         self.workplace = parse_workplace_id(workplace) if workplace is not None else "massage"
         self.set_zones(zones)
+
+    def merge_subjects(self, source_id: str, target_id: str) -> None:
+        """Combine in-memory state, open visits, and gallery embeddings for two profiles."""
+        if not source_id or not target_id or source_id == target_id:
+            return
+        self.gallery.merge_entries(source_id, target_id)
+
+        for (sid, zid), visit in list(self._open.items()):
+            if sid == source_id:
+                del self._open[(sid, zid)]
+                tgt_key = (target_id, zid)
+                if tgt_key in self._open:
+                    existing = self._open[tgt_key]
+                    existing.started_at = min(existing.started_at, visit.started_at)
+                    existing.last_seen = max(existing.last_seen, visit.last_seen)
+                else:
+                    visit.subject_id = target_id
+                    self._open[tgt_key] = visit
+
+        for (sid, zid), gate in list(self._visit_gates.items()):
+            if sid == source_id:
+                del self._visit_gates[(sid, zid)]
+                tgt_key = (target_id, zid)
+                if tgt_key not in self._visit_gates:
+                    self._visit_gates[tgt_key] = gate
+
+        for binding in self._track_bind.values():
+            if binding.subject_id == source_id:
+                binding.subject_id = target_id
+
+        for lost in self._recent_lost_tracks.values():
+            if lost.subject_id == source_id:
+                lost.subject_id = target_id
+
+        if source_id in self._saved_avatars:
+            self._saved_avatars.add(target_id)
+            self._saved_avatars.discard(source_id)
+
+        try:
+            import shutil
+            from paths import data_dir
+
+            av_dir = data_dir() / "avatars" / "visitors"
+            src_file = av_dir / f"{source_id}.jpg"
+            tgt_file = av_dir / f"{target_id}.jpg"
+            if src_file.is_file() and not tgt_file.is_file():
+                shutil.copy2(src_file, tgt_file)
+        except Exception as exc:
+            print(f"[CustomerVisitMonitor.merge_subjects] avatar copy error: {exc}", flush=True)
 
     def reset(self) -> None:
         """Wipe all in-memory visitors, open sessions, and tracking bindings."""

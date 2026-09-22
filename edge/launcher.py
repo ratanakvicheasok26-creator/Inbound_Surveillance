@@ -2727,7 +2727,7 @@ class LiveStreamEngine:
                 except Exception:
                     pass
 
-    def visit_detailed_report(self, filter_range: str = "today") -> dict[str, Any]:
+    def visit_detailed_report(self, filter_range: str = "today", date_filter: str | None = None) -> dict[str, Any]:
         """In-depth customer visit report with live sessions, averages, and avatars."""
         empty: dict[str, Any] = {
             "summary": {
@@ -2740,6 +2740,9 @@ class LiveStreamEngine:
                 "avg_dwell_seconds": 0.0,
                 "returning_rate": 0.0,
                 "active_now_count": 0,
+                "date_filter": date_filter,
+                "date_unique": 0,
+                "date_visits": 0,
             },
             "visitors": [],
             "recent_visits": [],
@@ -2755,7 +2758,7 @@ class LiveStreamEngine:
             conn = connect(DATA_DIR / "events.db", check_same_thread=False)
             from db import get_detailed_visits_report
 
-            data = get_detailed_visits_report(conn, filter_range=filter_range)
+            data = get_detailed_visits_report(conn, filter_range=filter_range, date_filter=date_filter)
             data["open_sessions"] = sessions
             data["summary"]["active_now_count"] = len(sessions)
             active_ids = {s.get("subject_id") for s in sessions if s.get("subject_id")}
@@ -2766,6 +2769,50 @@ class LiveStreamEngine:
             print(f"[visit_detailed_report] error: {exc}", flush=True)
             empty["open_sessions"] = sessions
             return empty
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def visits_calendar_summary(self, month: str | None = None) -> dict[str, Any]:
+        """Calendar date breakdown of customer visits."""
+        conn = None
+        try:
+            conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+            from db import get_visits_calendar_summary
+
+            dates = get_visits_calendar_summary(conn, month_prefix=month)
+            return {"ok": True, "dates": dates}
+        except Exception as exc:
+            print(f"[visits_calendar_summary] error: {exc}", flush=True)
+            return {"ok": False, "error": str(exc), "dates": []}
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def merge_customer_profiles(self, source_id: str, target_id: str) -> dict[str, Any]:
+        """Merge duplicate customer visitor profiles into one."""
+        if not source_id or not target_id or source_id == target_id:
+            return {"ok": False, "error": "Invalid source or target ID"}
+        conn = None
+        try:
+            # 1. Update in-memory monitor
+            self.visit_monitor.merge_subjects(source_id, target_id)
+
+            # 2. Update database
+            conn = connect(DATA_DIR / "events.db", check_same_thread=False)
+            from db import merge_customer_subjects
+
+            ok = merge_customer_subjects(conn, source_id, target_id)
+            return {"ok": ok, "source_id": source_id, "target_id": target_id}
+        except Exception as exc:
+            print(f"[merge_customer_profiles] error: {exc}", flush=True)
+            return {"ok": False, "error": str(exc)}
         finally:
             if conn is not None:
                 try:
@@ -4304,11 +4351,21 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     }
                 )
 
+        elif parsed.path == "/api/workplace/visits/calendar":
+            try:
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                month = str((qs.get("month") or [""])[0] or "").strip() or None
+                self._send_json(GLOBAL_ENGINE.visits_calendar_summary(month=month))
+            except Exception as exc:
+                print(f"[API /api/workplace/visits/calendar] {exc}", flush=True)
+                self._send_json({"ok": False, "error": str(exc), "dates": []}, 500)
+
         elif parsed.path == "/api/workplace/visits/detailed":
             try:
                 qs = urllib.parse.parse_qs(parsed.query or "")
                 filter_range = str((qs.get("range") or ["today"])[0] or "today")
-                self._send_json(GLOBAL_ENGINE.visit_detailed_report(filter_range=filter_range))
+                date_filter = str((qs.get("date") or [""])[0] or "").strip() or None
+                self._send_json(GLOBAL_ENGINE.visit_detailed_report(filter_range=filter_range, date_filter=date_filter))
             except Exception as exc:
                 print(f"[API /api/workplace/visits/detailed] {exc}", flush=True)
                 self._send_json(
@@ -4644,6 +4701,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                         conn.close()
                     except Exception:
                         pass
+            return
+
+        if parsed.path == "/api/workplace/visits/merge":
+            source_id = str(payload.get("source_id") or "").strip()
+            target_id = str(payload.get("target_id") or "").strip()
+            res = GLOBAL_ENGINE.merge_customer_profiles(source_id, target_id)
+            code = 200 if res.get("ok") else 400
+            self._send_json(res, code)
             return
 
         if parsed.path == "/api/garage/jobs/complete":
