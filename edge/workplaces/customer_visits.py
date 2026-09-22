@@ -124,6 +124,7 @@ class AnonymousVisitorGallery:
         feat: np.ndarray | None,
         threshold: float | None = None,
         allowed_ids: set[str] | None = None,
+        excluded_ids: set[str] | None = None,
     ) -> str | None:
         """Return an existing subject_id if cosine match clears threshold, else None."""
         vec = _normalize_feat(feat)
@@ -131,9 +132,11 @@ class AnonymousVisitorGallery:
             return None
         best_id: str | None = None
         best = threshold if threshold is not None else self.threshold
-        candidates = self.entries.items()
+        candidates = list(self.entries.items())
         if allowed_ids is not None:
-            candidates = [(sid, entry) for sid, entry in self.entries.items() if sid in allowed_ids]
+            candidates = [(sid, entry) for sid, entry in candidates if sid in allowed_ids]
+        if excluded_ids is not None:
+            candidates = [(sid, entry) for sid, entry in candidates if sid not in excluded_ids]
         for subject_id, entry in candidates:
             if not entry.embeddings:
                 continue
@@ -152,7 +155,7 @@ class AnonymousVisitorGallery:
         return best_id
 
     def enroll(self, feat: np.ndarray | None, subject_id: str | None = None) -> str | None:
-        """Enroll a normalized embedding with angle-diversity clustering. Empty feats never create a new id."""
+        """Enroll a normalized embedding with angle-diversity clustering."""
         vec = _normalize_feat(feat)
         if vec is None:
             return None
@@ -175,13 +178,21 @@ class AnonymousVisitorGallery:
                 del entry.embeddings[0 : len(entry.embeddings) - self.max_per_id]
         return sid
 
-    def match_or_enroll(self, feat: np.ndarray | None, threshold: float | None = None) -> str | None:
+    def match_or_enroll(
+        self,
+        feat: np.ndarray | None,
+        threshold: float | None = None,
+        allowed_ids: set[str] | None = None,
+        excluded_ids: set[str] | None = None,
+    ) -> str | None:
         """Match existing visitor or enroll. Returns None when feat is empty.
 
         Callers must not treat None as a new unique visitor — that was the
         source of 10k+ inflated unique counts when reid extraction is throttled.
         """
-        matched = self.match(feat, threshold=threshold)
+        matched = self.match(
+            feat, threshold=threshold, allowed_ids=allowed_ids, excluded_ids=excluded_ids
+        )
         if matched is not None:
             self.enroll(feat, matched)
             return matched
@@ -330,12 +341,15 @@ class CustomerVisitMonitor:
         now: float,
         max_dt: float = 3.5,
         max_dist: float = 0.25,
+        excluded_ids: set[str] | None = None,
     ) -> str | None:
         """Reconnect recently lost tracks (e.g. angle turn dropped track) before minting new visitor."""
         best_candidate: str | None = None
         best_dist = max_dist
 
         for tid, lost in list(self._recent_lost_tracks.items()):
+            if excluded_ids and lost.subject_id in excluded_ids:
+                continue
             dt = now - lost.last_seen
             if dt > max_dt:
                 continue
@@ -347,7 +361,7 @@ class CustomerVisitMonitor:
                     lost_vec = _normalize_feat(lost.feat)
                     if vec is not None and lost_vec is not None:
                         sim = float(np.dot(vec, lost_vec))
-                        if sim < 0.35:
+                        if sim < 0.40:
                             continue
                 best_dist = dist
                 best_candidate = lost.subject_id
@@ -363,8 +377,11 @@ class CustomerVisitMonitor:
         cy: float = 0.5,
         zone_ids: list[str] | None = None,
         face_customer_id: str | None = None,
+        claimed_ids: set[str] | None = None,
     ) -> str | None:
-        """Sticky track binding + face biometric anchoring + multi-view gallery."""
+        """Sticky track binding + face biometric anchoring + multi-view gallery with frame-exclusivity."""
+        claimed = claimed_ids if claimed_ids is not None else set()
+
         # 0. Direct Face-anchored customer identification (from any camera: Parking, Entrance, Reception)
         if face_customer_id:
             if track_id > 0:
@@ -382,18 +399,21 @@ class CustomerVisitMonitor:
 
         binding = self._track_bind.get(track_id) if track_id > 0 else None
         if binding is not None and (now - binding.last_seen) <= TRACK_STALE_SECONDS:
-            binding.last_seen = now
-            binding.cx = cx
-            binding.cy = cy
-            if zone_ids:
-                binding.zone_ids = list(zone_ids)
-            if feat is not None:
-                binding.last_feat = feat
-                self.gallery.enroll(feat, binding.subject_id)
-            return binding.subject_id
+            if binding.subject_id not in claimed:
+                binding.last_seen = now
+                binding.cx = cx
+                binding.cy = cy
+                if zone_ids:
+                    binding.zone_ids = list(zone_ids)
+                if feat is not None:
+                    binding.last_feat = feat
+                    self.gallery.enroll(feat, binding.subject_id)
+                return binding.subject_id
 
         # 1. Spatial-temporal track stitching (person turned angle, brief occlusion, Kalman track ID hopped)
-        stitched_id = self._try_stitch_lost_track(cx, cy, zone_ids or [], feat, now)
+        stitched_id = self._try_stitch_lost_track(
+            cx, cy, zone_ids or [], feat, now, excluded_ids=claimed
+        )
         if stitched_id is not None:
             if track_id > 0:
                 self._track_bind[track_id] = _TrackBinding(
@@ -408,19 +428,31 @@ class CustomerVisitMonitor:
                 self.gallery.enroll(feat, stitched_id)
             return stitched_id
 
-        # 2. Match active/open visitors with soft threshold (0.54)
-        active_ids = {visit.subject_id for visit in self._open.values()}
+        # 2. Match active/open visitors with calibrated threshold, respecting frame exclusivity
+        active_ids = {visit.subject_id for visit in self._open.values()} - claimed
         matched = None
         if feat is not None:
+            thresh = self.gallery.threshold
             if active_ids:
-                matched = self.gallery.match(feat, threshold=0.54, allowed_ids=active_ids)
+                matched = self.gallery.match(
+                    feat, threshold=thresh, allowed_ids=active_ids, excluded_ids=claimed
+                )
             if matched is None:
-                matched = self.gallery.match_or_enroll(feat)
+                matched = self.gallery.match_or_enroll(
+                    feat, threshold=thresh, excluded_ids=claimed
+                )
         else:
             return None
 
         if matched is None:
             return None
+
+        # Absolute safeguard: if matched ID is already claimed in this frame, mint fresh unique ID
+        if matched in claimed:
+            matched = self.gallery.enroll(feat)
+            if matched is None:
+                return None
+
         if track_id > 0:
             self._track_bind[track_id] = _TrackBinding(
                 subject_id=matched,
@@ -475,8 +507,25 @@ class CustomerVisitMonitor:
         visitors_in_zone: dict[str, list[str]] = {str(z["id"]): [] for z in self.zones}
         present_subject_zones: set[tuple[str, str]] = set()
         live_tracks: set[int] = set()
+        claimed_ids: set[str] = set()
 
         for det in detections or []:
+            # 1. Skip inanimate clutter or dead tracks
+            if getattr(det, "clutter", False):
+                try:
+                    det.identity = None
+                except Exception:
+                    pass
+                continue
+
+            # 2. Skip unconfirmed detections (e.g. 1st frame flash of background or low confidence)
+            if hasattr(det, "confirmed") and not det.confirmed and getattr(det, "hits", 1) < 2:
+                try:
+                    det.identity = None
+                except Exception:
+                    pass
+                continue
+
             if hasattr(det, "x1"):
                 x1, y1, x2, y2 = float(det.x1), float(det.y1), float(det.x2), float(det.y2)
             else:
@@ -500,6 +549,7 @@ class CustomerVisitMonitor:
             )
             if already_staff:
                 subject_id = str(getattr(det, "identity", None) or "")
+                claimed_ids.add(subject_id)
                 try:
                     det.is_staff = True
                 except Exception:
@@ -515,7 +565,8 @@ class CustomerVisitMonitor:
             ]
             face_customer_id = getattr(det, "customer_id", None)
             subject_id = self._resolve_subject(
-                track_id, feat, now, cx=cx, cy=cy, zone_ids=det_zones, face_customer_id=face_customer_id
+                track_id, feat, now, cx=cx, cy=cy, zone_ids=det_zones,
+                face_customer_id=face_customer_id, claimed_ids=claimed_ids,
             )
 
             if subject_id is None:
@@ -531,6 +582,7 @@ class CustomerVisitMonitor:
                         occupants_in_zone[zid].append("pending")
                 continue
 
+            claimed_ids.add(subject_id)
             try:
                 det.identity = subject_id
                 det.is_staff = False
