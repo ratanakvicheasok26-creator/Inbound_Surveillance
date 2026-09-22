@@ -12,9 +12,10 @@ WORKPLACE_IDS = ("garage", "massage")
 SUBJECT_KINDS = ("employee", "customer")
 MONITOR_IDS = ("employee_labor", "customer_visits")
 GARAGE_ZONE_KINDS = ("vehicle_bay", "tool_area")
-MASSAGE_ZONE_KINDS = ("entrance", "waiting", "treatment_room", "reception")
-VISIT_ZONE_KINDS = ("entrance", "waiting", "treatment_room")
+MASSAGE_ZONE_KINDS = ("parking", "entrance", "waiting", "treatment_room", "reception")
+VISIT_ZONE_KINDS = ("parking", "entrance", "waiting", "treatment_room")
 ALL_ZONE_KINDS = GARAGE_ZONE_KINDS + MASSAGE_ZONE_KINDS
+
 STAFF_LABEL = "Staff"
 STAFF_ID_PREFIX = "staff_"
 DEFAULT_RECEPTION_ROI = [0.38, 0.06, 0.14, 0.14]

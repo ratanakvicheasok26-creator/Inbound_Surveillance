@@ -1410,7 +1410,7 @@ class LiveStreamEngine:
 
     def reload_face_id(self) -> int:
         if self.face_rec is None:
-            self.face_rec = try_create_face_recognizer(self.cfg)
+            self.face_rec = try_create_face_recognizer(self.cfg, conn=self.conn)
             if self.face_rec is None:
                 return 0
         try:
@@ -3215,7 +3215,7 @@ class LiveStreamEngine:
                 f"engine={getattr(self.runtime_profile, 'pose_engine', 'rtmpose')}, "
                 f"device={self.runtime_profile.yolo_device}, weights={weights_path})"
             )
-            self.face_rec = try_create_face_recognizer(self.cfg)
+            self.face_rec = try_create_face_recognizer(self.cfg, conn=self.conn)
             self.reid = try_create_body_reid(self.cfg)
             self.liveness_probe = LivenessProbe()
             self.tracker = PersonTracker(

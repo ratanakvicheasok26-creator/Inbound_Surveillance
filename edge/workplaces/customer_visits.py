@@ -291,8 +291,24 @@ class CustomerVisitMonitor:
         cx: float = 0.5,
         cy: float = 0.5,
         zone_ids: list[str] | None = None,
+        face_customer_id: str | None = None,
     ) -> str | None:
-        """Sticky track binding + spatial-temporal continuity + multi-view gallery."""
+        """Sticky track binding + face biometric anchoring + multi-view gallery."""
+        # 0. Direct Face-anchored customer identification (from any camera: Parking, Entrance, Reception)
+        if face_customer_id:
+            if track_id > 0:
+                self._track_bind[track_id] = _TrackBinding(
+                    subject_id=face_customer_id,
+                    last_seen=now,
+                    cx=cx,
+                    cy=cy,
+                    zone_ids=list(zone_ids or []),
+                    last_feat=feat,
+                )
+            if feat is not None:
+                self.gallery.enroll(feat, face_customer_id)
+            return face_customer_id
+
         binding = self._track_bind.get(track_id) if track_id > 0 else None
         if binding is not None and (now - binding.last_seen) <= TRACK_STALE_SECONDS:
             binding.last_seen = now
@@ -344,6 +360,7 @@ class CustomerVisitMonitor:
                 last_feat=feat,
             )
         return matched
+
 
     def _prune_track_bindings(self, now: float, live_tracks: set[int]) -> None:
         stale = [
@@ -425,9 +442,11 @@ class CustomerVisitMonitor:
             det_zones = [
                 str(z["id"]) for z in self.zones if point_in_roi(cx, cy, z["roi"])
             ]
+            face_customer_id = getattr(det, "customer_id", None)
             subject_id = self._resolve_subject(
-                track_id, feat, now, cx=cx, cy=cy, zone_ids=det_zones
+                track_id, feat, now, cx=cx, cy=cy, zone_ids=det_zones, face_customer_id=face_customer_id
             )
+
             if subject_id is None:
                 # No embedding yet and no sticky track — wait. Do not invent a visitor.
                 try:

@@ -192,6 +192,23 @@ def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connect
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS customer_face_embeddings (
+            subject_id TEXT NOT NULL,
+            slot INTEGER NOT NULL,
+            embedding BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            PRIMARY KEY (subject_id, slot)
+        )
+        """
+    )
+    try:
+        cols_anon = {r["name"] for r in conn.execute("PRAGMA table_info(anonymous_subjects)").fetchall()}
+        if "visit_count" not in cols_anon:
+            conn.execute("ALTER TABLE anonymous_subjects ADD COLUMN visit_count INTEGER NOT NULL DEFAULT 1")
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS customer_complaints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             complaint_id TEXT UNIQUE NOT NULL,
@@ -1224,6 +1241,88 @@ def customer_visit_counts(
         "week_visits": int(week_visits["n"] if week_visits else 0),
         "recent": [dict(r) for r in recent],
     }
+
+
+def replace_customer_face_embeddings(
+    conn: sqlite3.Connection | None,
+    subject_id: str,
+    embeddings: list[Any],
+    *,
+    alias: str | None = None,
+    visit_count: int | None = None,
+    timestamp: float | datetime | None = None,
+) -> None:
+    """Persist customer face embeddings so identity survives process restart."""
+    if conn is None or not subject_id:
+        return
+    now = timestamp if timestamp is not None else datetime.now()
+    stamp = _iso(_as_datetime(now))
+    upsert_anonymous_subject(conn, subject_id, now)
+    if alias:
+        conn.execute("UPDATE anonymous_subjects SET alias = ? WHERE id = ?", (alias, subject_id))
+    if visit_count is not None:
+        try:
+            conn.execute(
+                "UPDATE anonymous_subjects SET visit_count = ? WHERE id = ?",
+                (int(visit_count), subject_id),
+            )
+        except sqlite3.OperationalError:
+            pass
+    conn.execute("DELETE FROM customer_face_embeddings WHERE subject_id = ?", (subject_id,))
+    for slot, embedding in enumerate(embeddings or []):
+        if embedding is None:
+            continue
+        if not hasattr(embedding, "tobytes"):
+            continue
+        arr = embedding.astype("float32")
+        blob = bytes(arr.tobytes())
+        dim = int(getattr(arr, "size", 0) or 0)
+        if not blob or dim <= 0:
+            continue
+        conn.execute(
+            """
+            INSERT INTO customer_face_embeddings (subject_id, slot, embedding, dim)
+            VALUES (?, ?, ?, ?)
+            """,
+            (subject_id, slot, blob, dim),
+        )
+    conn.execute(
+        "UPDATE anonymous_subjects SET last_seen_at = ? WHERE id = ?",
+        (stamp, subject_id),
+    )
+    conn.commit()
+
+
+def list_customer_face_embeddings(conn: sqlite3.Connection | None) -> dict[str, list[Any]]:
+    """Return subject_id -> list of L2 face embedding arrays."""
+    if conn is None:
+        return {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT subject_id, slot, embedding, dim
+            FROM customer_face_embeddings
+            ORDER BY subject_id, slot
+            """
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    out: dict[str, list[Any]] = {}
+    for row in rows:
+        blob = bytes(row["embedding"] or b"")
+        dim = int(row["dim"] or 0)
+        if not blob:
+            continue
+        try:
+            import numpy as np
+
+            embedding = np.frombuffer(blob, dtype=np.float32).copy()
+            if dim and embedding.size != dim:
+                embedding = embedding[:dim] if embedding.size > dim else embedding
+        except Exception:
+            continue
+        out.setdefault(str(row["subject_id"]), []).append(embedding)
+    return out
 
 
 def upsert_staff_memory(
