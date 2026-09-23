@@ -5101,14 +5101,27 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                         "STAFF IN ROI" if GLOBAL_ENGINE.is_occupied else "EMPTY"
                     )
                     identified = ", ".join(GLOBAL_ENGINE.identities) or "none"
-                    caption = (
-                        f"🔧 *Inbound Garage Snapshot*\n\n"
-                        f"🏢 *Shop:* {venue}\n"
-                        f"⏰ *Timestamp:* {now_str}\n"
-                        f"🛠️ *Floor Status:* {status_str}\n"
-                        f"👥 *Detections:* {GLOBAL_ENGINE.person_count} Person(s)\n"
-                        f"🪪 *Identified:* {identified}\n"
-                    )
+                    wp = str(GLOBAL_ENGINE.cfg.get("workplace_type") or "garage").strip().lower()
+                    branch = str(GLOBAL_ENGINE.cfg.get("branch_id") or "").strip()
+                    if wp == "massage":
+                        title = f"[{branch}] Live Snapshot" if branch else "Inbound Snapshot"
+                        caption = (
+                            f"📸 *{title}*\n\n"
+                            f"🏢 *Venue:* {venue}\n"
+                            f"⏰ *Timestamp:* {now_str}\n"
+                            f"📍 *Status:* {status_str}\n"
+                            f"👥 *Guests detected:* {GLOBAL_ENGINE.person_count}\n"
+                            f"🪪 *Identified:* {identified}\n"
+                        )
+                    else:
+                        caption = (
+                            f"🔧 *Inbound Garage Snapshot*\n\n"
+                            f"🏢 *Shop:* {venue}\n"
+                            f"⏰ *Timestamp:* {now_str}\n"
+                            f"🛠️ *Floor Status:* {status_str}\n"
+                            f"👥 *Detections:* {GLOBAL_ENGINE.person_count} Person(s)\n"
+                            f"🪪 *Identified:* {identified}\n"
+                        )
 
                     url = f"https://api.telegram.org/bot{token}/sendPhoto"
                     try:

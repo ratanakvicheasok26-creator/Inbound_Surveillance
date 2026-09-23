@@ -103,7 +103,7 @@ class TelegramLinkTests(unittest.TestCase):
             self.assertTrue(handled1)
             mock_reply.assert_called_with(
                 "123456",
-                "Linked to HourMeng. Garage alerts and daily scorecards will arrive here. "
+                "Linked to HourMeng. Alerts and daily summaries will arrive here. "
                 "If you connect a different Telegram later, this chat will stop receiving alerts.",
             )
 
@@ -122,7 +122,7 @@ class TelegramLinkTests(unittest.TestCase):
             self.assertTrue(handled2)
             mock_reply.assert_called_with(
                 "123456",
-                "This chat is already linked to HourMeng. Garage alerts and daily scorecards will arrive here.",
+                "This chat is already linked to HourMeng. Alerts and daily summaries will arrive here.",
             )
 
     def test_active_chat_recognized_on_start(self) -> None:
@@ -141,7 +141,7 @@ class TelegramLinkTests(unittest.TestCase):
             self.assertTrue(handled)
             mock_reply.assert_called_with(
                 "777888",
-                "This chat is already linked to AutoFix Garage. Garage alerts and daily scorecards will arrive here.",
+                "This chat is already linked to AutoFix Garage. Alerts and daily summaries will arrive here.",
             )
 
 
