@@ -152,10 +152,23 @@ def fit_window_size(width: int, height: int, max_h: int = FIT_MAX_H) -> tuple[in
 def load_config(path: Path) -> dict:
     with path.open() as handle:
         data = yaml.safe_load(handle) or {}
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", data.get("telegram_bot_token") or "")
-    chat = os.environ.get("TELEGRAM_CHAT_ID", data.get("telegram_chat_id") or "")
+    from telegram_out import resolve_telegram_credentials
+
+    token, chat = resolve_telegram_credentials(
+        data.get("telegram_bot_token"),
+        data.get("telegram_chat_id"),
+    )
     data["telegram_bot_token"] = token
     data["telegram_chat_id"] = chat
+    data["branch_id"] = str(data.get("branch_id") or "").strip()
+    workplace = str(data.get("workplace_type") or "garage").strip().lower()
+    data["workplace_type"] = workplace
+    if workplace == "massage":
+        data["enable_face_id"] = bool(data.get("enable_face_id", False))
+        data["store_customer_avatars"] = bool(data.get("store_customer_avatars", False))
+    else:
+        data["enable_face_id"] = bool(data.get("enable_face_id", True))
+        data["store_customer_avatars"] = bool(data.get("store_customer_avatars", True))
     return data
 
 

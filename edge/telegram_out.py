@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import requests
 
 API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def resolve_telegram_credentials(
+    token: Any = None,
+    chat_id: Any = None,
+) -> tuple[str, str]:
+    """Prefer TELEGRAM_* env vars; fall back to config values. Never invent a token."""
+    env_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    env_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    cfg_token = str(token or "").strip()
+    cfg_chat = normalize_chat_id(chat_id)
+    return (env_token or cfg_token, normalize_chat_id(env_chat) or cfg_chat)
 
 
 def normalize_chat_id(value: Any) -> str:
@@ -35,9 +48,14 @@ def normalize_chat_id(value: Any) -> str:
 
 
 class TelegramOut:
-    def __init__(self, token: str, chat_id: str) -> None:
-        self.token = (token or "").strip()
-        self.chat_id = normalize_chat_id(chat_id)
+    def __init__(self, token: str = "", chat_id: str = "") -> None:
+        resolved_token, resolved_chat = resolve_telegram_credentials(token, chat_id)
+        self.token = resolved_token
+        self.chat_id = resolved_chat
+
+    def refresh_from_env(self, token: str = "", chat_id: str = "") -> None:
+        """Re-resolve credentials (env wins over passed config)."""
+        self.token, self.chat_id = resolve_telegram_credentials(token, chat_id)
 
     @property
     def enabled(self) -> bool:

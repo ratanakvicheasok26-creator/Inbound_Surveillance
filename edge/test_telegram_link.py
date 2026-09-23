@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from telegram_link import TelegramLinkService
-from telegram_out import TelegramOut, normalize_chat_id
+from telegram_out import TelegramOut, normalize_chat_id, resolve_telegram_credentials
 
 
 class TelegramLinkTests(unittest.TestCase):
@@ -213,6 +213,32 @@ class TelegramOutNormalizeTests(unittest.TestCase):
         self.assertEqual(bot.chat_id, "222")
         bot.set_chat("111,333")
         self.assertEqual(bot.chat_id, "333")
+
+    def test_resolve_prefers_environment(self) -> None:
+        import os
+
+        prev_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        prev_chat = os.environ.get("TELEGRAM_CHAT_ID")
+        try:
+            os.environ["TELEGRAM_BOT_TOKEN"] = "env-token"
+            os.environ["TELEGRAM_CHAT_ID"] = "999"
+            token, chat = resolve_telegram_credentials("cfg-token", "111")
+            self.assertEqual(token, "env-token")
+            self.assertEqual(chat, "999")
+            del os.environ["TELEGRAM_BOT_TOKEN"]
+            del os.environ["TELEGRAM_CHAT_ID"]
+            token, chat = resolve_telegram_credentials("cfg-token", "111")
+            self.assertEqual(token, "cfg-token")
+            self.assertEqual(chat, "111")
+        finally:
+            if prev_token is None:
+                os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            else:
+                os.environ["TELEGRAM_BOT_TOKEN"] = prev_token
+            if prev_chat is None:
+                os.environ.pop("TELEGRAM_CHAT_ID", None)
+            else:
+                os.environ["TELEGRAM_CHAT_ID"] = prev_chat
 
 
 if __name__ == "__main__":

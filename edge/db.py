@@ -21,6 +21,14 @@ def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connect
         )
         """
     )
+    try:
+        cols_events = {r["name"] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+        if "branch_id" not in cols_events:
+            conn.execute("ALTER TABLE events ADD COLUMN branch_id TEXT")
+        if "camera_role" not in cols_events:
+            conn.execute("ALTER TABLE events ADD COLUMN camera_role TEXT")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS minutes (
@@ -239,11 +247,27 @@ def insert_event(
     event_type: str,
     ts: datetime,
     abs_path: str | None = None,
+    *,
+    branch_id: str | None = None,
+    camera_role: str | None = None,
 ) -> None:
-    conn.execute(
-        "INSERT INTO events (ts, event_type, abs_path) VALUES (?, ?, ?)",
-        (ts.isoformat(timespec="seconds"), event_type, abs_path),
-    )
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "branch_id" in cols and "camera_role" in cols:
+        conn.execute(
+            "INSERT INTO events (ts, event_type, abs_path, branch_id, camera_role) VALUES (?, ?, ?, ?, ?)",
+            (
+                ts.isoformat(timespec="seconds"),
+                event_type,
+                abs_path,
+                (branch_id or None),
+                (camera_role or None),
+            ),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO events (ts, event_type, abs_path) VALUES (?, ?, ?)",
+            (ts.isoformat(timespec="seconds"), event_type, abs_path),
+        )
     conn.commit()
 
 

@@ -30,6 +30,9 @@ VISIT_GRACE_SECONDS = 8.0
 # Cosine match; slightly soft so coat / angle drift still rematches same day.
 REID_MATCH_THRESHOLD = 0.62
 TRACK_STALE_SECONDS = 4.0
+WAIT_SLA_SECONDS = 180.0
+WAIT_SLA_COOLDOWN_SECONDS = 600.0
+WAIT_SLA_ZONE_KINDS = frozenset({"waiting", "reception"})
 
 
 def _iso(ts: float | datetime) -> str:
@@ -233,6 +236,12 @@ class CustomerVisitMonitor:
         conn: Any | None = None,
         staff_memory: Any | None = None,
         workplace: object | None = None,
+        store_customer_avatars: bool | None = None,
+        branch_id: str = "",
+        camera_role: str = "",
+        telegram_out: Any | None = None,
+        wait_sla_seconds: float = WAIT_SLA_SECONDS,
+        wait_sla_cooldown_seconds: float = WAIT_SLA_COOLDOWN_SECONDS,
     ) -> None:
         self.confirm_seconds = confirm_seconds
         self.clear_seconds = clear_seconds
@@ -249,6 +258,18 @@ class CustomerVisitMonitor:
         self._saved_avatars: set[str] = set()
         self._last_snapshots: list[VisitSnapshot] = []
         self.workplace = parse_workplace_id(workplace) if workplace is not None else "massage"
+        # Privacy: massage never stores visitor JPEGs unless explicitly opted in.
+        if store_customer_avatars is None:
+            self.store_customer_avatars = self.workplace != "massage"
+        else:
+            self.store_customer_avatars = bool(store_customer_avatars)
+        self.branch_id = str(branch_id or "").strip()
+        self.camera_role = str(camera_role or "").strip()
+        self.telegram_out = telegram_out
+        self.wait_sla_seconds = float(wait_sla_seconds)
+        self.wait_sla_cooldown_seconds = float(wait_sla_cooldown_seconds)
+        self._sla_first_seen: dict[tuple[str, str], float] = {}
+        self._sla_alerted_at: dict[tuple[str, str], float] = {}
         self.set_zones(zones)
 
     def merge_subjects(self, source_id: str, target_id: str) -> None:
@@ -288,6 +309,9 @@ class CustomerVisitMonitor:
             self._saved_avatars.add(target_id)
             self._saved_avatars.discard(source_id)
 
+        if self.workplace == "massage" or not self.store_customer_avatars:
+            return
+
         try:
             import shutil
             from paths import data_dir
@@ -308,10 +332,34 @@ class CustomerVisitMonitor:
         self._recent_lost_tracks.clear()
         self._saved_avatars.clear()
         self._last_snapshots.clear()
+        self._sla_first_seen.clear()
+        self._sla_alerted_at.clear()
         for gate in self._gates.values():
             gate.occupied = False
         self._visit_gates.clear()
 
+    def configure_site(
+        self,
+        *,
+        branch_id: str | None = None,
+        camera_role: str | None = None,
+        store_customer_avatars: bool | None = None,
+        telegram_out: Any | None = None,
+        workplace: object | None = None,
+    ) -> None:
+        """Update site identity / privacy / alert wiring without rebuilding the monitor."""
+        if workplace is not None:
+            self.workplace = parse_workplace_id(workplace)
+            if store_customer_avatars is None and self.workplace == "massage":
+                self.store_customer_avatars = False
+        if branch_id is not None:
+            self.branch_id = str(branch_id or "").strip()
+        if camera_role is not None:
+            self.camera_role = str(camera_role or "").strip()
+        if store_customer_avatars is not None:
+            self.store_customer_avatars = bool(store_customer_avatars)
+        if telegram_out is not None:
+            self.telegram_out = telegram_out
     def set_zones(self, zones: object | None, workplace: object | None = None) -> None:
         from workplaces import normalize_workplace_zones
 
@@ -506,6 +554,7 @@ class CustomerVisitMonitor:
         occupants_in_zone: dict[str, list[str]] = {str(z["id"]): [] for z in self.zones}
         visitors_in_zone: dict[str, list[str]] = {str(z["id"]): [] for z in self.zones}
         present_subject_zones: set[tuple[str, str]] = set()
+        present_sla_keys: set[tuple[str, str]] = set()
         live_tracks: set[int] = set()
         claimed_ids: set[str] = set()
 
@@ -594,6 +643,7 @@ class CustomerVisitMonitor:
 
             in_reception = False
             visit_zones: list[str] = []
+            sla_keys: list[tuple[str, str]] = []
             for zone in self.zones:
                 if not point_in_roi(cx, cy, zone["roi"]):
                     continue
@@ -604,6 +654,8 @@ class CustomerVisitMonitor:
                     in_reception = True
                 elif kind in VISIT_ZONE_KINDS:
                     visit_zones.append(zid)
+                if kind in WAIT_SLA_ZONE_KINDS:
+                    sla_keys.append((subject_id, zid))
 
             enrolled_staff = False
             if memory is not None:
@@ -617,6 +669,8 @@ class CustomerVisitMonitor:
             for zid in visit_zones:
                 visitors_in_zone[zid].append(subject_id)
                 present_subject_zones.add((subject_id, zid))
+            for key in sla_keys:
+                present_sla_keys.add(key)
 
         self._prune_track_bindings(now, live_tracks)
 
@@ -655,6 +709,7 @@ class CustomerVisitMonitor:
                 )
             )
         self._close_stale(now, present_keys)
+        self._check_wait_sla(present_sla_keys, now)
         self._last_snapshots = snapshots
         return snapshots
 
@@ -674,6 +729,9 @@ class CustomerVisitMonitor:
         ]
 
     def _maybe_save_avatar(self, subject_id: str, det: Any, frame: Any, now: float) -> None:
+        # Privacy hard-gate: massage / explicit opt-out never writes visitor JPEGs.
+        if self.workplace == "massage" or not self.store_customer_avatars:
+            return
         if frame is None or getattr(frame, "size", 0) == 0:
             return
         if subject_id in self._saved_avatars:
@@ -709,21 +767,80 @@ class CustomerVisitMonitor:
         except Exception:
             pass
 
+    def _check_wait_sla(self, present_keys: set[tuple[str, str]], now: float) -> None:
+        """Alert once when a guest dwells in waiting/reception for >= wait_sla_seconds."""
+        for key in list(self._sla_first_seen.keys()):
+            if key not in present_keys:
+                self._sla_first_seen.pop(key, None)
+
+        zone_meta = {
+            str(z["id"]): {
+                "kind": parse_zone_kind(z.get("type"), self.workplace),
+                "name": str(z.get("name") or z.get("id") or ""),
+            }
+            for z in self.zones
+        }
+
+        for key in present_keys:
+            first = self._sla_first_seen.get(key)
+            if first is None:
+                self._sla_first_seen[key] = now
+                continue
+            dwell = now - first
+            if dwell < self.wait_sla_seconds:
+                continue
+            last_alert = self._sla_alerted_at.get(key)
+            if last_alert is not None and (now - last_alert) < self.wait_sla_cooldown_seconds:
+                continue
+            self._sla_alerted_at[key] = now
+            subject_id, zone_id = key
+            meta = zone_meta.get(zone_id) or {}
+            branch = self.branch_id or "branch"
+            role = self.camera_role or "front_desk"
+            zone_name = meta.get("name") or zone_id
+            msg = (
+                f"[{branch}] WAIT BOTTLENECK: Guest waiting >= 3 mins at Front Desk "
+                f"({zone_name}, role={role}). Action: Greet / assist."
+            )
+            bot = self.telegram_out
+            if bot is not None and getattr(bot, "enabled", False):
+                try:
+                    bot.send_message(msg)
+                except Exception as exc:
+                    print(f"[wait_sla] telegram failed: {exc}", flush=True)
+            else:
+                print(f"[wait_sla] {msg}", flush=True)
+            if self.conn is not None:
+                try:
+                    from db import insert_event
+
+                    insert_event(
+                        self.conn,
+                        "wait_bottleneck",
+                        datetime.fromtimestamp(now),
+                        abs_path=f"{subject_id}@{zone_id}",
+                        branch_id=self.branch_id or None,
+                        camera_role=self.camera_role or None,
+                    )
+                except Exception as exc:
+                    print(f"[wait_sla] db event failed: {exc}", flush=True)
+
     def open_sessions(self) -> list[dict[str, Any]]:
         names = {str(z["id"]): str(z["name"]) for z in self.zones}
         now = time.time()
-        return [
-            {
+        sessions: list[dict[str, Any]] = []
+        for visit in self._open.values():
+            row: dict[str, Any] = {
                 "subject_id": visit.subject_id,
                 "zone_id": visit.zone_id,
                 "zone_name": names.get(visit.zone_id, visit.zone_id),
                 "started_at": _iso(visit.started_at),
                 "dwell_seconds": max(0.0, round(now - visit.started_at, 1)),
-                "avatar_url": f"/api/workplace/avatar/{visit.subject_id}",
             }
-            for visit in self._open.values()
-        ]
-
+            if self.store_customer_avatars and self.workplace != "massage":
+                row["avatar_url"] = f"/api/workplace/avatar/{visit.subject_id}"
+            sessions.append(row)
+        return sessions
     def _touch_visit(self, subject_id: str, zone_id: str, now: float) -> None:
         key = (subject_id, zone_id)
         current = self._open.get(key)
