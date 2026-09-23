@@ -97,7 +97,10 @@ class ScorecardTests(unittest.TestCase):
         self.assertIn("[champei-pp-01] DAILY OPERATIONS SCORECARD", text)
         self.assertIn("Date: 2026-09-23", text)
         self.assertIn("• Total Visits: 3", text)
+        self.assertIn("• Completed Sessions: 0", text)
         self.assertIn("• Unique Guests: 2", text)
+        self.assertIn("• Avg Session Duration: 0 mins", text)
+        self.assertIn("• Lobby Bounces / Walk-Aways: 0", text)
         self.assertIn("• Front-Desk Bottlenecks (>3m): 1", text)
 
     def test_send_daily_scorecard_routes_owner_event(self) -> None:

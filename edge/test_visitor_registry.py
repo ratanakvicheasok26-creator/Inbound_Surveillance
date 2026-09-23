@@ -161,6 +161,10 @@ class TelegramRoutingTests(unittest.TestCase):
             self.assertEqual(bot.resolve_chat_for_event("guest_arrival"), "staff")
             self.assertEqual(bot.resolve_chat_for_event("daily_scorecard"), "owner")
             self.assertEqual(bot.resolve_chat_for_event("silent_churn"), "owner")
+            self.assertEqual(
+                bot.resolve_chats_for_event("early_departure"),
+                ["staff", "owner"],
+            )
         finally:
             for key, value in prev.items():
                 if value is None:

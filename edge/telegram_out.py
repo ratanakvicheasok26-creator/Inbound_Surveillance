@@ -10,8 +10,8 @@ import requests
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-STAFF_EVENTS = frozenset({"wait_bottleneck", "vip_arrival", "guest_arrival"})
-OWNER_EVENTS = frozenset({"daily_scorecard", "silent_churn"})
+STAFF_EVENTS = frozenset({"wait_bottleneck", "vip_arrival", "guest_arrival", "early_departure"})
+OWNER_EVENTS = frozenset({"daily_scorecard", "silent_churn", "early_departure"})
 
 
 def format_alert_header(branch_id: str, title: str) -> str:
@@ -147,21 +147,42 @@ class TelegramOut:
             return False
         return True
 
+    def resolve_chats_for_event(self, event_type: str) -> list[str]:
+        """Return one or more chat ids for an event (dual-route when in both sets)."""
+        kind = str(event_type or "").strip().lower()
+        in_staff = kind in STAFF_EVENTS
+        in_owner = kind in OWNER_EVENTS
+        targets: list[str] = []
+        if in_staff and in_owner:
+            staff = normalize_chat_id(self.staff_chat_id) or normalize_chat_id(self.chat_id)
+            owner = normalize_chat_id(self.owner_chat_id) or normalize_chat_id(self.chat_id)
+            for cid in (staff, owner):
+                if cid and cid not in targets:
+                    targets.append(cid)
+            return targets
+        primary = self.resolve_chat_for_event(kind)
+        return [primary] if primary else []
+
     def send_alert(
         self,
         event_type: str,
         text: str,
         photo: bytes | None = None,
     ) -> bool:
-        """Route an alert to staff or owner chat by event_type. Never raises."""
+        """Route an alert by event_type. Dual-routes early_departure to staff+owner. Never raises."""
         try:
-            target = self.resolve_chat_for_event(event_type)
-            if not self.token or not target:
+            targets = self.resolve_chats_for_event(event_type)
+            if not self.token or not targets:
                 print(f"[telegram] skipped send_alert({event_type}) (no token/chat_id)")
                 return False
-            if photo:
-                return self.send_photo_bytes_to(target, photo, caption=text)
-            return self.send_message_to(target, text)
+            any_ok = False
+            for target in targets:
+                if photo:
+                    ok = self.send_photo_bytes_to(target, photo, caption=text)
+                else:
+                    ok = self.send_message_to(target, text)
+                any_ok = any_ok or ok
+            return any_ok
         except Exception as exc:
             print(f"[telegram] send_alert({event_type}) error: {exc}")
             return False
