@@ -270,6 +270,7 @@ try:
         update_vehicle_job_activity,
         upsert_minute,
     )
+    from door_gate import DoorTrafficMonitor
     from complaint_service import ComplaintMonitoringService
     from face_id import (
         create_identity,
@@ -1261,6 +1262,7 @@ class LiveStreamEngine:
         )
         self.staff_memory = StaffMemory(self.cfg.get("bays"), workplace=wp)
         self.visit_monitor.staff_memory = self.staff_memory
+        self.door_monitor: DoorTrafficMonitor | None = None
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
         self.complaint_service = None
@@ -3451,6 +3453,16 @@ class LiveStreamEngine:
                 if self.tracker is not None:
                     self.tracker.camera_id = str(self.cfg.get("active_camera_id") or "cam-1")
                     self.tracker.reset(clear_gallery=False)
+                door_cfg = dict(cfg.get("door_monitor") or {})
+                if door_cfg.get("enabled"):
+                    self.door_monitor = DoorTrafficMonitor(
+                        door_cfg,
+                        conn=self.conn,
+                        proofs_root=DATA_DIR / "proofs",
+                    )
+                    print("[DoorGate] Door traffic monitoring enabled")
+                else:
+                    self.door_monitor = None
                 rotate_deg, flip = resolve_orient(cfg.get("rotate"), source, packet.frame, cfg.get("flip"))
                 first_oriented = orient_frame(packet.frame, rotate_deg, flip)
                 h0, w0 = first_oriented.shape[:2]
@@ -3623,6 +3635,17 @@ class LiveStreamEngine:
                         self._bank_hard_negatives(frame, self.tracker.clutter_events)
                     elif flags["face_id"] and self.face_rec is not None:
                         self.face_rec.annotate_detections(frame, last_accepted)
+                    if self.door_monitor is not None:
+                        door_conn = self.door_monitor.conn
+                        if not flags["persist"]:
+                            self.door_monitor.conn = None
+                        try:
+                            self.door_monitor.update(
+                                last_accepted, w, h, now, frame=frame, stamp=datetime.now()
+                            )
+                            self.door_monitor.annotate(frame, w, h)
+                        finally:
+                            self.door_monitor.conn = door_conn
                     if flags["customer_visits"]:
                         prev_conn = self.visit_monitor.conn
                         if not flags["persist"]:
@@ -4385,6 +4408,22 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 "active_camera_id": str(GLOBAL_ENGINE.cfg.get("active_camera_id") or ""),
                 "active_roi_cameras": list(GLOBAL_ENGINE.active_roi_cameras.keys()),
                 "latest_camera_event": GLOBAL_ENGINE.latest_camera_event,
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode("utf-8"))
+
+        elif parsed.path == "/api/door-events":
+            mon = getattr(GLOBAL_ENGINE, "door_monitor", None)
+            door_cfg = dict(GLOBAL_ENGINE.cfg.get("door_monitor") or {})
+            data = {
+                "enabled": mon is not None,
+                "line_x": door_cfg.get("line_x"),
+                "zone": door_cfg.get("zone"),
+                "events": mon.recent() if mon is not None else [],
+                "sessions": mon.sessions_meta() if mon is not None else [],
+                "door_motion": round(mon.door_motion, 2) if mon is not None else 0.0,
             }
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
