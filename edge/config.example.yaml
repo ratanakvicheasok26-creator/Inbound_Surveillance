@@ -126,6 +126,25 @@ face_match_threshold: 0.60
 telegram_bot_token: ""
 telegram_chat_id: ""
 
+# Spa shoe-change / flip-flop station: visitors taking off street shoes and
+# putting on indoor flip-flops at the rack is a strong CUSTOMER signal (staff
+# never change footwear there). The monitor fires a customer_shoe_change event
+# after a visitor spends >= confirm_seconds in a reach-down posture (hands at
+# feet) with their bbox center inside the zone.
+# zone: normalized [x1, y1, x2, y2] covering the shoe bench / rack area.
+# wrist_ankle_dist: hands-feet distance as a fraction of the frame diagonal.
+# require_person: also require head + shoulder keypoints (rejects shoe clutter).
+shoe_change_zone:
+  enabled: false
+  zone: [0.40, 0.40, 0.70, 1.0]
+  wrist_ankle_dist: 0.06
+  confirm_seconds: 1.5
+  cooldown_seconds: 30.0
+  leave_seconds: 4.0
+  kpt_conf: 0.30
+  require_person: true
+  proofs: true
+
 # Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.
 # Default: on for massage / a deployed "Complaint intake" pipeline node.
 # Set enabled: true|false to override that. Garage stays off unless you opt in.

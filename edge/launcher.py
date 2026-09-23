@@ -271,6 +271,7 @@ try:
         upsert_minute,
     )
     from door_gate import DoorTrafficMonitor
+    from shoe_gate import ShoeChangeMonitor
     from complaint_service import ComplaintMonitoringService
     from face_id import (
         create_identity,
@@ -1263,6 +1264,7 @@ class LiveStreamEngine:
         self.staff_memory = StaffMemory(self.cfg.get("bays"), workplace=wp)
         self.visit_monitor.staff_memory = self.staff_memory
         self.door_monitor: DoorTrafficMonitor | None = None
+        self.shoe_monitor: ShoeChangeMonitor | None = None
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
         self.complaint_service = None
@@ -3463,6 +3465,16 @@ class LiveStreamEngine:
                     print("[DoorGate] Door traffic monitoring enabled")
                 else:
                     self.door_monitor = None
+                shoe_cfg = dict(cfg.get("shoe_change_zone") or {})
+                if shoe_cfg.get("enabled"):
+                    self.shoe_monitor = ShoeChangeMonitor(
+                        shoe_cfg,
+                        conn=self.conn,
+                        proofs_root=DATA_DIR / "proofs",
+                    )
+                    print("[ShoeGate] Shoe-change customer monitor enabled")
+                else:
+                    self.shoe_monitor = None
                 rotate_deg, flip = resolve_orient(cfg.get("rotate"), source, packet.frame, cfg.get("flip"))
                 first_oriented = orient_frame(packet.frame, rotate_deg, flip)
                 h0, w0 = first_oriented.shape[:2]
@@ -3646,6 +3658,20 @@ class LiveStreamEngine:
                             self.door_monitor.annotate(frame, w, h)
                         finally:
                             self.door_monitor.conn = door_conn
+                    if self.shoe_monitor is not None:
+                        shoe_conn = self.shoe_monitor.conn
+                        if not flags["persist"]:
+                            self.shoe_monitor.conn = None
+                        try:
+                            _shoe_events = self.shoe_monitor.update(
+                                last_accepted, w, h, now, frame=frame, stamp=datetime.now()
+                            )
+                            self.shoe_monitor.annotate(frame, w, h)
+                            for det in last_accepted:
+                                if getattr(det, "is_customer", False):
+                                    det.identity = getattr(det, "identity", None) or "Customer"
+                        finally:
+                            self.shoe_monitor.conn = shoe_conn
                     if flags["customer_visits"]:
                         prev_conn = self.visit_monitor.conn
                         if not flags["persist"]:
@@ -4424,6 +4450,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 "events": mon.recent() if mon is not None else [],
                 "sessions": mon.sessions_meta() if mon is not None else [],
                 "door_motion": round(mon.door_motion, 2) if mon is not None else 0.0,
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode("utf-8"))
+
+        elif parsed.path == "/api/shoe-events":
+            mon = getattr(GLOBAL_ENGINE, "shoe_monitor", None)
+            shoe_cfg = dict(GLOBAL_ENGINE.cfg.get("shoe_change_zone") or {})
+            data = {
+                "enabled": mon is not None,
+                "zone": shoe_cfg.get("zone"),
+                "events": mon.recent() if mon is not None else [],
+                "flagged": mon.flagged_count() if mon is not None else 0,
             }
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
