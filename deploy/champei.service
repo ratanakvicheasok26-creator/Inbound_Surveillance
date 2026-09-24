@@ -1,0 +1,16 @@
+[Unit]
+Description=Champei Spa Edge Intelligence Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ratharo69
+WorkingDirectory=/home/ratharo69/Downloads/GitHub Pulls/Inbound_Surveillance-1/edge
+ExecStart=/home/ratharo69/Downloads/GitHub Pulls/Inbound_Surveillance-1/venv/bin/python run_champei.py
+Restart=always
+RestartSec=5s
+EnvironmentFile=/home/ratharo69/Downloads/GitHub Pulls/Inbound_Surveillance-1/.env
+
+[Install]
+WantedBy=multi-user.target
