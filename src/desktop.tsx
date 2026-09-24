@@ -147,7 +147,7 @@ async function probe(port: number): Promise<boolean> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 800);
   try {
-    const res = await fetch(`${engineBaseUrl(port)}/api/telemetry`, {
+    const res = await fetch(`${engineBaseUrl(port)}/api/public-config`, {
       signal: controller.signal,
       cache: "no-store",
     });

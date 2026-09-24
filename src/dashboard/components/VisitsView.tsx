@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { engineBaseUrl } from "../../engine-url";
+import { engineApi } from "../../lib/engineApi";
 import type { DetailedVisitReport, DetailedVisitSummary, VisitorProfile, OpenSessionItem } from "../types";
 
 function defaultSummary(): DetailedVisitSummary {
@@ -68,7 +69,7 @@ export function VisitsView() {
 
   async function loadData() {
     try {
-      const res = await fetch(`${engine}/api/workplace/visits/detailed?range=today`, { cache: "no-store" });
+      const res = await engineApi(`/api/workplace/visits/detailed?range=today`, { cache: "no-store" });
       if (res.ok) {
         const data = (await res.json()) as DetailedVisitReport;
         if (data && typeof data === "object") {
@@ -98,7 +99,7 @@ export function VisitsView() {
       return;
     }
     try {
-      const res = await fetch(`${engine}/api/workplace/visits/reset`, {
+      const res = await engineApi(`/api/workplace/visits/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -119,7 +120,7 @@ export function VisitsView() {
     const next = prompt("Enter a customer name or label (e.g. 'Alice Regular', 'John VIP'):", currentAlias || "");
     if (next === null) return;
     try {
-      const res = await fetch(`${engine}/api/workplace/visits/alias`, {
+      const res = await engineApi(`/api/workplace/visits/alias`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subject_id: subjectId, alias: next.trim() }),

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { engineBaseUrl } from "../../engine-url";
+import { engineApi } from "../../lib/engineApi";
 import { engineBayToStation, type StationBay } from "../bay-names";
 import { cameraById, confidenceLabel, formatRelative } from "../format";
 import { holdLabel, holdReason, lastAlertByCamera } from "../rules";
@@ -101,7 +102,7 @@ export function LiveView() {
       const controller = new AbortController();
       const abortTimer = window.setTimeout(() => controller.abort(), 1200);
       try {
-        const res = await fetch(`${engine}/api/telemetry`, { cache: "no-store", signal: controller.signal });
+        const res = await engineApi(`/api/telemetry`, { cache: "no-store", signal: controller.signal });
         if (cancelled) return;
         if (!res.ok) {
           setEngineLive(false);
@@ -131,7 +132,7 @@ export function LiveView() {
     async function pump() {
       while (!cancelled) {
         try {
-          const res = await fetch(`${engine}/api/frame.jpeg?t=${Date.now()}`, { cache: "no-store" });
+          const res = await engineApi(`/api/frame.jpeg?t=${Date.now()}`, { cache: "no-store" });
           if (cancelled) break;
           if (res.ok) {
             const blob = await res.blob();
@@ -183,7 +184,7 @@ export function LiveView() {
 
   async function persistBays(next: StationBay[]) {
     try {
-      const res = await fetch(`${engine}/api/workplace/zones`, {
+      const res = await engineApi(`/api/workplace/zones`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bays: next }),
