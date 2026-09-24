@@ -237,7 +237,7 @@ def run_simulation(*, dry_run: bool, db_path: Path) -> int:
         return _fail(step, title, exc)
 
     # --- STEP 5 ---
-    step, title = 5, "EARLY DEPARTURE ANOMALY (<20 MINS)"
+    step, title = 5, "EARLY DEPARTURE ANOMALY (<35 MINS)"
     try:
         _banner(step, title)
         before_calls = len(_event_calls(bot)) if dry_run else 0
@@ -258,7 +258,7 @@ def run_simulation(*, dry_run: bool, db_path: Path) -> int:
                 f"early_departure not dispatched: {new_calls!r}",
             )
         mins = int(round(float(result.get("duration_seconds") or 0) / 60.0))
-        _ok(f"[ALERT] Early departure anomaly detected ({mins}m < 20m threshold).")
+        _ok(f"[ALERT] Early departure anomaly detected ({mins}m < 35m threshold).")
     except Exception as exc:
         return _fail(step, title, exc)
 

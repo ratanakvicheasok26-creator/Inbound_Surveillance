@@ -7,6 +7,7 @@ runs a mock heartbeat (--mock) or wraps launcher.start_unified_server (default).
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
@@ -29,7 +30,7 @@ def _verify_wal(db_path: Path) -> str:
         mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0] or "").lower()
         if mode != "wal":
             raise SystemExit(f"[run_champei] expected WAL journal_mode, got {mode!r}")
-        print(f"[run_champei] sqlite journal_mode={mode} path={db_path}", flush=True)
+        print(f"[DB] SQLite WAL mode confirmed: {mode}", flush=True)
         return mode
     finally:
         conn.close()
@@ -68,19 +69,32 @@ def _scorecard_loop(
 def _mock_loop(stop_event: threading.Event) -> None:
     print("[run_champei] mock mode — heartbeat (Ctrl-C / SIGTERM to stop)", flush=True)
     while not stop_event.is_set():
-        print(f"[run_champei] heartbeat {datetime.now().isoformat(timespec='seconds')}", flush=True)
+        print(
+            f"[run_champei] heartbeat {datetime.now().isoformat(timespec='seconds')}",
+            flush=True,
+        )
         stop_event.wait(60.0)
 
 
 def main(argv: list[str] | None = None) -> int:
+    default_branch = os.environ.get("BRANCH_ID", "champei-pp-01").strip() or "champei-pp-01"
+    try:
+        default_port = int(os.environ.get("HUB_PORT", "8000") or "8000")
+    except ValueError:
+        default_port = 8000
+
     parser = argparse.ArgumentParser(description="Champei Spa edge intelligence daemon")
     parser.add_argument(
         "--mock",
         action="store_true",
         help="Skip camera hub; run heartbeat + Telegram controller only",
     )
-    parser.add_argument("--port", type=int, default=8765, help="Hub HTTP port")
-    parser.add_argument("--branch", default="champei-pp-01", help="Branch id for scorecards")
+    parser.add_argument("--port", type=int, default=default_port, help="Hub HTTP port")
+    parser.add_argument(
+        "--branch",
+        default=default_branch,
+        help="Branch id for scorecards",
+    )
     args = parser.parse_args(argv)
 
     # Import launcher early so load_dotenv_files() populates TELEGRAM_* from .env.
@@ -108,8 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         daemon=False,
     )
     tg_thread.start()
+    print("[run_champei] Telegram controller started", flush=True)
     score_thread.start()
-    print("[run_champei] Telegram controller + scorecard scheduler started", flush=True)
+    print("[run_champei] Scorecard scheduler started", flush=True)
 
     def _stop_background(*_args: object) -> None:
         stop_event.set()

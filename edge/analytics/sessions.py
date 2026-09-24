@@ -16,7 +16,7 @@ from paths import data_dir
 from telegram_out import TelegramOut
 from visitor_registry import get_visitor_display_name
 
-EARLY_DEPARTURE_SECONDS = 1200  # 20 minutes
+EARLY_DEPARTURE_SECONDS = 2100  # 35 minutes
 
 
 def _default_db_path() -> Path:
