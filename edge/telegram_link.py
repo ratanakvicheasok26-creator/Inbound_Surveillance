@@ -362,7 +362,7 @@ class TelegramLinkService:
                 )
                 self._reply(
                     chat_id,
-                    f"This chat is already linked to {name}. Garage alerts and daily scorecards will arrive here.",
+                    f"This chat is already linked to {name}. Alerts and daily summaries will arrive here.",
                 )
                 return True
 
@@ -393,7 +393,7 @@ class TelegramLinkService:
         name = pending.display_name
         self._reply(
             chat_id,
-            f"Linked to {name}. Garage alerts and daily scorecards will arrive here. "
+            f"Linked to {name}. Alerts and daily summaries will arrive here. "
             "If you connect a different Telegram later, this chat will stop receiving alerts.",
         )
         return True

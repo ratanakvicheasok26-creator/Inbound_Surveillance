@@ -12,6 +12,10 @@
 venue: Demo Garage
 garage_name: Demo Garage
 workplace_type: garage
+# Spa / multi-branch installs set these (ignored by garage tooling until wired):
+# branch_id: champei-pp-01
+# store_customer_avatars: false
+# enable_face_id: false
 source: 0
 
 # Named cameras added in the hub. Empty until the operator saves one.
@@ -19,7 +23,8 @@ cameras: []
 # Example dual-stream camera (AI sub-stream + evidence main stream):
 # cameras:
 #   - id: cam-01
-#     name: Front Lift Bay
+#     name: Front Desk
+#     camera_role: front_desk
 #     source: rtsp://USER:PASS@192.168.1.64:554/Streaming/Channels/102
 #     main_source: rtsp://USER:PASS@192.168.1.64:554/Streaming/Channels/101
 #     protocol: rtsp
@@ -109,12 +114,16 @@ operating_hours:
 
 # Local face ID (YuNet + SFace). Put staff photos in faces/<Name>/*.jpg
 # (several angles help). Unknown people overlay as Customer.
+# Massage / spa: keep enable_face_id false and store_customer_avatars false
+# (embeddings + opaque visitor_* ids only — no visitor JPEGs).
 enable_face_id: true
+store_customer_avatars: true
 faces_dir: "faces"
 models_dir: "models"
 face_match_threshold: 0.60
 
-telegram_bot_token: "8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU"
+# Prefer env vars TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (never commit real tokens).
+telegram_bot_token: ""
 telegram_chat_id: ""
 
 # Customer Complaint Detection (audio) — Silero VAD + Khmer Whisper + Ollama.

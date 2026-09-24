@@ -140,8 +140,6 @@ DEFAULT_SUPABASE_ANON_KEY = (
     "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtZXB3anl3b2Jvd2t0ZG1rdXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NDA0MDYsImV4cCI6MjEwNDMxNjQwNn0."
     "u_hg9uXPSK7AE1kD3ol9LUmYgyddVWrELACWh5Z9zr4"
 )
-DEFAULT_TELEGRAM_BOT_TOKEN = "8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU"
-
 
 def load_dotenv_files() -> None:
     """Load KEY=VALUE pairs from .env without overriding a real environment."""
@@ -324,7 +322,7 @@ try:
     from sensors.wifi_tracker import WifiTracker, normalize_wifi_devices, presence_status
     from service_patterns import KNOWLEDGE_BASE, evaluate_completed_vehicle_job
     from telegram_link import TelegramLinkService
-    from telegram_out import TelegramOut, normalize_chat_id
+    from telegram_out import TelegramOut, normalize_chat_id, resolve_telegram_credentials
     from tracker import PersonTracker, run_identity_pipeline
     from vehicle import VehicleDetection, extract_vehicle_detections
 except Exception as _boot_err:
@@ -388,20 +386,23 @@ def read_config() -> dict[str, Any]:
     path = get_config_path()
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    token = (
-        os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-        or str(data.get("telegram_bot_token") or "").strip()
-        or DEFAULT_TELEGRAM_BOT_TOKEN
+    token, chat = resolve_telegram_credentials(
+        data.get("telegram_bot_token"),
+        data.get("telegram_chat_id"),
     )
-    chat = normalize_chat_id(os.environ.get("TELEGRAM_CHAT_ID", data.get("telegram_chat_id") or ""))
     data["telegram_bot_token"] = token
     data["telegram_chat_id"] = chat
-    if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
-        data["telegram_bot_token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     data["telegram_bot_configured"] = bool(data["telegram_bot_token"])
     data["telegram_bot_username"] = str(data.get("telegram_bot_username") or "")
 
     data["workplace_type"] = parse_workplace_id(data.get("workplace_type"))
+    data["branch_id"] = str(data.get("branch_id") or "").strip()
+    if data["workplace_type"] == "massage":
+        data["enable_face_id"] = bool(data.get("enable_face_id", False))
+        data["store_customer_avatars"] = bool(data.get("store_customer_avatars", False))
+    else:
+        data["enable_face_id"] = bool(data.get("enable_face_id", True))
+        data["store_customer_avatars"] = bool(data.get("store_customer_avatars", True))
     data["cameras"] = _normalize_cameras(
         data.get("cameras"),
         workplace=data["workplace_type"],
@@ -447,6 +448,9 @@ _SETTINGS_KEYS = (
     "venue",
     "garage_name",
     "workplace_type",
+    "branch_id",
+    "store_customer_avatars",
+    "enable_face_id",
     "open_time",
     "close_time",
     "absent_seconds",
@@ -569,6 +573,7 @@ def _normalize_cameras(raw: Any, workplace: Any = None, default_absent: Any = No
                 "ml_enabled": bool(item.get("ml_enabled", True)),
                 "trigger_mode": str(item.get("trigger_mode") or "roi_state_change"),
                 "absent_seconds": clamp_absent_seconds(item.get("absent_seconds"), fallback),
+                "camera_role": str(item.get("camera_role") or "").strip(),
             }
         )
     return out
@@ -647,6 +652,11 @@ def upsert_camera(cfg: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]
         "ml_enabled": bool(fields.get("ml_enabled", existing.get("ml_enabled", True))),
         "trigger_mode": trigger_mode,
         "absent_seconds": absent,
+        "camera_role": str(
+            fields.get("camera_role")
+            if "camera_role" in fields
+            else existing.get("camera_role") or ""
+        ).strip(),
     }
     for i, cam in enumerate(cameras):
         if cam["id"] == cid:
@@ -1234,11 +1244,21 @@ class LiveStreamEngine:
             under_car_grace_seconds=resolve_under_car_grace_seconds(self.cfg),
         )
         wp = parse_workplace_id(self.cfg.get("workplace_type"))
+        active_role = ""
+        active_cid = str(self.cfg.get("active_camera_id") or "")
+        for cam in self.cfg.get("cameras") or []:
+            if isinstance(cam, dict) and str(cam.get("id") or "") == active_cid:
+                active_role = str(cam.get("camera_role") or "").strip()
+                break
         self.visit_monitor = CustomerVisitMonitor(
             self.cfg.get("bays"),
             workplace=wp,
             confirm_seconds=float(self.cfg.get("occupy_confirm_seconds") or 1.0),
             clear_seconds=float(self.cfg.get("occupy_clear_seconds") or 4.0),
+            store_customer_avatars=bool(self.cfg.get("store_customer_avatars", False)),
+            branch_id=str(self.cfg.get("branch_id") or ""),
+            camera_role=active_role,
+            telegram_out=self.bot,
         )
         self.staff_memory = StaffMemory(self.cfg.get("bays"), workplace=wp)
         self.visit_monitor.staff_memory = self.staff_memory
@@ -1294,6 +1314,28 @@ class LiveStreamEngine:
             return worker.grabber
         return self._fallback_grabber
 
+    def _sync_visit_monitor_site(self, active_camera: dict[str, Any] | None = None) -> None:
+        """Keep visit monitor privacy + branch/role + Telegram wiring in sync with cfg."""
+        monitor = getattr(self, "visit_monitor", None)
+        if monitor is None:
+            return
+        cam = active_camera
+        if cam is None:
+            active_cid = str(self.cfg.get("active_camera_id") or "")
+            for item in self.cfg.get("cameras") or []:
+                if isinstance(item, dict) and str(item.get("id") or "") == active_cid:
+                    cam = item
+                    break
+        role = str((cam or {}).get("camera_role") or "").strip()
+        wp = parse_workplace_id(self.cfg.get("workplace_type"))
+        store_avatars = bool(self.cfg.get("store_customer_avatars", wp != "massage"))
+        monitor.configure_site(
+            branch_id=str(self.cfg.get("branch_id") or ""),
+            camera_role=role,
+            store_customer_avatars=store_avatars,
+            telegram_out=getattr(self, "bot", None),
+            workplace=wp,
+        )
 
     def _on_ai_verdict_received(self, verdict: AIAuditVerdict) -> None:
         try:
@@ -1677,6 +1719,7 @@ class LiveStreamEngine:
                 wp = parse_workplace_id(self.cfg.get("workplace_type"))
                 self.visit_monitor.set_zones(active_bays, workplace=wp)
                 self.staff_memory.set_zones(active_bays, workplace=wp)
+                self._sync_visit_monitor_site(active_camera=active)
             except Exception as zone_err:
                 print(f"[connect_camera] zone wiring failed: {zone_err}", flush=True)
             self.bay_telemetry = self.bay_manager.telemetry()
@@ -1938,6 +1981,9 @@ class LiveStreamEngine:
                     self.cfg.get("telegram_bot_token", ""),
                     self.cfg.get("telegram_chat_id", ""),
                 )
+                self._sync_visit_monitor_site()
+            if "branch_id" in updates or "store_customer_avatars" in updates or "workplace_type" in updates:
+                self._sync_visit_monitor_site()
             if "telegram_bot_token" in updates:
                 self.telegram_links.configure(self.cfg.get("telegram_bot_token", ""))
             if "telegram_chat_id" in updates:
@@ -3764,7 +3810,25 @@ class LiveStreamEngine:
                             last_state.occupied,
                         )
                         if last_state.occupied and not has_opened_today(self.conn, stamp.date()):
-                            insert_event(self.conn, "opened", stamp)
+                            insert_event(
+                                self.conn,
+                                "opened",
+                                stamp,
+                                branch_id=str(self.cfg.get("branch_id") or "") or None,
+                                camera_role=str(
+                                    next(
+                                        (
+                                            c.get("camera_role")
+                                            for c in (self.cfg.get("cameras") or [])
+                                            if isinstance(c, dict)
+                                            and str(c.get("id") or "") == str(self.cfg.get("active_camera_id") or "")
+                                        ),
+                                        "",
+                                    )
+                                    or ""
+                                )
+                                or None,
+                            )
 
                     if last_state.should_alert:
                         primary = snapshots[0] if snapshots else None
@@ -3784,7 +3848,26 @@ class LiveStreamEngine:
                                 proof_frame = still
                         path = save_proof(proof_frame, roi_px, stamp, proofs, kind="idle_bay")
                         if self.conn is not None:
-                            insert_event(self.conn, "abandoned", stamp, str(path))
+                            insert_event(
+                                self.conn,
+                                "abandoned",
+                                stamp,
+                                str(path),
+                                branch_id=str(self.cfg.get("branch_id") or "") or None,
+                                camera_role=str(
+                                    next(
+                                        (
+                                            c.get("camera_role")
+                                            for c in (self.cfg.get("cameras") or [])
+                                            if isinstance(c, dict)
+                                            and str(c.get("id") or "") == str(self.cfg.get("active_camera_id") or "")
+                                        ),
+                                        "",
+                                    )
+                                    or ""
+                                )
+                                or None,
+                            )
                         caption = (
                             f"{venue}: no active wrench time "
                             f"for {int(absent)}s.\n{stamp.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -5057,14 +5140,27 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                         "STAFF IN ROI" if GLOBAL_ENGINE.is_occupied else "EMPTY"
                     )
                     identified = ", ".join(GLOBAL_ENGINE.identities) or "none"
-                    caption = (
-                        f"🔧 *Inbound Garage Snapshot*\n\n"
-                        f"🏢 *Shop:* {venue}\n"
-                        f"⏰ *Timestamp:* {now_str}\n"
-                        f"🛠️ *Floor Status:* {status_str}\n"
-                        f"👥 *Detections:* {GLOBAL_ENGINE.person_count} Person(s)\n"
-                        f"🪪 *Identified:* {identified}\n"
-                    )
+                    wp = str(GLOBAL_ENGINE.cfg.get("workplace_type") or "garage").strip().lower()
+                    branch = str(GLOBAL_ENGINE.cfg.get("branch_id") or "").strip()
+                    if wp == "massage":
+                        title = f"[{branch}] Live Snapshot" if branch else "Inbound Snapshot"
+                        caption = (
+                            f"📸 *{title}*\n\n"
+                            f"🏢 *Venue:* {venue}\n"
+                            f"⏰ *Timestamp:* {now_str}\n"
+                            f"📍 *Status:* {status_str}\n"
+                            f"👥 *Guests detected:* {GLOBAL_ENGINE.person_count}\n"
+                            f"🪪 *Identified:* {identified}\n"
+                        )
+                    else:
+                        caption = (
+                            f"🔧 *Inbound Garage Snapshot*\n\n"
+                            f"🏢 *Shop:* {venue}\n"
+                            f"⏰ *Timestamp:* {now_str}\n"
+                            f"🛠️ *Floor Status:* {status_str}\n"
+                            f"👥 *Detections:* {GLOBAL_ENGINE.person_count} Person(s)\n"
+                            f"🪪 *Identified:* {identified}\n"
+                        )
 
                     url = f"https://api.telegram.org/bot{token}/sendPhoto"
                     try:

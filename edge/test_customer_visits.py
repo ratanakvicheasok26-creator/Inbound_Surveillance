@@ -343,6 +343,73 @@ class CustomerVisitMonitorTests(unittest.TestCase):
         empty_month = get_visits_calendar_summary(self.conn, month_prefix="2025-01")
         self.assertEqual(len(empty_month), 0)
 
+    def test_massage_never_writes_visitor_avatars(self) -> None:
+        import numpy as np
+
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        frame[:] = (40, 40, 40)
+        subject = "visitor_privacy"
+        self.monitor.store_customer_avatars = False
+        self.monitor.workplace = "massage"
+        det = _det(40, 40, _feat(3), track_id=9)
+        self.monitor._maybe_save_avatar(subject, det, frame, 1000.0)
+        self.assertNotIn(subject, self.monitor._saved_avatars)
+
+        # Massage hard-gates even if store_customer_avatars is True.
+        self.monitor.workplace = "massage"
+        self.monitor.store_customer_avatars = True
+        self.monitor._maybe_save_avatar(subject, det, frame, 1001.0)
+        self.assertNotIn(subject, self.monitor._saved_avatars)
+
+    def test_wait_sla_alerts_once_with_cooldown(self) -> None:
+        class _Bot:
+            def __init__(self) -> None:
+                self.enabled = True
+                self.messages: list[str] = []
+
+            def send_message(self, text: str) -> bool:
+                self.messages.append(text)
+                return True
+
+        bot = _Bot()
+        monitor = CustomerVisitMonitor(
+            [
+                {"id": "waiting", "name": "Waiting", "roi": [0.0, 0.0, 1.0, 1.0], "type": "waiting"},
+                {"id": "reception", "name": "Reception", "roi": [0.0, 0.0, 0.01, 0.01], "type": "reception"},
+            ],
+            confirm_seconds=0.01,
+            clear_seconds=0.01,
+            grace_seconds=0.05,
+            match_threshold=0.5,
+            conn=self.conn,
+            workplace="massage",
+            store_customer_avatars=False,
+            branch_id="champei-pp-01",
+            camera_role="front_desk",
+            telegram_out=bot,
+            wait_sla_seconds=180.0,
+            wait_sla_cooldown_seconds=600.0,
+        )
+        feat = _feat(42)
+        t0 = 5_000.0
+        monitor.update([_det(80, 80, feat, track_id=1)], 200, 200, now=t0)
+        self.assertEqual(bot.messages, [])
+        monitor.update([_det(80, 80, feat, track_id=1)], 200, 200, now=t0 + 179.0)
+        self.assertEqual(bot.messages, [])
+        monitor.update([_det(80, 80, feat, track_id=1)], 200, 200, now=t0 + 181.0)
+        self.assertEqual(len(bot.messages), 1)
+        self.assertIn("champei-pp-01", bot.messages[0])
+        self.assertIn("WAIT BOTTLENECK", bot.messages[0])
+        # Cooldown: same subject should not spam immediately.
+        monitor.update([_det(80, 80, feat, track_id=1)], 200, 200, now=t0 + 200.0)
+        self.assertEqual(len(bot.messages), 1)
+        row = self.conn.execute(
+            "SELECT event_type, branch_id, camera_role FROM events WHERE event_type = 'wait_bottleneck'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["branch_id"], "champei-pp-01")
+        self.assertEqual(row["camera_role"], "front_desk")
+
 
 if __name__ == "__main__":
     unittest.main()

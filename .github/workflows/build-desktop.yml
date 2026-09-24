@@ -43,7 +43,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtZXB3anl3b2Jvd2t0ZG1rdXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NDA0MDYsImV4cCI6MjEwNDMxNjQwNn0.u_hg9uXPSK7AE1kD3ol9LUmYgyddVWrELACWh5Z9zr4' }}
           FIREWORKS_API_KEY=${{ secrets.FIREWORKS_API_KEY || '' }}
           FIREWORKS_MODEL=${{ secrets.FIREWORKS_MODEL || 'accounts/fireworks/models/deepseek-v4-flash-vision-exp' }}
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN || '8987540090:AAEntu6IaceRsrnNl0Eow7ZrOYHBR90FkZU' }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID || '' }}
           EOF
           cp .env edge/.env
