@@ -2220,9 +2220,9 @@ class LiveStreamEngine:
                 try:
                     import sqlite3
                     db_path = DATA_DIR / "events.db"
-                    conn = sqlite3.connect(str(db_path), timeout=5.0)
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
                     try:
-                        conn.execute("PRAGMA busy_timeout = 5000")
+                        conn.execute("PRAGMA busy_timeout = 30000")
                         close_bay_sessions(conn, bids, datetime.now())
                     finally:
                         conn.close()

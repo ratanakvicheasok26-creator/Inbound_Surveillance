@@ -43,9 +43,10 @@ def default_db_path() -> Path:
 def connect_registry(db_path: Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path is not None else default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     ensure_visitor_meta(conn)
     return conn
 
@@ -118,11 +119,11 @@ def set_visitor_alias(
     vid = str(visitor_id or "").strip()
     if not vid:
         raise ValueError("visitor_id is required")
-    name = str(alias or "").strip()
+    name = str(alias or "").strip()[:64]
     if not name:
         raise ValueError("alias/name is required")
-    tier = str(vip_tier or "Standard").strip() or "Standard"
-    note = str(notes or "").strip()
+    tier = str(vip_tier or "Standard").strip()[:32] or "Standard"
+    note = str(notes or "").strip()[:256]
 
     own = conn is None
     db = conn if conn is not None else connect_registry(db_path)
