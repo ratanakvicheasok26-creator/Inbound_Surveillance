@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         target=controller.run_loop,
         kwargs={"stop_event": stop_event},
         name="telegram-controller",
-        daemon=False,
+        daemon=True,
     )
     score_thread = threading.Thread(
         target=_scorecard_loop,
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             "db_path": db_path,
         },
         name="daily-scorecard",
-        daemon=False,
+        daemon=True,
     )
     tg_thread.start()
     print("[run_champei] Telegram controller started", flush=True)
@@ -144,8 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         stop_event.set()
     finally:
         stop_event.set()
-        tg_thread.join(timeout=5.0)
-        score_thread.join(timeout=5.0)
+        tg_thread.join(timeout=2.0)
+        score_thread.join(timeout=2.0)
         print("[run_champei] shutdown complete", flush=True)
 
     return 0

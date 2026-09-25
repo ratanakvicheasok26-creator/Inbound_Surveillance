@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { engineApi } from "../../lib/engineApi";
 import { ScanAndGoLoader } from "../../components/ui/scan-and-go-loader";
 import type {
   CameraProtocol,
@@ -138,7 +139,7 @@ export function DiscoveryModal({ open, engineBase, onClose, onConnected }: Disco
 
     async function poll() {
       try {
-        const res = await fetch(`${base}/api/discovery/results`, { cache: "no-store" });
+        const res = await engineApi(`/api/discovery/results`, { cache: "no-store" }, base);
         if (cancelled) return;
         if (!res.ok) {
           setStatus("error");
@@ -164,11 +165,11 @@ export function DiscoveryModal({ open, engineBase, onClose, onConnected }: Disco
       setDevices([]);
       setError("");
       try {
-        const res = await fetch(`${base}/api/discovery/scan`, {
+        const res = await engineApi(`/api/discovery/scan`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: "{}",
-        });
+        }, base);
         const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
         if (cancelled) return;
         if (!res.ok || data.success === false) {
@@ -226,11 +227,11 @@ export function DiscoveryModal({ open, engineBase, onClose, onConnected }: Disco
     setConnectError("");
     const base = engineBase.replace(/\/$/, "");
     try {
-      const saveRes = await fetch(`${base}/api/cameras`, {
+      const saveRes = await engineApi(`/api/cameras`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      }, base);
       const saveData = (await saveRes.json().catch(() => ({}))) as {
         success?: boolean;
         error?: string;
@@ -243,7 +244,7 @@ export function DiscoveryModal({ open, engineBase, onClose, onConnected }: Disco
         return;
       }
       const cameraId = saveData.camera?.id || saveData.active_camera_id || "";
-      const connectRes = await fetch(`${base}/api/connect-stream`, {
+      const connectRes = await engineApi(`/api/connect-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -258,7 +259,7 @@ export function DiscoveryModal({ open, engineBase, onClose, onConnected }: Disco
           credentials: payload.credentials,
           xaddrs: payload.xaddrs,
         }),
-      });
+      }, base);
       const connectData = (await connectRes.json().catch(() => ({}))) as { success?: boolean; error?: string };
       if (connectData.success === false) {
         setConnectError(connectData.error || "Could not connect stream.");

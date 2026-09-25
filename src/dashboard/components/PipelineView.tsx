@@ -18,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { PROTOCOLS } from "../account";
 import { useAccount } from "../auth";
 import { engineBaseUrl } from "../../engine-url";
+import { engineApi } from "../../lib/engineApi";
 import type { Json } from "../../lib/database.types";
 import { defaultNodeData, GROUP_ACCENT, GROUP_LABELS, GROUP_ORDER, NODE_CATALOG } from "../../pipeline/catalog";
 import {
@@ -188,7 +189,7 @@ function PipelineEditor() {
     setError("");
     try {
       await savePipelineGraph(graph as unknown as Json);
-      const res = await fetch(`${engine}/api/pipeline`, {
+      const res = await engineApi(`/api/pipeline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(graph),

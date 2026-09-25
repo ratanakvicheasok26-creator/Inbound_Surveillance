@@ -32,6 +32,7 @@ import {
 } from "./account";
 import type { Json } from "../lib/database.types";
 import { parseWorkplaceId, type WorkplaceId } from "../workplaces";
+import { engineApi, setEngineAuthToken } from "../lib/engineApi";
 
 type AuthStatus = "loading" | "ready";
 
@@ -78,6 +79,26 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
+  const applySession = (next: Session | null) => {
+    setSession(next);
+    setEngineAuthToken(next?.access_token ?? null);
+    void (async () => {
+      try {
+        if (next?.access_token) {
+          await engineApi("/api/auth-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session: next }),
+          });
+        } else {
+          await engineApi("/api/auth-session", { method: "DELETE" });
+        }
+      } catch {
+        // engine offline; session sync is best-effort
+      }
+    })();
+  };
+
   useEffect(() => {
     if (!supabaseConfigured) {
       setStatus("ready");
@@ -86,11 +107,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-      setSession(data.session);
+      applySession(data.session);
       setStatus("ready");
     });
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
-      setSession(next);
+      applySession(next);
       if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
     });
     return () => {

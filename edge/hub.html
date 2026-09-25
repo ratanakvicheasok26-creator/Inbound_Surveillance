@@ -1571,6 +1571,16 @@
     let hubAccountUser = null;
     let hubAccountProfile = null;
     let telegramLinkPollTimer = null;
+    let hubAuthToken = null;
+
+    function hubFetch(path, opts) {
+      const init = opts || {};
+      init.headers = init.headers || {};
+      if (hubAuthToken && typeof init.headers === 'object') {
+        init.headers['Authorization'] = 'Bearer ' + hubAuthToken;
+      }
+      return fetch(path, init);
+    }
 
     function greetingText() {
       const h = new Date().getHours();
@@ -1716,7 +1726,7 @@
       let avatar = profile ? await signedAvatarUrl(profile.avatar_path) : null;
       if (!avatar) {
         try {
-          const checkAv = await fetch('/api/profile/avatar', { method: 'HEAD', cache: 'no-cache' });
+          const checkAv = await hubFetch('/api/profile/avatar', { method: 'HEAD', cache: 'no-cache' });
           if (checkAv.ok) avatar = '/api/profile/avatar?t=' + Date.now();
         } catch (_) {}
       }
@@ -1738,7 +1748,7 @@
         const chatInput = document.getElementById('tg-chat-input');
         if (chatInput && !chatInput.value) chatInput.value = profile.telegram_chat_id;
         try {
-          await fetch('/api/settings', {
+          await hubFetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ telegram_chat_id: profile.telegram_chat_id }),
@@ -1754,12 +1764,13 @@
     async function enterHub(session) {
       if (!session || enteringHub) return;
       enteringHub = true;
+      hubAuthToken = session.access_token || null;
       try {
         const shouldRemember = localStorage.getItem('hub_remember_me') !== '0';
         // Sync session to local engine backend for persistent login across desktop app restarts if remember is enabled
         if (shouldRemember) {
           try {
-            await fetch('/api/auth-session', {
+            await hubFetch('/api/auth-session', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ session }),
@@ -1767,7 +1778,7 @@
           } catch (_) {}
         } else {
           try {
-            await fetch('/api/auth-session', { method: 'DELETE' });
+            await hubFetch('/api/auth-session', { method: 'DELETE' });
           } catch (_) {}
         }
 
@@ -1916,10 +1927,10 @@
 
     async function signOutAccount() {
       try {
-        await fetch('/api/disconnect', { method: 'POST' });
+        await hubFetch('/api/disconnect', { method: 'POST' });
       } catch (_) {}
       try {
-        await fetch('/api/auth-session', { method: 'DELETE' });
+        await hubFetch('/api/auth-session', { method: 'DELETE' });
       } catch (_) {}
       try {
         localStorage.removeItem('hub_remembered_email');
@@ -1948,7 +1959,7 @@
 
         let cfg = {};
         try {
-          const res = await fetch('/api/public-config', { cache: 'no-store' });
+          const res = await hubFetch('/api/public-config', { cache: 'no-store' });
           if (res.ok) cfg = await res.json();
         } catch (_) {}
 
@@ -1959,7 +1970,7 @@
           showAuthMessage('Supabase library failed to load. Please verify network connectivity.', true);
           // Even if Supabase script failed (e.g. offline mode), check local session so operator can still run
           try {
-            const sessRes = await fetch('/api/auth-session', { cache: 'no-store' });
+            const sessRes = await hubFetch('/api/auth-session', { cache: 'no-store' });
             if (sessRes.ok) {
               const sessData = await sessRes.json();
               if (sessData && sessData.session) {
@@ -2010,7 +2021,7 @@
 
         // 2. If webview session was cleared (restart / port reuse), check local engine session persistence
         try {
-          const sessRes = await fetch('/api/auth-session', { cache: 'no-store' });
+          const sessRes = await hubFetch('/api/auth-session', { cache: 'no-store' });
           if (sessRes.ok) {
             const sessData = await sessRes.json();
             if (sessData && sessData.session) {
@@ -2254,7 +2265,7 @@
       try {
         // 1. Post to local engine /api/profile/avatar
         try {
-          await fetch('/api/profile/avatar', {
+          await hubFetch('/api/profile/avatar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ avatar: dataUrl }),
@@ -2306,7 +2317,7 @@
       showProfileFeedback(false, 'Resetting avatar…', true);
       try {
         try {
-          await fetch('/api/profile/avatar', { method: 'DELETE' });
+          await hubFetch('/api/profile/avatar', { method: 'DELETE' });
         } catch (_) {}
 
         if (supabaseClient && hubAccountUser) {
@@ -2361,7 +2372,7 @@
 
       try {
         try {
-          await fetch('/api/profile', {
+          await hubFetch('/api/profile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2372,7 +2383,7 @@
         } catch (_) {}
 
         try {
-          await fetch('/api/settings', {
+          await hubFetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2516,7 +2527,7 @@
       const root = document.getElementById('identity-content');
       root.innerHTML = '<p class="text-on-surface-variant text-sm">Loading identities…</p>';
       try {
-        const res = await fetch('/api/identities', { cache: 'no-store' });
+        const res = await hubFetch('/api/identities', { cache: 'no-store' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not load identities');
         const people = data.identities || [];
@@ -2572,7 +2583,7 @@
       const name = (input && input.value || '').trim();
       if (!name) return;
       try {
-        const res = await fetch('/api/identities', {
+        const res = await hubFetch('/api/identities', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name })
@@ -2599,7 +2610,7 @@
       const root = document.getElementById('identity-content');
       root.innerHTML = '<p class="text-on-surface-variant text-sm">Loading photos…</p>';
       try {
-        const res = await fetch('/api/identities/' + encodeURIComponent(name), { cache: 'no-store' });
+        const res = await hubFetch('/api/identities/' + encodeURIComponent(name), { cache: 'no-store' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not open identity');
         const photos = data.photos || [];
@@ -2629,7 +2640,7 @@
       Array.from(files).forEach((file) => body.append('photos', file, file.name));
       identityFeedback(true, 'Uploading ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '…');
       try {
-        const res = await fetch('/api/identities/' + encodeURIComponent(identityName) + '/photos', {
+        const res = await hubFetch('/api/identities/' + encodeURIComponent(identityName) + '/photos', {
           method: 'POST',
           body
         });
@@ -2651,7 +2662,7 @@
     async function deleteIdentityPhoto(name, filename) {
       if (!confirm('Remove this photo from ' + name + '?')) return;
       try {
-        const res = await fetch('/api/identities/' + encodeURIComponent(name) + '/photo/' + encodeURIComponent(filename), { method: 'DELETE' });
+        const res = await hubFetch('/api/identities/' + encodeURIComponent(name) + '/photo/' + encodeURIComponent(filename), { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not remove photo');
         identityFeedback(true, 'Photo removed.');
@@ -2665,7 +2676,7 @@
       if (!identityName) return;
       if (!confirm('Delete identity “' + identityName + '” and all of their photos?')) return;
       try {
-        const res = await fetch('/api/identities/' + encodeURIComponent(identityName), { method: 'DELETE' });
+        const res = await hubFetch('/api/identities/' + encodeURIComponent(identityName), { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not delete identity');
         identityFeedback(true, identityName + ' was removed.');
@@ -2807,7 +2818,7 @@
     async function pushOrient() {
       if (!isStreamActive && !activeCameraId) return;
       try {
-        const res = await fetch('/api/orient', {
+        const res = await hubFetch('/api/orient', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2902,7 +2913,7 @@
       renderAbsentCameraRows();
       syncPipelineCameras();
       try {
-        const res = await fetch('/api/settings', {
+        const res = await hubFetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ camera_id: cameraId, absent_seconds: n })
@@ -2931,7 +2942,7 @@
     async function saveHubSettings() {
       const payload = hubSettingsPayload();
       try {
-        const res = await fetch('/api/settings', {
+        const res = await hubFetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -2997,7 +3008,7 @@
       const tick = async function () {
         if (generation !== jpegPumpGeneration || !isStreamActive) return;
         try {
-          const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), {
+          const res = await hubFetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), {
             cache: 'no-store'
           });
           if (generation !== jpegPumpGeneration || !isStreamActive) return;
@@ -3389,7 +3400,7 @@
       const select = document.getElementById('uploaded-videos-select');
       if (!select) return;
       try {
-        const res = await fetch('/api/uploaded-videos');
+        const res = await hubFetch('/api/uploaded-videos');
         if (!res.ok) return;
         const data = await res.json();
         const currentVal = select.value;
@@ -3442,7 +3453,7 @@
 
       try {
         const url = `/api/upload-video?filename=${encodeURIComponent(file.name)}`;
-        const res = await fetch(url, {
+        const res = await hubFetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': file.type || 'video/mp4'
@@ -4056,7 +4067,7 @@
             isFetching = true;
             try {
               const srcUrl = `/api/camera/${encodeURIComponent(cam.id)}/frame.jpeg`;
-              const res = await fetch(srcUrl + (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), {
+              const res = await hubFetch(srcUrl + (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), {
                 cache: 'no-store'
               });
               if (!img.isConnected) {
@@ -4254,7 +4265,7 @@
       if (!ok) return;
 
       try {
-        const res = await fetch('/api/cameras/import-bays', {
+        const res = await hubFetch('/api/cameras/import-bays', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -4552,7 +4563,7 @@
     async function pollDiscoveryResults(gen) {
       if (gen !== discoveryScanGen) return;
       try {
-        const res = await fetch('/api/discovery/results');
+        const res = await hubFetch('/api/discovery/results');
         if (!res.ok) {
           renderDiscoveryResults({
             status: 'error',
@@ -4587,7 +4598,7 @@
       if (btn) btn.disabled = true;
       renderDiscoveryResults({ status: 'scanning', devices: [] });
       try {
-        const res = await fetch('/api/discovery/scan', {
+        const res = await hubFetch('/api/discovery/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
@@ -4670,7 +4681,7 @@
       const btn = document.getElementById('btn-discover-connect');
       if (btn) btn.disabled = true;
       try {
-        const saveRes = await fetch('/api/cameras', {
+        const saveRes = await hubFetch('/api/cameras', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -4720,7 +4731,7 @@
         return;
       }
       try {
-        const res = await fetch('/api/cameras', {
+        const res = await hubFetch('/api/cameras', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -4743,7 +4754,7 @@
       if (!cam) return;
       if (!confirm('Remove “' + cam.name + '” from the camera list?')) return;
       try {
-        const res = await fetch('/api/cameras/delete', {
+        const res = await hubFetch('/api/cameras/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id })
@@ -4769,7 +4780,7 @@
       if (!cam) return;
       const targetState = !(cam.enabled !== false);
       try {
-        const res = await fetch('/api/cameras/toggle-port', {
+        const res = await hubFetch('/api/cameras/toggle-port', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id, enabled: targetState })
@@ -4798,7 +4809,7 @@
       if (!cam) return;
       const targetState = forceState !== null ? Boolean(forceState) : !(cam.ml_enabled !== false);
       try {
-        const res = await fetch('/api/cameras/toggle-ml', {
+        const res = await hubFetch('/api/cameras/toggle-ml', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id, ml_enabled: targetState })
@@ -4872,7 +4883,7 @@
 
     async function loadInitialConfig() {
       try {
-        const res = await fetch('/api/config');
+        const res = await hubFetch('/api/config');
         if (!res.ok) return;
         currentConfig = await res.json();
         applyWorkplaceChrome();
@@ -4960,7 +4971,7 @@
       while (Date.now() < deadline) {
         if (seq !== connectSeq) return { superseded: true };
         try {
-          const res = await fetch('/api/telemetry');
+          const res = await hubFetch('/api/telemetry');
           if (res.ok) {
             const data = await res.json();
             if (isFailedConnection(data)) {
@@ -5011,7 +5022,7 @@
       try {
         const payload = cameraPayload();
         if (!payload.source && payload.xaddrs && payload.xaddrs[0]) payload.source = payload.xaddrs[0];
-        const res = await fetch('/api/connect-stream', {
+        const res = await hubFetch('/api/connect-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -5168,7 +5179,7 @@
       }
 
       try {
-        fetch('/api/cameras/acknowledge-event', {
+        hubFetch('/api/cameras/acknowledge-event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event_id: evt.event_id })
@@ -5198,7 +5209,7 @@
 
     async function pollGarage() {
       try {
-        const res = await fetch('/api/garage/telemetry');
+        const res = await hubFetch('/api/garage/telemetry');
         if (!res.ok) return;
         const data = await res.json();
         applyGarageHeader(data);
@@ -5214,7 +5225,7 @@
     async function pollTelemetry() {
       if (!isStreamActive) return;
       try {
-        const res = await fetch('/api/telemetry');
+        const res = await hubFetch('/api/telemetry');
         if (!res.ok) return;
         const data = await res.json();
         const state = connectionState(data);
@@ -5734,7 +5745,7 @@
     async function persistLiveBays() {
       try {
         const baysToPersist = liveBays.filter((b) => !b.is_auto && !String(b.id || '').startsWith('auto_'));
-        const res = await fetch('/api/garage/bays', {
+        const res = await hubFetch('/api/garage/bays', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bays: baysToPersist })
@@ -6549,7 +6560,7 @@
       const next = wifiDevices.filter((d) => d.name.toLowerCase() !== name.toLowerCase());
       next.push({ name, mac, ip });
       try {
-        const res = await fetch('/api/garage/wifi', {
+        const res = await hubFetch('/api/garage/wifi', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wifi_devices: next })
@@ -6568,7 +6579,7 @@
 
     async function removeWifiDevice(name) {
       const next = wifiDevices.filter((d) => d.name !== name);
-      const res = await fetch('/api/garage/wifi', {
+      const res = await hubFetch('/api/garage/wifi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wifi_devices: next })
@@ -6691,7 +6702,7 @@
 
     async function pollTelegramLinkOnce() {
       if (!hubAccountUser) return null;
-      const res = await fetch('/api/telegram/status?user_id=' + encodeURIComponent(hubAccountUser.id), { cache: 'no-store' });
+      const res = await hubFetch('/api/telegram/status?user_id=' + encodeURIComponent(hubAccountUser.id), { cache: 'no-store' });
       const data = await res.json();
       if (data.telegram_chat_id) {
         const chatInput = document.getElementById('tg-chat-input');
@@ -6748,7 +6759,7 @@
         // Ask the engine host to launch Telegram desktop via OS handler
         let openedOnHost = false;
         try {
-          const res = await fetch('/api/telegram/open', {
+          const res = await hubFetch('/api/telegram/open', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ app_link: appHref || '', deep_link: webHref || '' }),
@@ -6773,7 +6784,7 @@
       }
       btn.disabled = true;
       try {
-        const res = await fetch('/api/telegram/begin-link', {
+        const res = await hubFetch('/api/telegram/begin-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -6813,7 +6824,7 @@
       btn.disabled = true;
       feedback.classList.add('hidden');
       try {
-        const res = await fetch('/api/test-telegram', {
+        const res = await hubFetch('/api/test-telegram', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -6850,7 +6861,7 @@
       const emptyData = { today_unique: 0, today_visits: 0, week_unique: 0, week_visits: 0, open_sessions: [] };
       let data = emptyData;
       try {
-        const res = await fetch('/api/workplace/visits', { cache: 'no-store' });
+        const res = await hubFetch('/api/workplace/visits', { cache: 'no-store' });
         if (res.ok) {
           data = Object.assign({}, emptyData, await res.json());
         }
@@ -6897,7 +6908,7 @@
       const root = document.getElementById('scorecard-content');
       if (!root) return;
       try {
-        const res = await fetch('/api/garage/scorecard', { cache: 'no-store' });
+        const res = await hubFetch('/api/garage/scorecard', { cache: 'no-store' });
         const data = await res.json();
         const shop = data.shop || {};
         const util = document.getElementById('scorecard-util');
@@ -6977,7 +6988,7 @@
 
         // Fetch recent AI vision audits
         try {
-          const auditRes = await fetch('/api/ai-audits?limit=8', { cache: 'no-store' });
+          const auditRes = await hubFetch('/api/ai-audits?limit=8', { cache: 'no-store' });
           const auditData = await auditRes.json();
           const audits = auditData.audits || [];
           if (audits.length) {
@@ -7015,7 +7026,7 @@
         }
 
         try {
-          const cmpRes = await fetch('/api/complaints?limit=8', { cache: 'no-store' });
+          const cmpRes = await hubFetch('/api/complaints?limit=8', { cache: 'no-store' });
           const cmpData = await cmpRes.json();
           const complaints = cmpData.complaints || [];
           const listening = !!cmpData.listening;

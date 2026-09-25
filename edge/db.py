@@ -8,9 +8,10 @@ from typing import Any
 
 def connect(db_path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread, timeout=10)
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS events (

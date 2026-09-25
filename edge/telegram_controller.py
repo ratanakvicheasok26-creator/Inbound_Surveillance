@@ -210,7 +210,7 @@ class TelegramController:
                     "timeout": max(0, int(timeout)),
                     "limit": 20,
                 },
-                timeout=max(15, int(timeout) + 5),
+                timeout=max(3, int(timeout) + 2),
             )
             data = response.json() if response.content else {}
         except Exception as exc:
@@ -252,11 +252,13 @@ class TelegramController:
         stop = stop_event if stop_event is not None else threading.Event()
         while not stop.is_set():
             if not self.token:
-                if stop.wait(1.0):
+                if stop.wait(0.5):
                     break
                 continue
+            if stop.is_set():
+                break
             try:
-                self.poll_once(timeout=10)
+                self.poll_once(timeout=2)
                 self._backoff = 1.0
             except Exception as exc:
                 self._last_error = str(exc)

@@ -271,6 +271,7 @@ try:
         upsert_minute,
     )
     from door_gate import DoorTrafficMonitor
+    from shoe_gate import ShoeChangeMonitor
     from complaint_service import ComplaintMonitoringService
     from face_id import (
         create_identity,
@@ -1263,6 +1264,7 @@ class LiveStreamEngine:
         self.staff_memory = StaffMemory(self.cfg.get("bays"), workplace=wp)
         self.visit_monitor.staff_memory = self.staff_memory
         self.door_monitor: DoorTrafficMonitor | None = None
+        self.shoe_monitor: ShoeChangeMonitor | None = None
         self.wifi = WifiTracker(self.cfg.get("wifi_devices"))
         self.bay_telemetry = self.bay_manager.telemetry()
         self.complaint_service = None
@@ -2218,9 +2220,9 @@ class LiveStreamEngine:
                 try:
                     import sqlite3
                     db_path = DATA_DIR / "events.db"
-                    conn = sqlite3.connect(str(db_path), timeout=5.0)
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
                     try:
-                        conn.execute("PRAGMA busy_timeout = 5000")
+                        conn.execute("PRAGMA busy_timeout = 30000")
                         close_bay_sessions(conn, bids, datetime.now())
                     finally:
                         conn.close()
@@ -3463,6 +3465,16 @@ class LiveStreamEngine:
                     print("[DoorGate] Door traffic monitoring enabled")
                 else:
                     self.door_monitor = None
+                shoe_cfg = dict(cfg.get("shoe_change_zone") or {})
+                if shoe_cfg.get("enabled"):
+                    self.shoe_monitor = ShoeChangeMonitor(
+                        shoe_cfg,
+                        conn=self.conn,
+                        proofs_root=DATA_DIR / "proofs",
+                    )
+                    print("[ShoeGate] Shoe-change customer monitor enabled")
+                else:
+                    self.shoe_monitor = None
                 rotate_deg, flip = resolve_orient(cfg.get("rotate"), source, packet.frame, cfg.get("flip"))
                 first_oriented = orient_frame(packet.frame, rotate_deg, flip)
                 h0, w0 = first_oriented.shape[:2]
@@ -3646,6 +3658,20 @@ class LiveStreamEngine:
                             self.door_monitor.annotate(frame, w, h)
                         finally:
                             self.door_monitor.conn = door_conn
+                    if self.shoe_monitor is not None:
+                        shoe_conn = self.shoe_monitor.conn
+                        if not flags["persist"]:
+                            self.shoe_monitor.conn = None
+                        try:
+                            _shoe_events = self.shoe_monitor.update(
+                                last_accepted, w, h, now, frame=frame, stamp=datetime.now()
+                            )
+                            self.shoe_monitor.annotate(frame, w, h)
+                            for det in last_accepted:
+                                if getattr(det, "is_customer", False):
+                                    det.identity = getattr(det, "identity", None) or "Customer"
+                        finally:
+                            self.shoe_monitor.conn = shoe_conn
                     if flags["customer_visits"]:
                         prev_conn = self.visit_monitor.conn
                         if not flags["persist"]:
@@ -4030,15 +4056,59 @@ def encode_mjpeg_part(frame_bytes: bytes, timestamp: float | None = None) -> byt
     return header + frame_bytes + b"\r\n"
 
 
+_ALLOWED_ORIGIN_HOSTS = frozenset(
+    {"127.0.0.1", "localhost", "[::1]", "tauri.localhost"}
+)
+
+_SESSION_TOKEN_CACHE: dict[str, str | None] = {"value": None}
+
+
+def _load_session_token() -> str | None:
+    tok = _SESSION_TOKEN_CACHE["value"]
+    if tok is None:
+        session_file = DATA_DIR / "session.json"
+        if session_file.exists():
+            try:
+                with session_file.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                sess = (
+                    data.get("session", data)
+                    if isinstance(data, dict)
+                    else None
+                )
+                tok = sess.get("access_token") if isinstance(sess, dict) else None
+            except Exception:
+                tok = None
+        _SESSION_TOKEN_CACHE["value"] = tok or None
+    return _SESSION_TOKEN_CACHE["value"]
+
+
+def _reset_session_token_cache() -> None:
+    _SESSION_TOKEN_CACHE["value"] = None
+
+
 class DashboardRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        try:
+            _, _, hostport = origin.partition("://")
+            host = hostport.split("/")[0].split(":")[0].lower()
+        except Exception:
+            return False
+        return host in _ALLOWED_ORIGIN_HOSTS
+
     def _cors(self) -> None:
-        origin = self.headers.get("Origin") or "*"
-        self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        if self._origin_allowed():
+            self.send_header(
+                "Access-Control-Allow-Origin", self.headers.get("Origin") or "*"
+            )
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Vary", "Origin")
 
     def end_headers(self):
@@ -4048,6 +4118,34 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.end_headers()
+
+    def _authorized(self) -> bool:
+        header = self.headers.get("Authorization") or ""
+        token = header[len("Bearer "):] if header[:7].lower() == "bearer " else ""
+        expected = _load_session_token()
+        if not token or not expected:
+            self._send_json({"error": "Unauthorized"}, 401)
+            return False
+        import hmac
+
+        if hmac.compare_digest(token, expected):
+            return True
+        self._send_json({"error": "Unauthorized"}, 401)
+        return False
+
+    def _is_media_path(self, path: str) -> bool:
+        p = path.split("?")[0]
+        if p in ("/api/frame.jpeg", "/api/stream"):
+            return True
+        if p.startswith("/api/camera/"):
+            return True
+        if p.startswith("/api/identities/") and "/photo/" in p:
+            return True
+        if p.startswith("/api/workplace/avatar"):
+            return True
+        if p == "/api/profile/avatar":
+            return True
+        return False
 
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
         self.send_response(status)
@@ -4197,6 +4295,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path.startswith("/api/"):
+            if path == "/api/auth-session":
+                if not self._origin_allowed():
+                    self._send_json({"error": "Origin not allowed"}, 403)
+                    return
+            elif path == "/api/public-config" or self._is_media_path(path):
+                pass
+            elif not self._authorized():
+                return
         if parsed.path in ("/", "/index.html"):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4424,6 +4532,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 "events": mon.recent() if mon is not None else [],
                 "sessions": mon.sessions_meta() if mon is not None else [],
                 "door_motion": round(mon.door_motion, 2) if mon is not None else 0.0,
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode("utf-8"))
+
+        elif parsed.path == "/api/shoe-events":
+            mon = getattr(GLOBAL_ENGINE, "shoe_monitor", None)
+            shoe_cfg = dict(GLOBAL_ENGINE.cfg.get("shoe_change_zone") or {})
+            data = {
+                "enabled": mon is not None,
+                "zone": shoe_cfg.get("zone"),
+                "events": mon.recent() if mon is not None else [],
+                "flagged": mon.flagged_count() if mon is not None else 0,
             }
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -4777,6 +4899,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path == "/api/auth-session":
+            if not self._origin_allowed():
+                self._send_json({"error": "Origin not allowed"}, 403)
+                return
+        elif path.startswith("/api/") and not self._authorized():
+            return
         parts = [urllib.parse.unquote(p) for p in parsed.path.split("/") if p]
         length = int(self.headers.get("Content-Length", 0) or 0)
         max_upload_size = 1024 * 1024 * 1024 if parsed.path == "/api/upload-video" else 40 * 1024 * 1024
@@ -5215,6 +5344,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 sess_data = payload.get("session") if (isinstance(payload, dict) and "session" in payload and isinstance(payload.get("session"), dict)) else payload
                 with session_file.open("w", encoding="utf-8") as f:
                     json.dump(sess_data, f, indent=2)
+                _reset_session_token_cache()
                 self._send_json({"ok": True})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
@@ -5270,7 +5400,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/api/auth-session":
+        path = parsed.path
+        if path == "/api/auth-session":
+            if not self._origin_allowed():
+                self._send_json({"error": "Origin not allowed"}, 403)
+                return
+            _reset_session_token_cache()
             session_file = DATA_DIR / "session.json"
             if session_file.exists():
                 try:
