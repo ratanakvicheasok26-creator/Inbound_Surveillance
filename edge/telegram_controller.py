@@ -1,6 +1,6 @@
 """Inbound Telegram staff/owner controller for Champei edge.
 
-Polls getUpdates for /name, /info, /scorecard, /churn, /help.
+Polls getUpdates for /name, /info, /scorecard, /churn, /weekly, /help.
 Does not touch vision/workplace modules.
 """
 
@@ -15,6 +15,7 @@ import requests
 
 from analytics.churn import compute_churn_risks, format_churn_watchlist
 from analytics.scorecard import build_daily_scorecard
+from analytics.weekly_customer_brief import build_weekly_customer_brief
 from telegram_out import normalize_chat_id
 from visitor_registry import get_visitor_display_name, set_visitor_alias
 
@@ -147,6 +148,13 @@ class TelegramController:
                 return DENIED
             risks = compute_churn_risks(db_path=self.db_path)
             return format_churn_watchlist(risks, branch_id=self.branch_id)
+        if cmd == "/weekly":
+            if role != "owner":
+                return DENIED
+            return build_weekly_customer_brief(
+                db_path=self.db_path,
+                branch_id=self.branch_id,
+            )
         return (
             f"Unknown command. Try /help.\n\n{self._help_text(role)}"
             if cmd.startswith("/")
@@ -161,7 +169,7 @@ class TelegramController:
             "/help",
         ]
         if role == "owner":
-            lines.extend(["/scorecard", "/churn"])
+            lines.extend(["/scorecard", "/churn", "/weekly"])
         return "\n".join(lines)
 
     def _cmd_name(self, payload: str) -> str:

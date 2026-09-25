@@ -63,6 +63,7 @@ class TelegramControllerRbacTests(unittest.TestCase):
     def test_staff_denied_scorecard_and_churn(self) -> None:
         self.assertEqual(self.ctrl.handle_message("111", "/scorecard"), DENIED)
         self.assertEqual(self.ctrl.handle_message("111", "/churn"), DENIED)
+        self.assertEqual(self.ctrl.handle_message("111", "/weekly"), DENIED)
 
     def test_owner_permitted_scorecard(self) -> None:
         reply = self.ctrl.handle_message("222", "/scorecard")
@@ -76,6 +77,13 @@ class TelegramControllerRbacTests(unittest.TestCase):
         self.assertIsNotNone(reply)
         assert reply is not None
         self.assertIn("SILENT CHURN WATCHLIST", reply)
+
+    def test_owner_permitted_weekly_brief(self) -> None:
+        reply = self.ctrl.handle_message("222", "/weekly")
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertIn("WEEKLY CUSTOMER ACTIVITY BRIEF", reply)
+        self.assertIn("champei-pp-01", reply)
 
     def test_staff_name_upsert(self) -> None:
         reply = self.ctrl.handle_message(
@@ -108,12 +116,14 @@ class TelegramControllerRbacTests(unittest.TestCase):
         assert reply is not None
         self.assertIn("/name", reply)
         self.assertNotIn("/scorecard", reply)
+        self.assertNotIn("/weekly", reply)
 
     def test_owner_help_includes_owner_commands(self) -> None:
         reply = self.ctrl.handle_message("222", "/help")
         assert reply is not None
         self.assertIn("/scorecard", reply)
         self.assertIn("/churn", reply)
+        self.assertIn("/weekly", reply)
 
 
 if __name__ == "__main__":

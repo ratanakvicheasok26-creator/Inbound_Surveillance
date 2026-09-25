@@ -16,6 +16,7 @@ RUNNER = EDGE_DIR / "run_champei.py"
 MARKER_WAL = "[DB] SQLite WAL mode confirmed: wal"
 MARKER_TG = "Telegram controller started"
 MARKER_SCORE = "Scorecard scheduler started"
+MARKER_WEEKLY = "Weekly customer brief scheduler started"
 
 
 class RunChampeiSmokeTests(unittest.TestCase):
@@ -49,6 +50,7 @@ class RunChampeiSmokeTests(unittest.TestCase):
                         MARKER_WAL in blob
                         and MARKER_TG in blob
                         and MARKER_SCORE in blob
+                        and MARKER_WEEKLY in blob
                     ):
                         break
                 elif proc.poll() is not None:
@@ -57,6 +59,7 @@ class RunChampeiSmokeTests(unittest.TestCase):
             self.assertIn(MARKER_WAL, blob, f"WAL marker missing in:\n{blob}")
             self.assertIn(MARKER_TG, blob, f"Telegram start missing in:\n{blob}")
             self.assertIn(MARKER_SCORE, blob, f"Scorecard start missing in:\n{blob}")
+            self.assertIn(MARKER_WEEKLY, blob, f"Weekly brief start missing in:\n{blob}")
 
             proc.send_signal(signal.SIGINT)
             try:

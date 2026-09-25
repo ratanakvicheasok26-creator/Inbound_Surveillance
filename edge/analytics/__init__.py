@@ -1,4 +1,4 @@
-"""Champei hospitality analytics: daily scorecard, silent churn, sessions."""
+"""Champei hospitality analytics: daily scorecard, weekly brief, churn, sessions."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ from typing import Any
 __all__ = [
     "build_daily_scorecard",
     "send_daily_scorecard",
+    "compute_customer_activity_brief",
+    "format_customer_activity_brief",
+    "build_weekly_customer_brief",
+    "send_weekly_customer_brief",
     "compute_churn_risks",
     "send_weekly_churn",
     "record_session_completion",
@@ -21,6 +25,25 @@ def __getattr__(name: str) -> Any:
         return {
             "build_daily_scorecard": build_daily_scorecard,
             "send_daily_scorecard": send_daily_scorecard,
+        }[name]
+    if name in (
+        "compute_customer_activity_brief",
+        "format_customer_activity_brief",
+        "build_weekly_customer_brief",
+        "send_weekly_customer_brief",
+    ):
+        from analytics.weekly_customer_brief import (
+            build_weekly_customer_brief,
+            compute_customer_activity_brief,
+            format_customer_activity_brief,
+            send_weekly_customer_brief,
+        )
+
+        return {
+            "compute_customer_activity_brief": compute_customer_activity_brief,
+            "format_customer_activity_brief": format_customer_activity_brief,
+            "build_weekly_customer_brief": build_weekly_customer_brief,
+            "send_weekly_customer_brief": send_weekly_customer_brief,
         }[name]
     if name in ("compute_churn_risks", "send_weekly_churn"):
         from analytics.churn import compute_churn_risks, send_weekly_churn
