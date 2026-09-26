@@ -27,8 +27,8 @@ Mode: **READ-ONLY** inspection (no vision/tracker/workplace edits).
 | Session Duration | `sessions.record_session_completion / db.end_customer_visit` | `customer_visits(duration_seconds, ended_at, status)` | None (Internal DB metric) | Duration calculated on session close | WARNING — Live end path skips status & early-departure helper |
 | Early Departure Anomaly | `sessions.record_session_completion` | `customer_visits` | early_departure / Dual (Staff + Owner) | < 1200s (<20m) | WARNING — Active in helper, pending live exit trigger |
 | Lobby Bounce / Walk-Away | `sessions.record_walk_away` | `events(event_type='walk_away')` | Internal DB only (Scorecard) | Explicit helper invocation | UNCOVERED — No vision bounce detector wired |
-| Daily Ops Scorecard | `scorecard.build_daily_scorecard / send_daily_scorecard` | `customer_visits + events` | daily_scorecard / Owner | Scheduled daily at 21:00 or manual CLI | WARNING — Ready via CLI, pending background scheduler |
-| Silent Churn Watchlist | `churn.compute_churn_risks / send_weekly_churn` | `customer_visits + visitor_meta` | silent_churn / Owner | Days overdue > max(cadence * 2.0, 21d) | WARNING — Ready via CLI, pending background scheduler |
+| Daily Ops Scorecard | `scorecard.build_daily_scorecard / send_daily_scorecard` | `customer_visits + events` | daily_scorecard / Owner | Scheduled daily at 21:00 or manual CLI | OK — Background scheduler in `run_champei` (21:00 local) + `/scorecard` for owner |
+| Silent Churn Watchlist | `churn.compute_churn_risks / send_weekly_churn` | `customer_visits + visitor_meta` | silent_churn / Owner | Days overdue > max(cadence * 2.0, 21d) | WARNING — Ready via CLI / `/churn` (owner); no weekly auto-scheduler yet |
 
 ## SECTION 2: Camera & Spatial Coverage (Entrance CCTV View)
 
@@ -69,4 +69,12 @@ Mode: **READ-ONLY** inspection (no vision/tracker/workplace edits).
 
 ## SECTION 5: Summary Tally
 
-**OK: 1 | WARNING: 12 | UNCOVERED: 4**
+**OK: 2 | WARNING: 11 | UNCOVERED: 4**
+
+## SECTION 6: Security Architecture Note: Telegram RBAC Scope
+
+- **Owner Role:** Strictly bound to the Owner's private 1-on-1 chat (`TELEGRAM_OWNER_CHAT_ID`). All management reports (`/scorecard`, `/churn`) fail-closed outside this chat.
+- **Staff Role:** Bound to the shared Staff Group Chat (`TELEGRAM_STAFF_CHAT_ID`). Access control is managed natively via Telegram group membership. Any member present in the staff group can execute operational updates (`/name`).
+- **Risk Assessment:** Accepted. Eliminates manual user-ID provisioning on the edge laptop while keeping sensitive analytics isolated from group members.
+
+See also [`DEPLOY_CHAMPEI.md`](DEPLOY_CHAMPEI.md) for laptop install, `.env` lockdown, Task Scheduler, and Tailscale.
