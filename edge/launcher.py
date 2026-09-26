@@ -1170,7 +1170,7 @@ class LiveStreamEngine:
     frames to the web UI. Media ingest (AsyncFrameGrabber + go2rtc) is unchanged.
     """
 
-    def __init__(self):
+    def __init__(self, *, telegram_link_poll: bool = True):
         self.lock = threading.Lock()
         self.running = False
         self.is_streaming = False
@@ -1185,6 +1185,7 @@ class LiveStreamEngine:
         self._bg_camera_state: dict[str, dict[str, Any]] = {}
         self.active_roi_cameras: dict[str, float] = {}
         self._last_bg_roi_infer: dict[str, float] = {}
+        self._telegram_link_poll = bool(telegram_link_poll)
         self.media = Go2RtcManager()
         self.camera_pool = CameraStreamPool(
             gateway=self.media, eval_callback=self._evaluate_background_camera
@@ -1225,7 +1226,10 @@ class LiveStreamEngine:
         self.conn = None
         self.bot = TelegramOut(self.cfg.get("telegram_bot_token", ""), self.cfg.get("telegram_chat_id", ""))
         self.telegram_links = TelegramLinkService()
-        self.telegram_links.configure(self.cfg.get("telegram_bot_token", ""))
+        self.telegram_links.configure(
+            self.cfg.get("telegram_bot_token", ""),
+            start_poller=self._telegram_link_poll,
+        )
         if self.cfg.get("telegram_chat_id"):
             self.telegram_links.set_active_chat(
                 str(self.cfg.get("telegram_chat_id")),
@@ -1315,6 +1319,14 @@ class LiveStreamEngine:
         if worker is not None:
             return worker.grabber
         return self._fallback_grabber
+
+    def set_telegram_link_poll(self, enabled: bool) -> None:
+        """Enable/disable TelegramLinkService getUpdates (Champei uses TelegramController)."""
+        self._telegram_link_poll = bool(enabled)
+        self.telegram_links.configure(
+            self.cfg.get("telegram_bot_token", ""),
+            start_poller=self._telegram_link_poll,
+        )
 
     def _sync_visit_monitor_site(self, active_camera: dict[str, Any] | None = None) -> None:
         """Keep visit monitor privacy + branch/role + Telegram wiring in sync with cfg."""
@@ -1987,7 +1999,10 @@ class LiveStreamEngine:
             if "branch_id" in updates or "store_customer_avatars" in updates or "workplace_type" in updates:
                 self._sync_visit_monitor_site()
             if "telegram_bot_token" in updates:
-                self.telegram_links.configure(self.cfg.get("telegram_bot_token", ""))
+                self.telegram_links.configure(
+                    self.cfg.get("telegram_bot_token", ""),
+                    start_poller=self._telegram_link_poll,
+                )
             if "telegram_chat_id" in updates:
                 self.telegram_links.set_active_chat(
                     self.cfg.get("telegram_chat_id", ""),
@@ -3112,7 +3127,7 @@ class LiveStreamEngine:
                 "ok": False,
                 "error": "TELEGRAM_BOT_TOKEN is not configured on the engine.",
             }
-        self.telegram_links.configure(token)
+        self.telegram_links.configure(token, start_poller=self._telegram_link_poll)
         result = self.telegram_links.begin_link(user_id, display_name)
         status = self.telegram_links.status()
         result["telegram_chat_id"] = self.cfg.get("telegram_chat_id") or ""
@@ -3705,6 +3720,9 @@ class LiveStreamEngine:
                         with self.lock:
                             self.bay_telemetry = [s.as_dict() for s in visit_snaps]
                         last_state = GhostState(self.is_occupied, self.empty_elapsed, False)
+                    # Always define stamp before garage/visit DB upserts (spa path
+                    # has customer_visits without employee_labor).
+                    stamp = datetime.now()
                     if flags["employee_labor"]:
                         snapshots = self.bay_manager.update(
                             last_accepted, w, h, now, kpt_conf=kpt_conf, frame=frame
@@ -3721,7 +3739,6 @@ class LiveStreamEngine:
                             for s in snapshots
                         )
                         last_state = ghost.update(any_occupied, now)
-                        stamp = datetime.now()
                         if flags["persist"]:
                             self._record_garage_tick(last_accepted, snapshots, last_state, stamp, now, clock_out_grace)
 
@@ -4021,14 +4038,16 @@ class LiveStreamEngine:
 GLOBAL_ENGINE: LiveStreamEngine | None = None
 
 
-def init_global_engine() -> LiveStreamEngine:
+def init_global_engine(*, telegram_link_poll: bool = True) -> LiveStreamEngine:
     """Create the process-wide engine. Deferred on frozen Windows so import
     failures and config errors are logged from ``main()`` instead of crashing
     before the boot banner.
     """
     global GLOBAL_ENGINE
     if GLOBAL_ENGINE is None:
-        GLOBAL_ENGINE = LiveStreamEngine()
+        GLOBAL_ENGINE = LiveStreamEngine(telegram_link_poll=telegram_link_poll)
+    else:
+        GLOBAL_ENGINE.set_telegram_link_poll(telegram_link_poll)
     return GLOBAL_ENGINE
 
 
@@ -5432,8 +5451,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def start_unified_server(port: int = 8765, open_browser: bool = True) -> None:
-    engine = init_global_engine()
+def start_unified_server(
+    port: int = 8765,
+    open_browser: bool = True,
+    *,
+    telegram_link_poll: bool = True,
+) -> None:
+    engine = init_global_engine(telegram_link_poll=telegram_link_poll)
     actual_port = find_free_port(port)
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(("127.0.0.1", actual_port), DashboardRequestHandler)

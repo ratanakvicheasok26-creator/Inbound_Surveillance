@@ -286,10 +286,15 @@ class ShoeChangeMonitor:
                 trk = _Track(last_seen=now, last_cx=cx, last_cy=cy)
                 self.tracks[tid] = trk
             trk.in_zone = self._in_zone(cx, cy)
+            # Refresh presence before posture gate so bent/obscured guests
+            # are not pruned while untying shoes (head keypoints often drop).
+            trk.hits += 1
+            trk.last_cx = cx
+            trk.last_cy = cy
+            trk.last_seen = now
 
             if trk.in_zone and not trk.signaled:
                 if self.require_person and not _person_visible(det, self.kpt_conf):
-                    trk.hits += 1
                     continue
                 reach = reach_down_distance(det, h, w, self.kpt_conf)
                 if reach is not None and reach <= self.wrist_ankle_dist:
@@ -308,10 +313,6 @@ class ShoeChangeMonitor:
                 not_relink = not self._recently_fired(cx, cy, now)
                 if cooldown_ok and not_relink:
                     self._fire(det, trk, tid, cx, cy, now, stamp, frame, w, h, fired)
-            trk.hits += 1
-            trk.last_cx = cx
-            trk.last_cy = cy
-            trk.last_seen = now
 
         return fired
 

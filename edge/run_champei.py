@@ -60,9 +60,10 @@ def _scorecard_loop(
                     f"[run_champei] daily scorecard {'sent' if ok else 'skipped/failed'} day={day}",
                     flush=True,
                 )
+                if ok:
+                    last_sent_day = day
             except Exception as exc:
                 print(f"[run_champei] scorecard error: {exc}", flush=True)
-            last_sent_day = day
         stop_event.wait(30.0)
 
 
@@ -139,7 +140,12 @@ def main(argv: list[str] | None = None) -> int:
             # Hub owns SIGINT/SIGTERM; we join background threads after it returns.
             from launcher import start_unified_server
 
-            start_unified_server(port=args.port, open_browser=False)
+            # TelegramController owns getUpdates; disable link-service poller.
+            start_unified_server(
+                port=args.port,
+                open_browser=False,
+                telegram_link_poll=False,
+            )
     except KeyboardInterrupt:
         stop_event.set()
     finally:
