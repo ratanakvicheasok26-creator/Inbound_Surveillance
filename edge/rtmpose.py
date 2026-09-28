@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from runtime import DEFAULT_NUM_THREADS, resolve_num_threads
+
 # YOLOX-tiny + RTMPose-s (CPU) / YOLOX-m + RTMPose-m (GPU). URLs are the
 # official OpenMMLab ONNX SDK zips; rtmlib also mirrors them on Hugging Face.
 RTMPOSE_MODES: dict[str, dict[str, Any]] = {
@@ -164,6 +166,7 @@ class RTMPoseEngine:
         auto_download: bool = True,
         det_model: Any = None,
         pose_model: Any = None,
+        num_threads: int | None = None,
     ):
         if models_dir is None:
             models_dir = Path(__file__).resolve().parent / "models"
@@ -172,10 +175,12 @@ class RTMPoseEngine:
         self.lock = threading.Lock()
         self.mode = mode if mode in RTMPOSE_MODES else "lightweight"
         self.backend, self.device = _backend_device(runtime_profile)
+        self.num_threads = int(num_threads) if num_threads else DEFAULT_NUM_THREADS
 
         if det_model is not None and pose_model is not None:
             self.det_model = det_model
             self.pose_model = pose_model
+            self._tune_sessions()
             return
 
         if not auto_download:
@@ -204,11 +209,88 @@ class RTMPoseEngine:
             device=self.device,
             to_openpose=False,
         )
+        self._tune_sessions()
         print(
             f"[RTMPoseEngine] Loaded YOLOX+RTMPose mode={self.mode} "
-            f"backend={self.backend} device={self.device}",
+            f"backend={self.backend} device={self.device} threads={self.num_threads}",
             flush=True,
         )
+
+    def _tune_sessions(self) -> None:
+        """Rebuild rtmlib's inference sessions with an explicit thread budget.
+
+        rtmlib constructs ``ort.InferenceSession`` with no SessionOptions, so
+        ONNX Runtime defaults intra-op threads to the *logical* CPU count. On an
+        SMT box that is the slowest setting measured (191ms vs 149ms for the
+        YOLOX-tiny detector on 2c/4t). Pinning to physical cores is a free win
+        and also stops the infer thread from fighting the capture and JPEG
+        threads for the same cores.
+        """
+        if self.num_threads <= 0:
+            return
+        for name in ("det_model", "pose_model"):
+            model = getattr(self, name, None)
+            if model is None:
+                continue
+            try:
+                if self.backend == "onnxruntime":
+                    self._tune_ort_session(model)
+                elif self.backend == "openvino":
+                    self._tune_openvino_model(model)
+            except Exception as ex:
+                print(f"[RTMPoseEngine] thread tuning skipped for {name}: {ex}")
+
+    def _tune_ort_session(self, model: Any) -> None:
+        import onnxruntime as ort
+
+        from runtime import configure_onnx_session_options
+
+        path = getattr(model, "onnx_model", None)
+        if not path:
+            return
+        # Same provider rtmlib resolved, via the same table, so tuning cannot
+        # move the model to a different accelerator (or request one this box
+        # does not have, which ORT raises on rather than falling back).
+        from rtmlib.tools.base import RTMLIB_SETTINGS
+
+        provider = RTMLIB_SETTINGS.get("onnxruntime", {}).get(
+            self.device, "CPUExecutionProvider"
+        )
+        tuned = ort.InferenceSession(
+            str(path),
+            configure_onnx_session_options(self.num_threads),
+            providers=[provider],
+        )
+        if [o.name for o in tuned.get_outputs()] != [o.name for o in model.session.get_outputs()]:
+            raise RuntimeError("session output signature changed; keeping rtmlib default session")
+        model.session = tuned
+
+    def _tune_openvino_model(self, model: Any) -> None:
+        import openvino as ov
+
+        from runtime import configure_openvino_properties
+
+        core = getattr(model, "core", None)
+        if core is None:
+            core = ov.Core()
+            model.core = core
+        configure_openvino_properties(core, self.num_threads)
+        path = getattr(model, "onnx_model", None)
+        if not path:
+            return
+        # Compile on the same device rtmlib picked, or tuning would silently
+        # move the model off the accelerator it was loaded on. rtmlib resolves
+        # it through RTMLIB_SETTINGS['openvino'] ('cpu'->CPU, 'gpu'->GPU, ...).
+        from rtmlib.tools.base import RTMLIB_SETTINGS
+
+        device = RTMLIB_SETTINGS.get("openvino", {}).get(self.device, self.device.upper())
+        read_model = core.read_model(str(path))
+        compiled = core.compile_model(read_model, device)
+        model.compiled_model = compiled
+        model.input_layer = compiled.input(0)
+        # rtmlib indexes outputs off the *read* model's output count, not the
+        # compiled one; mirror it so predict() finds the same layers.
+        model._ov_outputs = [compiled.output(i) for i in range(len(read_model.outputs))]
 
     def predict(
         self,
@@ -284,6 +366,7 @@ def load_person_pose_model(
                 models_dir=models_dir,
                 runtime_profile=profile,
                 mode=mode,
+                num_threads=resolve_num_threads(cfg),
             )
             print(f"[Pose] Initialized RTMPose engine mode={mode} ({getattr(profile, 'name', '')})", flush=True)
             return model

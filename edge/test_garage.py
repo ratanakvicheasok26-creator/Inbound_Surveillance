@@ -853,9 +853,27 @@ class WifiPresenceTests(unittest.TestCase):
 
 
 class GarageApiTests(unittest.TestCase):
+    TOKEN = "garage-api-test-token"
+
     @classmethod
     def setUpClass(cls):
+        import json as _json
+        import tempfile as _tempfile
+
+        import launcher
         from launcher import DashboardRequestHandler, GLOBAL_ENGINE, ThreadingHTTPServer
+
+        # Every /api/ route is behind _authorized(), which reads a bearer token
+        # from DATA_DIR/session.json. These tests predate that gate, so point
+        # DATA_DIR at a temp dir holding a known token and send it below --
+        # otherwise all three HTTP tests fail with a bare 401.
+        cls._orig_data_dir = launcher.DATA_DIR
+        cls._tmp = _tempfile.TemporaryDirectory()
+        launcher.DATA_DIR = Path(cls._tmp.name)
+        (launcher.DATA_DIR / "session.json").write_text(
+            _json.dumps({"access_token": cls.TOKEN}), encoding="utf-8"
+        )
+        launcher._SESSION_TOKEN_CACHE["value"] = None
 
         GLOBAL_ENGINE.bay_manager.set_bays(DEFAULT_BAYS)
         GLOBAL_ENGINE.bay_telemetry = GLOBAL_ENGINE.bay_manager.telemetry()
@@ -868,10 +886,18 @@ class GarageApiTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        import launcher
+
+        launcher.DATA_DIR = cls._orig_data_dir
+        launcher._SESSION_TOKEN_CACHE["value"] = None
+        cls._tmp.cleanup()
+
+    def _auth(self) -> dict:
+        return {"Authorization": f"Bearer {self.TOKEN}"}
 
     def _get(self, path: str):
         conn = HTTPConnection("127.0.0.1", self.port, timeout=2)
-        conn.request("GET", path)
+        conn.request("GET", path, headers=self._auth())
         resp = conn.getresponse()
         body = resp.read()
         conn.close()
@@ -949,7 +975,12 @@ class GarageApiTests(unittest.TestCase):
     def _post(self, path: str, payload: dict):
         body = json.dumps(payload).encode("utf-8")
         conn = HTTPConnection("127.0.0.1", self.port, timeout=2)
-        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+        conn.request(
+            "POST",
+            path,
+            body=body,
+            headers={"Content-Type": "application/json", **self._auth()},
+        )
         resp = conn.getresponse()
         data = resp.read()
         conn.close()
@@ -1244,6 +1275,12 @@ class GarageApiTests(unittest.TestCase):
     def test_toggle_camera_port_closes_and_reconnects_worker(self):
         from launcher import LiveStreamEngine, CameraStreamWorker
         engine = LiveStreamEngine()
+        # This is the one test in the module that really starts camera workers:
+        # toggle_camera_port re-syncs the pool, so a worker thread ends up holding
+        # an open V4L2 capture. Left running, it is still alive at interpreter
+        # shutdown and OpenCV aborts the process -- the suite printed "OK" and
+        # then died with SIGABRT ("FATAL: exception not rethrown"), exit 134.
+        self.addCleanup(engine.stop)
         engine.cfg["cameras"] = [
             {"id": "cam-1", "name": "Bay 1", "source": "0", "enabled": True},
             {"id": "cam-2", "name": "Bay 2", "source": "1", "enabled": True},

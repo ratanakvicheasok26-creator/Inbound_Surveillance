@@ -1,10 +1,19 @@
 import sqlite3
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from edge.db import (
+# Flat import, like every sibling test module. `from edge.db import ...` only
+# resolved when the repo root happened to be sys.path[0]; running the suite the
+# normal way (cd edge && python -m unittest discover) made this the single
+# module that failed to import at all.
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from db import (
     connect,
     record_face_clock_in,
     record_face_clock_out,

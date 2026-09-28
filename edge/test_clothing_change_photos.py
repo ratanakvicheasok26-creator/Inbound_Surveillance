@@ -35,6 +35,32 @@ DEFAULT_PHOTOS = [
     ),
 ]
 
+# Must mirror the CustomerFaceGallery default in face_id.py.
+FALLBACK_THRESHOLD = 0.38
+
+
+def production_threshold() -> float:
+    """Read face_match_threshold from the config the engine actually boots with.
+
+    The gallery threshold is the single knob that decides whether a returning
+    guest is recognised or re-enrolled as a new customer, so this test has to
+    assert against the shipped value rather than a hardcoded literal.
+    """
+    import yaml
+
+    for name in ("config.yaml", "config.example.yaml"):
+        path = ROOT / name
+        if not path.is_file():
+            continue
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        raw = data.get("face_match_threshold")
+        if raw is not None:
+            return float(raw)
+    return FALLBACK_THRESHOLD
+
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     va = np.asarray(a, dtype=np.float32).flatten()
@@ -46,7 +72,9 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(va / na, vb / nb))
 
 
-def run_clothing_change_test(photo_a: Path, photo_b: Path, threshold: float = 0.60) -> dict:
+def run_clothing_change_test(photo_a: Path, photo_b: Path, threshold: float | None = None) -> dict:
+    if threshold is None:
+        threshold = production_threshold()
     img_a = cv2.imread(str(photo_a))
     img_b = cv2.imread(str(photo_b))
     if img_a is None:
@@ -131,13 +159,37 @@ def print_result(result: dict) -> None:
 
 
 class ClothingChangePhotoTests(unittest.TestCase):
+    def test_shipped_threshold_is_the_gallery_default(self) -> None:
+        """Guards the cause of this test's original failure.
+
+        config.example.yaml shipped 0.60 while face_id.CustomerFaceGallery
+        defaults to 0.38. At 0.60 the same guest in a different outfit scores
+        ~0.43 and is re-enrolled as a new customer, so the operator gets a
+        fresh "Customer #N" on every visit and retention analytics are noise.
+        """
+        from face_id import CustomerFaceGallery
+
+        self.assertAlmostEqual(
+            production_threshold(),
+            CustomerFaceGallery().threshold,
+            places=3,
+            msg="config face_match_threshold has drifted from the gallery default",
+        )
+
     def test_two_outfit_photos_are_same_customer(self) -> None:
         missing = [p for p in DEFAULT_PHOTOS if not p.is_file()]
         if missing:
             self.skipTest(f"Clothing-change photos not found: {missing}")
-        result = run_clothing_change_test(DEFAULT_PHOTOS[0], DEFAULT_PHOTOS[1])
+        threshold = production_threshold()
+        result = run_clothing_change_test(DEFAULT_PHOTOS[0], DEFAULT_PHOTOS[1], threshold=threshold)
         print_result(result)
         self.assertGreater(result["face_cosine"], 0.20, "Detector/recognizer returned unrelated embeddings")
+        self.assertGreater(
+            result["face_cosine"],
+            threshold,
+            f"Face cosine {result['face_cosine']:.3f} is under the shipped threshold {threshold:.2f}; "
+            "the same guest is re-enrolled as a new customer",
+        )
         self.assertTrue(
             result["same_person"],
             f"Expected same customer across outfits; face cosine={result['face_cosine']:.3f}",
@@ -149,7 +201,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test face match across two outfit photos")
     parser.add_argument("photo_a", nargs="?", default=str(DEFAULT_PHOTOS[0]))
     parser.add_argument("photo_b", nargs="?", default=str(DEFAULT_PHOTOS[1]))
-    parser.add_argument("--threshold", type=float, default=0.60)
+    parser.add_argument("--threshold", type=float, default=None)
     args = parser.parse_args()
     pa, pb = Path(args.photo_a), Path(args.photo_b)
     if not pa.is_file() or not pb.is_file():

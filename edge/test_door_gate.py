@@ -2,6 +2,7 @@
 
 import unittest
 from datetime import datetime
+from pathlib import Path
 
 from door_gate import DoorTrafficMonitor
 
@@ -168,6 +169,82 @@ class DoorGateTest(unittest.TestCase):
         self._tick(mon, [off])
         self.assertEqual(mon.recent(), [])
         self.assertNotIn(5, mon.tracks)
+
+
+class DoorMonitorConfigTests(unittest.TestCase):
+    """The door monitor shipped disabled, so customer visit times were silently
+    never recorded while the shoe monitor looked healthy. These guard the shipped
+    configs against that class of silent misconfiguration."""
+
+    @staticmethod
+    def _load(name):
+        import yaml
+
+        path = Path(__file__).resolve().parent / name
+        if not path.is_file():
+            raise unittest.SkipTest(f"{name} not present")
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    def test_live_config_records_door_traffic(self):
+        cfg = self._load("config.yaml")
+        block = cfg.get("door_monitor")
+        self.assertIsInstance(block, dict, "config.yaml has no door_monitor block")
+        self.assertTrue(
+            block.get("enabled"),
+            "door_monitor.enabled is false: no enter/exit times means no visit "
+            "durations and no 'when does my customer come' data",
+        )
+
+    def test_live_door_zone_is_wellformed(self):
+        block = self._load("config.yaml").get("door_monitor") or {}
+        zone = block.get("zone")
+        self.assertEqual(len(zone), 2, f"door_monitor.zone must be [x1, x2], got {zone!r}")
+        zx1, zx2 = float(zone[0]), float(zone[1])
+        self.assertLess(zx1, zx2, f"door_monitor.zone is inverted: {zone!r}")
+        self.assertTrue(0.0 <= zx1 and zx2 <= 1.0, f"door_monitor.zone out of frame: {zone!r}")
+
+        line_x = float(block.get("line_x", 0.55))
+        self.assertTrue(0.0 <= line_x <= 1.0, f"door_monitor.line_x out of frame: {line_x}")
+        # The tripwire must sit inside the door band, otherwise a crossing can
+        # never be observed for anyone the zone-appear path misses.
+        self.assertGreaterEqual(
+            line_x,
+            min(zx1, zx2),
+            f"line_x={line_x} is left of the door zone {zone!r}: guests appear "
+            "outside the band before any crossing can be confirmed",
+        )
+
+        self.assertIn(
+            str(block.get("enter_direction", "")),
+            ("right_to_left", "left_to_right"),
+            "enter_direction must be right_to_left or left_to_right",
+        )
+
+    def test_example_config_documents_door_monitor(self):
+        block = self._load("config.example.yaml").get("door_monitor")
+        self.assertIsInstance(
+            block, dict, "config.example.yaml must ship a door_monitor block to be discoverable"
+        )
+        self.assertIn("zone", block)
+        self.assertIn("enter_direction", block)
+        # Example stays opt-in; only the live config enables it.
+        self.assertFalse(block.get("enabled"), "example config must not enable monitors by default")
+
+    def test_monitor_still_fires_from_shipped_config(self):
+        """End-to-end: build the monitor from the live config and walk a guest in."""
+        block = self._load("config.yaml").get("door_monitor") or {}
+        if not block.get("enabled"):
+            self.skipTest("door_monitor disabled")
+        mon = DoorTrafficMonitor({**block, "proofs": False})
+        w, h, t = 960, 1080, 2000.0
+        fired = []
+        # The zone-appear anchor needs a second observation (hits == 1).
+        for _ in range(2):
+            stamp = datetime.fromtimestamp(t)
+            fired = mon.update([_FakeDet(cx=0.62, track_id=1)], w, h, t, frame=None, stamp=stamp)
+            t += 1.0
+        self.assertEqual([e.kind for e in fired], ["enter"], f"guest at cx=0.62 did not register: {fired}")
+        self.assertEqual(mon.sessions_meta()[0]["session_id"], 1)
 
 
 if __name__ == "__main__":

@@ -55,7 +55,72 @@ DEFAULT_VEHICLE_IMGSZ = 512
 GPU_IMGSZ = 1280
 DEFAULT_BAY_ZOOM = True
 DEFAULT_BAY_ZOOM_PAD = 0.08
-DEFAULT_NUM_THREADS = min(4, max(1, os.cpu_count() or 4))
+def _affinity_cpus() -> int:
+    """CPUs this process may actually run on (respects taskset / cgroup pinning)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+def physical_core_count() -> int:
+    """Usable physical cores, so SMT siblings do not oversubscribe the thread pool.
+
+    ONNX Runtime's intra-op pool is tuned for physical cores, not logical CPUs.
+    Measured on the 2-core / 4-thread AMD Ryzen 3 3250U with the YOLOX-tiny
+    416x416 detector that rtmpose_mode=lightweight loads:
+
+        threads   1       2       4       8       16
+        ORT ms    199.1   149.0   191.2   363.0   724.2
+
+    Hyper-threading made it 2.4x *slower* at 8 threads than at 2. Defaulting to
+    ``os.cpu_count()`` (logical) therefore picks the worst setting on every
+    SMT-enabled mini-PC and laptop.
+    """
+    logical = max(1, _affinity_cpus())
+    if logical == 1:
+        return 1
+
+    pairs: set[tuple[str, str]] = set()
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
+            phys = core = None
+            for line in fh:
+                if not line.strip():
+                    if phys is not None and core is not None:
+                        pairs.add((phys, core))
+                    phys = core = None
+                    continue
+                key, _, value = line.partition(":")
+                key = key.strip().lower()
+                if key == "physical id":
+                    phys = value.strip()
+                elif key == "core id":
+                    core = value.strip()
+            if phys is not None and core is not None:
+                pairs.add((phys, core))
+    except OSError:
+        pairs = set()
+
+    if pairs:
+        return max(1, min(logical, len(pairs)))
+    # No topology available: assume 2-way SMT, which is the common edge case.
+    return max(1, logical // 2)
+
+
+def resolve_num_threads(cfg: dict | None = None) -> int:
+    """Inference thread count: explicit config wins, else physical cores."""
+    cfg = cfg or {}
+    raw = cfg.get("num_threads")
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            print(f"[Runtime] ignoring invalid num_threads={raw!r}")
+    return physical_core_count()
+
+
+DEFAULT_NUM_THREADS = physical_core_count()
 
 
 @dataclass(frozen=True)

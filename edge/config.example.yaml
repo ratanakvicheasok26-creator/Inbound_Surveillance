@@ -55,8 +55,17 @@ wifi_devices: []
 # Shoes, bags, and jackets fail: no head/torso tree. Blankets still fail.
 # detect_fps caps inference; the preview still follows the camera.
 # Dual-target runtime: cpu | openvino | cuda | tensorrt
+#   cpu      = ONNX Runtime. Best on AMD/ARM edge boxes.
+#   openvino = OpenVINO 2026.x, pre-installed and already wired through
+#              runtime.py + rtmpose.py. Only faster on Intel CPUs (VNNI/AVX512);
+#              measured 0.89x, i.e. slower, on an AMD Ryzen 3 3250U, so leave
+#              this on cpu unless the box is Intel.
 # imgsz 960 keeps far 1080p workers large enough; set 1280 on cuda/tensorrt.
 runtime: cpu
+# Inference thread budget. Omit to auto-detect *physical* cores. Do not set this
+# to the logical CPU count: ONNX Runtime's intra-op pool scales badly past
+# physical cores (measured 1.42x slower at 4 threads vs 2 on a 2c/4t Ryzen 3).
+# num_threads: 2
 # Pose backend: "rtmpose" (OpenMMLab RTMPose via rtmlib), "yolo" (YOLO11n-pose),
 # or "tinypose" (PP-TinyPose). Vehicle boxes still use Ultralytics YOLO.
 pose_engine: rtmpose
@@ -120,11 +129,38 @@ enable_face_id: true
 store_customer_avatars: true
 faces_dir: "faces"
 models_dir: "models"
-face_match_threshold: 0.60
+# Cosine similarity floor for SFace 128-d embeddings (face_id.CustomerFaceGallery
+# default is 0.38, the OpenCV-zoo SFace operating point). Raising this to 0.60
+# makes the same guest re-enroll as a brand-new customer on every visit, which
+# silently inflates customer counts and breaks retention / churn reporting.
+face_match_threshold: 0.38
 
 # Prefer env vars TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (never commit real tokens).
 telegram_bot_token: ""
 telegram_chat_id: ""
+
+# Spa lobby door traffic: times when customers cross the entrance so each visit
+# gets an enter/exit pair and a dwell time. Two signals, either one is enough:
+#   line_x  vertical tripwire (direction of travel decides enter vs exit)
+#   zone    door-side horizontal band [x1, x2] normalized; a track appearing
+#           inside it counts as ENTER, an entered track vanishing from it as EXIT
+# enter_direction: right_to_left means the door is on the RIGHT of the frame and
+# guests walk right -> left to come in. Flip to left_to_right if the door is on
+# the left. verify with one real walk-through before trusting the numbers.
+door_monitor:
+  enabled: false
+  line_x: 0.55
+  zone: [0.50, 1.00]
+  enter_direction: right_to_left
+  confirm_obs: 3
+  cooldown_seconds: 20.0
+  leave_seconds: 5.0
+  relink_seconds: 30.0
+  relink_distance: 0.28
+  motion_confirm: false
+  motion_thresh: 2.5
+  max_sessions: 2
+  proofs: true
 
 # Spa shoe-change / flip-flop station: visitors taking off street shoes and
 # putting on indoor flip-flops at the rack is a strong CUSTOMER signal (staff

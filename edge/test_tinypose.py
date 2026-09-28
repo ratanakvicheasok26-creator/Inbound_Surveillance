@@ -87,7 +87,18 @@ class TestTinyPoseCropAndConfidence(unittest.TestCase):
 class TestTinyPosePipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.pico_path, cls.pose_path = ensure_tinypose_models(MODELS_DIR, download=False)
+        # TinyPose is an optional backend (rtmpose is the default and what
+        # config.yaml ships). Its weights are not in the repo, so a machine that
+        # never selected this backend has nothing to test. Skip with an
+        # actionable message instead of raising FileNotFoundError and turning
+        # the whole suite red.
+        try:
+            cls.pico_path, cls.pose_path = ensure_tinypose_models(MODELS_DIR, download=False)
+        except FileNotFoundError as exc:
+            raise unittest.SkipTest(
+                f"{exc} -- run: python -c \"import tinypose,pathlib;"
+                "tinypose.ensure_tinypose_models(pathlib.Path('models'))\""
+            ) from exc
 
     def test_01_models_present(self):
         self.assertTrue(self.pico_path.is_file(), f"PicoDet ONNX missing: {self.pico_path}")
