@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from db import connect as db_connect
 from paths import data_dir
 from telegram_out import TelegramOut
 from visitor_registry import get_visitor_display_name
@@ -20,10 +21,7 @@ def _default_db_path() -> Path:
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path is not None else _default_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_connect(path)
 
 
 def _parse_day(value: str) -> date | None:

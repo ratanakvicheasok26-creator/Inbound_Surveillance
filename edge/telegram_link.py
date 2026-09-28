@@ -48,6 +48,9 @@ class TelegramLinkService:
         self._active_chat_id = ""
         self._active_display_name = ""
         self._last_error = ""
+        # When False, configure() refreshes identity but must not call getUpdates
+        # (e.g. run_champei owns TelegramController as the sole poller).
+        self._start_poller = True
         self._poll_thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -97,19 +100,28 @@ class TelegramLinkService:
                 "Alerts now go only to the newly connected account.",
             )
 
-    def configure(self, token: str) -> None:
+    def configure(self, token: str, *, start_poller: bool | None = None) -> None:
         token = (token or "").strip()
         with self._lock:
-            if token == self._token:
+            if start_poller is not None:
+                self._start_poller = bool(start_poller)
+            poll = self._start_poller
+            token_changed = token != self._token
+            if not token_changed and start_poller is None:
                 return
-            self._token = token
-            self._bot_username = ""
-            self._bot_id = None
-            self._offset = 0
-            self._last_error = ""
+            if token_changed:
+                self._token = token
+                self._bot_username = ""
+                self._bot_id = None
+                self._offset = 0
+                self._last_error = ""
         if token:
-            self.refresh_bot_identity()
-            self.start()
+            if token_changed:
+                self.refresh_bot_identity()
+            if poll:
+                self.start()
+            else:
+                self.stop()
         else:
             self.stop()
 
