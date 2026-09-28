@@ -153,8 +153,8 @@ class SessionAnalyticsTests(unittest.TestCase):
             branch_id="champei-pp-01",
             day=day,
         )
-        self.assertIn("• Lobby Bounces / Walk-Aways: 1", text)
-        self.assertIn("• Total Visits: 1", text)
+        self.assertIn("• Total Customer Visits: 1", text)
+        self.assertIn("• Completed Treatments: 1", text)
 
 
 class TelegramEarlyDepartureRoutingTests(unittest.TestCase):

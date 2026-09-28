@@ -12,7 +12,7 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 STAFF_EVENTS = frozenset({"wait_bottleneck", "vip_arrival", "guest_arrival", "early_departure"})
 OWNER_EVENTS = frozenset(
-    {"daily_scorecard", "silent_churn", "early_departure", "weekly_customer_brief"}
+    {"daily_scorecard", "silent_churn", "early_departure", "weekly_customer_brief", "monthly_customer_brief"}
 )
 
 

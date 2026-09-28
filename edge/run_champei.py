@@ -43,7 +43,7 @@ def _scorecard_loop(
     *,
     branch_id: str,
     db_path: Path,
-    fire_at: dt_time = dt_time(21, 0),
+    fire_at: dt_time = dt_time(21, 45),
 ) -> None:
     """Fire send_daily_scorecard once per local calendar day at fire_at."""
     from analytics.scorecard import send_daily_scorecard
@@ -101,7 +101,7 @@ def _weekly_brief_loop(
     *,
     branch_id: str,
     db_path: Path,
-    fire_at: dt_time = dt_time(21, 0),
+    fire_at: dt_time = dt_time(17, 0),
     tz: dt_tzinfo | None = None,
     now_fn=None,
     send_fn=None,
@@ -135,6 +135,53 @@ def _weekly_brief_loop(
                 except Exception as exc:
                     print(f"[run_champei] weekly customer brief error: {exc}", flush=True)
                 last_week_key = week_key
+        stop_event.wait(poll_seconds)
+
+
+def _is_last_day_of_month(d: date) -> bool:
+    import calendar
+    return d.day == calendar.monthrange(d.year, d.month)[1]
+
+
+def _monthly_brief_loop(
+    stop_event: threading.Event,
+    *,
+    branch_id: str,
+    db_path: Path,
+    fire_at: dt_time = dt_time(21, 45),
+    tz: dt_tzinfo | None = None,
+    now_fn=None,
+    send_fn=None,
+    poll_seconds: float = 30.0,
+) -> None:
+    """Fire send_monthly_strategic_brief once per calendar month on the last day at fire_at."""
+    from analytics.monthly_customer_brief import send_monthly_strategic_brief
+
+    if not _env_flag("MONTHLY_CUSTOMER_BRIEF_ENABLED", True):
+        print("[run_champei] monthly customer brief disabled", flush=True)
+        return
+
+    zone = tz if tz is not None else _local_tz()
+    clock = now_fn if now_fn is not None else (lambda: datetime.now(zone))
+    dispatch = send_fn if send_fn is not None else send_monthly_strategic_brief
+
+    last_month_key: str | None = None
+    while not stop_event.is_set():
+        now = clock()
+        local = now.astimezone(zone) if now.tzinfo is not None else now.replace(tzinfo=zone)
+        if _is_last_day_of_month(local.date()) and (local.hour, local.minute) >= (fire_at.hour, fire_at.minute):
+            month_key = f"{local.year:04d}-{local.month:02d}"
+            if last_month_key != month_key:
+                try:
+                    ok = dispatch(db_path=db_path, branch_id=branch_id, as_of=local.date())
+                    print(
+                        f"[run_champei] monthly customer brief "
+                        f"{'sent' if ok else 'skipped/failed'} month={month_key}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(f"[run_champei] monthly customer brief error: {exc}", flush=True)
+                last_month_key = month_key
         stop_event.wait(poll_seconds)
 
 
@@ -198,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
             "stop_event": stop_event,
             "branch_id": args.branch,
             "db_path": db_path,
+            "fire_at": _parse_fire_at(os.environ.get("SCORECARD_FIRE_AT", "21:45"), default=dt_time(21, 45)),
         },
         name="daily-scorecard",
         daemon=True,
@@ -208,17 +256,30 @@ def main(argv: list[str] | None = None) -> int:
             "stop_event": stop_event,
             "branch_id": args.branch,
             "db_path": db_path,
-            "fire_at": _parse_fire_at(os.environ.get("WEEKLY_CUSTOMER_BRIEF_AT", "")),
+            "fire_at": _parse_fire_at(os.environ.get("WEEKLY_CUSTOMER_BRIEF_AT", "17:00"), default=dt_time(17, 0)),
         },
         name="weekly-customer-brief",
+        daemon=True,
+    )
+    monthly_thread = threading.Thread(
+        target=_monthly_brief_loop,
+        kwargs={
+            "stop_event": stop_event,
+            "branch_id": args.branch,
+            "db_path": db_path,
+            "fire_at": _parse_fire_at(os.environ.get("MONTHLY_CUSTOMER_BRIEF_AT", "21:45"), default=dt_time(21, 45)),
+        },
+        name="monthly-customer-brief",
         daemon=True,
     )
     tg_thread.start()
     print("[run_champei] Telegram controller started", flush=True)
     score_thread.start()
-    print("[run_champei] Scorecard scheduler started", flush=True)
+    print("[run_champei] Scorecard scheduler started (21:45 daily)", flush=True)
     weekly_thread.start()
-    print("[run_champei] Weekly customer brief scheduler started", flush=True)
+    print("[run_champei] Weekly customer brief scheduler started (17:00 Sundays)", flush=True)
+    monthly_thread.start()
+    print("[run_champei] Monthly customer brief scheduler started (21:45 end of month)", flush=True)
 
     try:
         if args.mock:
@@ -240,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         tg_thread.join(timeout=2.0)
         score_thread.join(timeout=2.0)
         weekly_thread.join(timeout=2.0)
+        monthly_thread.join(timeout=2.0)
         print("[run_champei] shutdown complete", flush=True)
 
     return 0

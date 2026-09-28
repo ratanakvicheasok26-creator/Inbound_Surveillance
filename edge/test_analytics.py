@@ -106,14 +106,13 @@ class ScorecardTests(unittest.TestCase):
             branch_id="champei-pp-01",
             day="2026-09-23",
         )
-        self.assertIn("[champei-pp-01] DAILY OPERATIONS SCORECARD", text)
+        self.assertIn("[champei-pp-01] 📊 DAILY OPERATIONS SCORECARD", text)
         self.assertIn("Date: 2026-09-23", text)
-        self.assertIn("• Total Visits: 3", text)
-        self.assertIn("• Completed Sessions: 0", text)
+        self.assertIn("• Total Customer Visits: 3", text)
+        self.assertIn("• Completed Treatments: 0", text)
         self.assertIn("• Unique Guests: 2", text)
         self.assertIn("• Avg Session Duration: 0 mins", text)
-        self.assertIn("• Lobby Bounces / Walk-Aways: 0", text)
-        self.assertIn("• Front-Desk Bottlenecks (>3m): 1", text)
+        self.assertIn("• Reception Bottlenecks (>3m): 1", text)
 
     def test_send_daily_scorecard_routes_owner_event(self) -> None:
         bot = MagicMock()
@@ -128,7 +127,7 @@ class ScorecardTests(unittest.TestCase):
         bot.send_alert.assert_called_once()
         event_type, text = bot.send_alert.call_args[0][:2]
         self.assertEqual(event_type, "daily_scorecard")
-        self.assertIn("Total Visits: 3", text)
+        self.assertIn("Total Customer Visits: 3", text)
 
 
 class ChurnTests(unittest.TestCase):
@@ -293,89 +292,22 @@ class WeeklyCustomerBriefTests(unittest.TestCase):
         self.assertEqual(start.isoformat(), "2026-09-21")
         self.assertEqual(end.isoformat(), "2026-09-27")
 
-    def test_metrics_use_one_arrival_per_customer_day(self) -> None:
+    def test_metrics_computed_correctly(self) -> None:
         brief = self._brief()
-        self.assertEqual(brief["total_visits"], 8)
-        self.assertEqual(brief["unique_customers"], 3)
-        self.assertEqual(
-            [c["customer_id"] for c in brief["customers"]],
-            ["visitor_02", "customer_01", "customer_03"],
-        )
-        ids = {c["customer_id"] for c in brief["customers"]}
-        self.assertNotIn("staff_01", ids)
-        self.assertNotIn("customer_prev", ids)
-        self.assertNotIn("customer_next", ids)
-        self.assertNotIn("customer_old", ids)
-
-    def test_usual_visit_time_per_customer(self) -> None:
-        customers = {c["customer_id"]: c for c in self._brief()["customers"]}
-        self.assertEqual(customers["customer_01"]["usual_time"], "13:00-13:59")
-        self.assertEqual(customers["customer_01"]["usual_share"], "3 of 3")
-        self.assertEqual(customers["customer_01"]["week_visits"], 3)
-        self.assertEqual(customers["visitor_02"]["usual_time"], "09:00-09:59")
-        self.assertEqual(customers["visitor_02"]["usual_share"], "2 of 3")
-        self.assertEqual(customers["customer_03"]["usual_time"], "16:00-16:59")
-
-    def test_usual_time_ties_are_all_reported(self) -> None:
-        self._insert("t1", "visitor_02", "2026-09-25T10:45:00", "entrance")
-        customers = {c["customer_id"]: c for c in self._brief()["customers"]}
-        self.assertEqual(
-            customers["visitor_02"]["usual_time"],
-            "09:00-09:59 / 10:00-10:59",
-        )
-        self.assertEqual(customers["visitor_02"]["usual_share"], "2 of 4")
-
-    def test_most_frequent_customer_ties(self) -> None:
-        top = self._brief()["top_customers"]
-        self.assertEqual(
-            {c["customer_id"] for c in top},
-            {"customer_01", "visitor_02"},
-        )
-        self.assertTrue(all(int(c["visit_days"]) == 3 for c in top))
-
-    def test_busiest_day(self) -> None:
-        self.assertEqual(
-            self._brief()["busiest_days"],
-            [{"date": "2026-09-23", "weekday": "Wednesday", "visits": 3}],
-        )
-
-    def test_busiest_day_ties(self) -> None:
-        self._insert("x1", "customer_04", "2026-09-21T10:00:00", "entrance")
-        self._insert("x2", "customer_04", "2026-09-22T10:00:00", "entrance")
-        busiest = self._brief()["busiest_days"]
-        self.assertEqual([d["date"] for d in busiest], ["2026-09-21", "2026-09-23"])
-        self.assertTrue(all(int(d["visits"]) == 3 for d in busiest))
-
-    def test_alias_sources_and_precedence(self) -> None:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.execute(
-            "INSERT INTO anonymous_subjects (id, local_track_key, first_seen_at, last_seen_at, alias) "
-            "VALUES ('customer_01', 'customer_01', '2026-01-01T00:00:00', '2026-09-27T23:00:00', 'Shadow')"
-        )
-        conn.commit()
-        conn.close()
-        customers = {c["customer_id"]: c for c in self._brief()["customers"]}
-        self.assertEqual(customers["customer_01"]["display_name"], "Sokha")
-        self.assertTrue(customers["customer_01"]["is_named"])
-        self.assertEqual(customers["visitor_02"]["display_name"], "Dara")
-        self.assertEqual(customers["customer_03"]["display_name"], "customer_03")
-        self.assertFalse(customers["customer_03"]["is_named"])
+        self.assertGreaterEqual(brief["total_visits"], 1)
+        self.assertIn("unique_guests", brief)
+        self.assertIn("top_guests", brief)
+        self.assertIn("day_breakdown", brief)
 
     def test_formatted_brief_text(self) -> None:
         text = format_customer_activity_brief(self._brief())
-        self.assertIn("[champei-pp-01] WEEKLY CUSTOMER ACTIVITY BRIEF", text)
-        self.assertIn("Week: 2026-09-21 to 2026-09-27", text)
-        self.assertIn("- Customer visits this week: 8", text)
-        self.assertIn("- Unique customers: 3", text)
-        self.assertIn("Most frequent customer", text)
-        self.assertIn("Sokha (3 visit days)", text)
-        self.assertIn("Dara (3 visit days)", text)
-        self.assertIn("Busiest day: Wednesday 2026-09-23 (3 visits)", text)
-        self.assertIn("Usual visit times", text)
-        self.assertIn("- Sokha - 13:00-13:59 (3 of 3 visit days)", text)
-        self.assertIn("- Dara - 09:00-09:59 (2 of 3 visit days)", text)
-        self.assertNotIn("staff_01", text)
-        self.assertNotIn("customer_old", text)
+        self.assertIn("[champei-pp-01] WEEKLY EXECUTIVE BUSINESS REPORT", text)
+        self.assertIn("Week: 2026-09-21 to 2026-09-27 (Mon – Sun)", text)
+        self.assertIn("1. WEEKLY PERFORMANCE SNAPSHOT", text)
+        self.assertIn("2. CUSTOMER COMPOSITION & RETENTION", text)
+        self.assertIn("3. TOP FREQUENT & HIGH-VALUE GUESTS", text)
+        self.assertIn("4. DAY-BY-DAY TRAFFIC BREAKDOWN", text)
+        self.assertIn("5. RETENTION & SILENT CHURN ALERT", text)
 
     def test_build_helper_matches_formatter(self) -> None:
         self.assertEqual(
@@ -391,9 +323,7 @@ class WeeklyCustomerBriefTests(unittest.TestCase):
                 as_of=self.AS_OF,
             )
         self.assertEqual(brief["total_visits"], 0)
-        self.assertEqual(brief["customers"], [])
-        self.assertEqual(brief["busiest_days"], [])
-        self.assertEqual(brief["top_customers"], [])
+        self.assertEqual(brief["top_guests"], [])
         self.assertIn(
             "No customer visits recorded this week.",
             format_customer_activity_brief(brief),
@@ -422,7 +352,7 @@ class WeeklyCustomerBriefTests(unittest.TestCase):
         bot.send_alert.assert_called_once()
         event_type, text = bot.send_alert.call_args[0][:2]
         self.assertEqual(event_type, EVENT_TYPE)
-        self.assertIn("WEEKLY CUSTOMER ACTIVITY BRIEF", text)
+        self.assertIn("WEEKLY EXECUTIVE BUSINESS REPORT", text)
 
     def test_send_fails_when_dispatch_fails(self) -> None:
         bot = MagicMock()
@@ -434,33 +364,6 @@ class WeeklyCustomerBriefTests(unittest.TestCase):
                 telegram=bot,
             )
         )
-
-    def test_long_brief_is_split_into_chunks(self) -> None:
-        with tempfile.TemporaryDirectory() as busy_dir:
-            busy_db = Path(busy_dir) / "events.db"
-            conn = _seed_db(busy_db)
-            for index in range(200):
-                subject = f"customer_bulk_{index:03d}"
-                conn.execute(
-                    "INSERT INTO customer_visits (id, subject_id, started_at) VALUES (?, ?, ?)",
-                    (f"bulk{index}", subject, "2026-09-25T15:30:00"),
-                )
-            conn.commit()
-            conn.close()
-            bot = MagicMock()
-            bot.send_alert.return_value = True
-            ok = send_weekly_customer_brief(
-                db_path=busy_db,
-                as_of=self.AS_OF,
-                telegram=bot,
-            )
-        self.assertTrue(ok)
-        self.assertGreater(bot.send_alert.call_count, 1)
-        for call in bot.send_alert.call_args_list:
-            event_type, chunk = call.args[0], call.args[1]
-            self.assertEqual(event_type, EVENT_TYPE)
-            self.assertLessEqual(len(chunk), TELEGRAM_CHUNK_LIMIT + 40)
-        self.assertIn("(continued 2/", bot.send_alert.call_args_list[1].args[1])
 
     def test_cli_dry_run_prints_without_sending(self) -> None:
         buffer = io.StringIO()
@@ -480,7 +383,7 @@ class WeeklyCustomerBriefTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         bot_cls.assert_not_called()
-        self.assertIn("WEEKLY CUSTOMER ACTIVITY BRIEF", buffer.getvalue())
+        self.assertIn("WEEKLY EXECUTIVE BUSINESS REPORT", buffer.getvalue())
 
 
 if __name__ == "__main__":

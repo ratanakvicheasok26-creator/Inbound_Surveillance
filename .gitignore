@@ -44,6 +44,8 @@ IMG_1*.mov
 .cursor/
 
 edge/videos/
+videos/
+edge/media/
 tools/virtual-camera/videos/
 
 # Environment and Secrets

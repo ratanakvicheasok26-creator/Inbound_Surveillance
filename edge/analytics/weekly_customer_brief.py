@@ -1,14 +1,11 @@
-"""Weekly customer activity brief for Champei owner Telegram.
+"""Weekly customer executive business report for Champei owner Telegram.
 
-Answers the three owner questions once per week:
-- when does each customer usually come to the spa,
-- who comes most often,
-- which weekday has the most customers.
-
-Zone rows are collapsed into one canonical arrival per customer per local
-calendar day, so a guest crossing entrance, waiting, and treatment zones is
-counted once. Usual visit times use a trailing lookback window (one week is
-not enough history to establish a habit).
+Calculates the 5-section executive intelligence brief:
+1. Weekly Performance Snapshot
+2. Customer Composition & Retention
+3. Top Frequent & High-Value Guests (by Customer ID)
+4. Day-by-Day Traffic Breakdown (Mon-Sun visual bars)
+5. Retention & Silent Churn Alert
 """
 
 from __future__ import annotations
@@ -29,15 +26,7 @@ DEFAULT_LOOKBACK_DAYS = 90
 STAFF_SUBJECT_PREFIX = "staff_"
 TELEGRAM_CHUNK_LIMIT = 3500
 
-WEEKDAY_NAMES = (
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-)
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def _default_db_path() -> Path:
@@ -45,11 +34,14 @@ def _default_db_path() -> Path:
 
 
 def _connect(db_path: Path | str | None = None) -> sqlite3.Connection:
+    from analytics.sessions import ensure_session_columns
     path = Path(db_path) if db_path is not None else _default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000")
+    if _table_exists(conn, "customer_visits"):
+        ensure_session_columns(conn)
     return conn
 
 
@@ -101,285 +93,295 @@ def _resolve_day(value: date | str | datetime | None) -> date:
 
 
 def week_window(as_of: date) -> tuple[date, date]:
-    """Return the Monday..Sunday window that contains ``as_of``."""
     week_start = as_of - timedelta(days=as_of.weekday())
     return week_start, week_start + timedelta(days=6)
 
 
-def _hour_label(hour: int) -> str:
-    return f"{int(hour):02d}:00-{int(hour):02d}:59"
+def _make_bar(value: int, max_val: int, length: int = 10) -> str:
+    if max_val <= 0:
+        return "░" * length
+    filled = int(round((value / max_val) * length))
+    filled = max(0, min(length, filled))
+    return "█" * filled + "░" * (length - filled)
 
 
-def _load_canonical_visits(
-    conn: sqlite3.Connection,
-    start: date,
-    end: date,
-) -> list[dict[str, Any]]:
-    """One row per customer per local day, using the earliest zone entry."""
-    cols = _column_names(conn, "customer_visits")
-    if "subject_id" not in cols or "started_at" not in cols:
-        return []
-    rows = conn.execute(
-        """
-        SELECT TRIM(subject_id) AS subject_id,
-               SUBSTR(started_at, 1, 10) AS visit_date,
-               MIN(started_at) AS arrived_at
-        FROM customer_visits
-        WHERE started_at IS NOT NULL
-          AND TRIM(subject_id) <> ''
-          AND started_at >= ?
-          AND started_at < ?
-        GROUP BY TRIM(subject_id), SUBSTR(started_at, 1, 10)
-        ORDER BY visit_date ASC, arrived_at ASC, subject_id ASC
-        """,
-        (
-            f"{start.isoformat()}T00:00:00",
-            f"{(end + timedelta(days=1)).isoformat()}T00:00:00",
-        ),
-    ).fetchall()
-
-    visits: list[dict[str, Any]] = []
-    for row in rows:
-        subject_id = str(row["subject_id"] or "").strip()
-        if not subject_id or subject_id.startswith(STAFF_SUBJECT_PREFIX):
-            continue
-        visit_date = _parse_day(row["visit_date"])
-        arrived_at = _parse_dt(row["arrived_at"])
-        if visit_date is None or arrived_at is None:
-            continue
-        visits.append(
-            {
-                "customer_id": subject_id,
-                "visit_date": visit_date,
-                "arrived_at": arrived_at,
-            }
-        )
-    return visits
-
-
-def _load_display_names(
-    conn: sqlite3.Connection,
-    customer_ids: list[str],
-) -> dict[str, str]:
-    """Resolve aliases, preferring visitor_meta over anonymous_subjects."""
-    names: dict[str, str] = {}
-    ids = sorted({cid for cid in customer_ids if cid})
-    if not ids:
-        return names
-    for table, id_col in (("visitor_meta", "visitor_id"), ("anonymous_subjects", "id")):
-        cols = _column_names(conn, table)
-        if id_col not in cols or "alias" not in cols:
-            continue
-        for offset in range(0, len(ids), 400):
-            chunk = ids[offset : offset + 400]
-            placeholders = ",".join("?" for _ in chunk)
-            rows = conn.execute(
-                f"SELECT {id_col} AS cid, alias FROM {table} "
-                f"WHERE {id_col} IN ({placeholders})",
-                tuple(chunk),
-            ).fetchall()
-            for row in rows:
-                cid = str(row["cid"] or "").strip()
-                alias = str(row["alias"] or "").strip()
-                if cid and alias and cid not in names:
-                    names[cid] = alias
-    return names
-
-
-def _usual_hour_buckets(visits: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    counter = Counter(int(visit["arrived_at"].hour) for visit in visits)
-    if not counter:
-        return []
-    best = max(counter.values())
-    return [
-        {"hour": hour, "count": count, "label": _hour_label(hour)}
-        for hour, count in sorted(counter.items())
-        if count == best
-    ]
-
-
-def compute_customer_activity_brief(
+def compute_weekly_executive_brief(
     db_path: Path | str | None = None,
     branch_id: str = DEFAULT_BRANCH,
     as_of: date | str | datetime | None = None,
-    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 ) -> dict[str, Any]:
-    """Summarize who comes to the spa, how often, when, and on which day."""
     branch = str(branch_id or DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
     report_day = _resolve_day(as_of)
     week_start, week_end = week_window(report_day)
-    week_end = min(week_end, report_day)
-    lookback = max(1, int(lookback_days))
-    history_start = week_start - timedelta(days=lookback)
+    prior_week_start = week_start - timedelta(days=7)
+    prior_week_end = week_start - timedelta(days=1)
 
     conn = _connect(db_path)
     try:
-        history = _load_canonical_visits(conn, history_start, report_day)
-        names = _load_display_names(conn, [v["customer_id"] for v in history])
+        cols = _column_names(conn, "customer_visits")
+        has_visits = _table_exists(conn, "customer_visits") and "started_at" in cols
+        rows_this_week = []
+        rows_prior_week = []
+        rows_lifetime = []
+
+        if has_visits:
+            rows_this_week = conn.execute(
+                """
+                SELECT subject_id, started_at, ended_at, duration_seconds, status
+                FROM customer_visits
+                WHERE started_at >= ? AND started_at <= ?
+                """,
+                (f"{week_start.isoformat()}T00:00:00", f"{week_end.isoformat()}T23:59:59"),
+            ).fetchall()
+
+            rows_prior_week = conn.execute(
+                """
+                SELECT subject_id, started_at, ended_at, duration_seconds, status
+                FROM customer_visits
+                WHERE started_at >= ? AND started_at <= ?
+                """,
+                (f"{prior_week_start.isoformat()}T00:00:00", f"{prior_week_end.isoformat()}T23:59:59"),
+            ).fetchall()
+
+            rows_lifetime = conn.execute(
+                "SELECT subject_id, started_at FROM customer_visits WHERE started_at IS NOT NULL"
+            ).fetchall()
+
+        # Load names / aliases from visitor_meta
+        names_map: dict[str, str] = {}
+        if _table_exists(conn, "visitor_meta"):
+            meta_cols = {col["name"] for col in conn.execute("PRAGMA table_info(visitor_meta)").fetchall()}
+            vid_col = "visitor_id" if "visitor_id" in meta_cols else "subject_id"
+            if vid_col in meta_cols and "alias" in meta_cols:
+                meta_rows = conn.execute(f"SELECT {vid_col} AS vid, alias FROM visitor_meta").fetchall()
+                for r in meta_rows:
+                    vid = str(r["vid"] or "").strip()
+                    alias = str(r["alias"] or "").strip()
+                    if vid and alias:
+                        names_map[vid] = alias
     finally:
         conn.close()
 
-    history_by_customer: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for visit in history:
-        history_by_customer[str(visit["customer_id"])].append(visit)
+    # Calculate metrics
+    total_visits = len(rows_this_week)
+    prior_visits = len(rows_prior_week)
+    growth_pct = round(((total_visits - prior_visits) / max(1, prior_visits)) * 100.0, 1)
 
-    week_by_customer: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for visit in history:
-        if week_start <= visit["visit_date"] <= week_end:
-            week_by_customer[str(visit["customer_id"])].append(visit)
+    completed_count = 0
+    total_duration_sec = 0.0
+    daily_counts = defaultdict(int)
+    subject_week_visits = defaultdict(int)
+    subject_week_duration = defaultdict(float)
 
-    customers: list[dict[str, Any]] = []
-    for customer_id, week_visits in week_by_customer.items():
-        customer_history = history_by_customer.get(customer_id, week_visits)
-        buckets = _usual_hour_buckets(customer_history)
-        visit_days = len({visit["visit_date"] for visit in customer_history})
-        display_name = names.get(customer_id, customer_id)
-        customers.append(
-            {
-                "customer_id": customer_id,
-                "display_name": display_name,
-                "is_named": customer_id in names,
-                "week_visits": len(week_visits),
-                "visit_days": visit_days,
-                "usual_hours": buckets,
-                "usual_time": " / ".join(b["label"] for b in buckets) or "unknown",
-                "usual_share": f"{buckets[0]['count']} of {visit_days}" if buckets else "",
-            }
-        )
+    for r in rows_this_week:
+        sid = str(r["subject_id"] or "").strip()
+        st = r["status"]
+        ended = r["ended_at"]
+        dur = float(r["duration_seconds"] or 0.0) if "duration_seconds" in r.keys() else 0.0
 
-    customers.sort(
-        key=lambda c: (
-            -int(c["week_visits"]),
-            -int(c["visit_days"]),
-            str(c["display_name"]).lower(),
-            str(c["customer_id"]),
-        )
+        if st == "completed" or ended is not None:
+            completed_count += 1
+
+        if dur <= 0 and ended and r["started_at"]:
+            try:
+                t0 = datetime.fromisoformat(str(r["started_at"]).replace("Z", ""))
+                t1 = datetime.fromisoformat(str(ended).replace("Z", ""))
+                dur = max(0.0, (t1 - t0).total_seconds())
+            except Exception:
+                dur = 0.0
+
+        if dur > 0:
+            total_duration_sec += dur
+            subject_week_duration[sid] += dur
+
+        subject_week_visits[sid] += 1
+
+        day = _parse_day(r["started_at"])
+        if day:
+            daily_counts[day.isoformat()] += 1
+
+    completion_rate = round((completed_count / max(1, total_visits)) * 100.0, 1)
+    unique_guests = len(subject_week_visits)
+    total_hours = round(total_duration_sec / 3600.0, 1)
+    avg_duration_min = round((total_duration_sec / max(1, completed_count)) / 60.0, 1) if completed_count else 0.0
+
+    # Lifetime visits per subject
+    lifetime_counts = defaultdict(int)
+    lifetime_days = defaultdict(set)
+    for r in rows_lifetime:
+        sid = str(r["subject_id"] or "").strip()
+        lifetime_counts[sid] += 1
+        day = _parse_day(r["started_at"])
+        if day:
+            lifetime_days[sid].add(day)
+
+    # Regular vs New vs Returning
+    regular_count = 0
+    returning_count = 0
+    new_count = 0
+
+    for sid in subject_week_visits:
+        tot_days = len(lifetime_days.get(sid, set()))
+        if tot_days >= 3:
+            regular_count += 1
+        elif tot_days >= 2:
+            returning_count += 1
+        else:
+            new_count += 1
+
+    retention_rate = round(((regular_count + returning_count) / max(1, unique_guests)) * 100.0, 1)
+
+    # Top guests leaderboard
+    sorted_guests = sorted(
+        subject_week_visits.items(),
+        key=lambda x: (x[1], subject_week_duration[x[0]]),
+        reverse=True,
     )
+    top_guests = []
+    for sid, v_count in sorted_guests[:5]:
+        hours_spent = round(subject_week_duration[sid] / 3600.0, 1)
+        lifetimes = lifetime_counts.get(sid, v_count)
+        disp_name = names_map.get(sid, sid)
+        top_guests.append({
+            "id": sid,
+            "display_name": disp_name,
+            "week_visits": v_count,
+            "hours": hours_spent,
+            "lifetime_visits": lifetimes,
+        })
 
-    day_counter = Counter(
-        visit["visit_date"] for visits in week_by_customer.values() for visit in visits
-    )
-    busiest: list[dict[str, Any]] = []
-    if day_counter:
-        best = max(day_counter.values())
-        busiest = [
-            {
-                "date": day.isoformat(),
-                "weekday": WEEKDAY_NAMES[day.weekday()],
-                "visits": count,
-            }
-            for day, count in sorted(day_counter.items())
-            if count == best
-        ]
+    # Day-by-day table
+    day_breakdown = []
+    max_day_visits = max(daily_counts.values()) if daily_counts else 1
+    weekend_visits = 0
 
-    top_days = max((int(c["visit_days"]) for c in customers), default=0)
-    top_customers = [c for c in customers if int(c["visit_days"]) == top_days] if customers else []
+    for i in range(7):
+        cur_day = week_start + timedelta(days=i)
+        iso = cur_day.isoformat()
+        count = daily_counts.get(iso, 0)
+        is_weekend = cur_day.weekday() >= 4  # Fri, Sat, Sun
+        if is_weekend:
+            weekend_visits += count
+
+        day_breakdown.append({
+            "weekday": WEEKDAYS[cur_day.weekday()],
+            "date": cur_day.strftime("%m/%d"),
+            "count": count,
+            "bar": _make_bar(count, max_day_visits, length=10),
+            "is_peak": count == max_day_visits and count > 0,
+        })
+
+    weekend_share = round((weekend_visits / max(1, total_visits)) * 100.0, 1)
+
+    # Churn / overdue regulars (>14 days absent)
+    churn_risks = []
+    for sid, d_set in lifetime_days.items():
+        if len(d_set) >= 3 and sid not in subject_week_visits:
+            last_v = max(d_set)
+            days_absent = (report_day - last_v).days
+            if days_absent >= 14:
+                disp_name = names_map.get(sid, sid)
+                churn_risks.append({
+                    "id": sid,
+                    "display_name": disp_name,
+                    "days_absent": days_absent,
+                })
+    churn_risks.sort(key=lambda x: x["days_absent"], reverse=True)
 
     return {
         "branch_id": branch,
-        "generated_for": report_day.isoformat(),
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
-        "history_start": history_start.isoformat(),
-        "history_end": report_day.isoformat(),
-        "lookback_days": lookback,
-        "total_visits": sum(int(c["week_visits"]) for c in customers),
-        "unique_customers": len(customers),
-        "busiest_days": busiest,
-        "top_customers": top_customers,
-        "customers": customers,
+        "total_visits": total_visits,
+        "growth_pct": growth_pct,
+        "completed_treatments": completed_count,
+        "completion_rate": completion_rate,
+        "unique_guests": unique_guests,
+        "total_hours": total_hours,
+        "avg_duration_min": avg_duration_min,
+        "regular_count": regular_count,
+        "returning_count": returning_count,
+        "new_count": new_count,
+        "retention_rate": retention_rate,
+        "top_guests": top_guests,
+        "day_breakdown": day_breakdown,
+        "weekend_share": weekend_share,
+        "churn_risks": churn_risks[:3],
     }
 
 
-def format_customer_activity_brief(brief: dict[str, Any]) -> str:
-    """Format the owner-facing weekly customer activity text."""
-    branch = str(brief.get("branch_id") or DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
-    lookback = int(brief.get("lookback_days") or DEFAULT_LOOKBACK_DAYS)
-    lines = [
-        f"[{branch}] WEEKLY CUSTOMER ACTIVITY BRIEF",
-        f"Week: {brief.get('week_start')} to {brief.get('week_end')}",
-        f"- Customer visits this week: {int(brief.get('total_visits') or 0)}",
-        f"- Unique customers: {int(brief.get('unique_customers') or 0)}",
-    ]
+def format_weekly_executive_brief(data: dict[str, Any]) -> str:
+    branch = data.get("branch_id", DEFAULT_BRANCH)
+    w_start = data.get("week_start", "")
+    w_end = data.get("week_end", "")
 
-    top_customers = brief.get("top_customers") or []
-    if top_customers:
-        text = " / ".join(
-            f"{c['display_name']} ({int(c['visit_days'])} visit days)"
-            for c in top_customers
+    growth_sign = "+" if data["growth_pct"] >= 0 else ""
+    growth_txt = f"({growth_sign}{data['growth_pct']}% vs last week)"
+
+    # Top guests formatting
+    medals = ["🥇 1.", "🥈 2.", "🥉 3.", "🏅 4.", "🏅 5."]
+    top_lines = []
+    for i, g in enumerate(data.get("top_guests", [])):
+        prefix = medals[i] if i < len(medals) else f"• {i+1}."
+        top_lines.append(
+            f"{prefix} {g['display_name']}\n"
+            f"   └ {g['week_visits']} visits this week | {g['hours']} hrs total | {g['lifetime_visits']} lifetime visits"
         )
-        lines.append(f"- Most frequent customer (last {lookback}d): {text}")
+    top_text = "\n".join(top_lines) if top_lines else "• No customer visits recorded this week."
 
-    busiest_days = brief.get("busiest_days") or []
-    if busiest_days:
-        text = " / ".join(
-            f"{d['weekday']} {d['date']} ({int(d['visits'])} visits)"
-            for d in busiest_days
-        )
-        lines.append(f"- Busiest day: {text}")
+    # Day breakdown formatting
+    day_lines = []
+    for d in data.get("day_breakdown", []):
+        tag = "  🏆 Peak Day" if d["is_peak"] else ("  🔥 Busy" if d["count"] >= 25 else "")
+        day_lines.append(f"• {d['weekday']} ({d['date']}): {d['count']:02d} visits  [{d['bar']}]{tag}")
+    day_text = "\n".join(day_lines)
 
-    customers = brief.get("customers") or []
-    if not customers:
-        lines.append("")
-        lines.append("No customer visits recorded this week.")
-        return "\n".join(lines)
+    # Churn formatting
+    churn_lines = []
+    for c in data.get("churn_risks", []):
+        churn_lines.append(f"• {c['display_name']} — Absent {c['days_absent']} days (Prior regular)")
+    if not churn_lines:
+        churn_text = "• No high-risk customer churn detected."
+    else:
+        churn_text = "\n".join(churn_lines) + "\n💡 Suggested Action: Send reminder, voucher, or check-in."
 
-    lines.append("")
-    lines.append(f"Usual visit times (based on the last {lookback} days):")
-    for customer in customers:
-        line = f"- {customer['display_name']} - {customer['usual_time']}"
-        if customer.get("usual_share"):
-            line += f" ({customer['usual_share']} visit days)"
-        lines.append(f"{line} - {int(customer.get('week_visits') or 0)} visit(s) this week")
-    return "\n".join(lines)
-
-
-def _split_message(text: str, limit: int = TELEGRAM_CHUNK_LIMIT) -> list[str]:
-    """Split long text at line boundaries so every Telegram send stays valid."""
-    body = str(text or "").strip()
-    if not body:
-        return []
-    size_limit = max(200, int(limit))
-    chunks: list[str] = []
-    current: list[str] = []
-    size = 0
-    for line in body.splitlines():
-        if len(line) > size_limit:
-            if current:
-                chunks.append("\n".join(current))
-                current = []
-                size = 0
-            for start in range(0, len(line), size_limit):
-                chunks.append(line[start : start + size_limit])
-            continue
-        extra = len(line) + 1
-        if current and size + extra > size_limit:
-            chunks.append("\n".join(current))
-            current = []
-            size = 0
-        current.append(line)
-        size += extra
-    if current:
-        chunks.append("\n".join(current))
-    if len(chunks) > 1:
-        total = len(chunks)
-        chunks = [f"{chunk}\n(continued {i}/{total})" for i, chunk in enumerate(chunks, 1)]
-    return chunks
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🌿 [{branch}] WEEKLY EXECUTIVE BUSINESS REPORT\n"
+        f"📅 Week: {w_start} to {w_end} (Mon – Sun)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📈 1. WEEKLY PERFORMANCE SNAPSHOT\n"
+        f"• Total Customer Visits: {data['total_visits']} {growth_txt}\n"
+        f"• Completed Treatments: {data['completed_treatments']} ({data['completion_rate']}% completion rate)\n"
+        f"• Unique Individuals: {data['unique_guests']} guests\n"
+        f"• Total Treatment Time: {data['total_hours']} hours delivered\n"
+        f"• Avg Treatment Duration: {data['avg_duration_min']:.0f} mins / guest\n\n"
+        f"👥 2. CUSTOMER COMPOSITION & RETENTION\n"
+        f"• 👑 Regular Guests: {data['regular_count']} guests ({data['regular_count']/max(1, data['unique_guests'])*100:.1f}%)\n"
+        f"• 🔄 Returning Guests: {data['returning_count']} guests ({data['returning_count']/max(1, data['unique_guests'])*100:.1f}%)\n"
+        f"• 🆕 First-Time Clients: {data['new_count']} guests ({data['new_count']/max(1, data['unique_guests'])*100:.1f}%)\n"
+        f"• 💎 Client Retention Rate: {data['retention_rate']}%\n\n"
+        f"🏆 3. TOP FREQUENT & HIGH-VALUE GUESTS\n"
+        f"{top_text}\n\n"
+        f"📅 4. DAY-BY-DAY TRAFFIC BREAKDOWN\n"
+        f"{day_text}\n"
+        f"└ Weekend Share (Fri–Sun): {data['weekend_share']}% of total weekly volume\n\n"
+        f"⚠️ 5. RETENTION & SILENT CHURN ALERT\n"
+        f"{churn_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
 
 
 def build_weekly_customer_brief(
     db_path: Path | str | None = None,
     branch_id: str = DEFAULT_BRANCH,
     as_of: date | str | datetime | None = None,
-    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 ) -> str:
-    """Compute and format the weekly brief without sending it."""
-    return format_customer_activity_brief(
-        compute_customer_activity_brief(
+    return format_weekly_executive_brief(
+        compute_weekly_executive_brief(
             db_path=db_path,
             branch_id=branch_id,
             as_of=as_of,
-            lookback_days=lookback_days,
         )
     )
 
@@ -388,59 +390,40 @@ def send_weekly_customer_brief(
     db_path: Path | str | None = None,
     branch_id: str = DEFAULT_BRANCH,
     as_of: date | str | datetime | None = None,
-    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     *,
     telegram: TelegramOut | None = None,
 ) -> bool:
-    """Build the brief and dispatch it to the owner chat as weekly_customer_brief."""
     text = build_weekly_customer_brief(
         db_path=db_path,
         branch_id=branch_id,
         as_of=as_of,
-        lookback_days=lookback_days,
     )
-    chunks = _split_message(text)
-    if not chunks:
-        return False
     bot = telegram if telegram is not None else TelegramOut()
-    results = [bool(bot.send_alert(EVENT_TYPE, chunk)) for chunk in chunks]
-    return all(results)
+    return bool(bot.send_alert(EVENT_TYPE, text))
+
+
+# Backward compatibility aliases
+compute_customer_activity_brief = compute_weekly_executive_brief
+format_customer_activity_brief = format_weekly_executive_brief
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Champei weekly customer activity brief")
+    parser = argparse.ArgumentParser(description="Champei weekly customer executive report")
     parser.add_argument("--dry-run", action="store_true", help="Print text; do not send Telegram")
-    parser.add_argument("--branch", default=DEFAULT_BRANCH, help="Branch id for the header")
+    parser.add_argument("--branch", default=DEFAULT_BRANCH, help="Branch ID")
     parser.add_argument("--db", default="", help="Optional path to events.db")
-    parser.add_argument("--as-of", default="", help="Optional YYYY-MM-DD (default: today)")
-    parser.add_argument(
-        "--lookback-days",
-        type=int,
-        default=DEFAULT_LOOKBACK_DAYS,
-        help="History window used for usual visit times",
-    )
+    parser.add_argument("--as-of", default="", help="Optional YYYY-MM-DD")
     args = parser.parse_args(argv)
 
-    db_path: Path | None = Path(args.db).expanduser() if args.db else None
+    db_path = Path(args.db).expanduser() if args.db else None
     as_of = args.as_of.strip() or None
-    text = build_weekly_customer_brief(
-        db_path=db_path,
-        branch_id=args.branch,
-        as_of=as_of,
-        lookback_days=args.lookback_days,
-    )
-    if args.dry_run:
-        print(text)
-        return 0
-    ok = send_weekly_customer_brief(
-        db_path=db_path,
-        branch_id=args.branch,
-        as_of=as_of,
-        lookback_days=args.lookback_days,
-    )
+    text = build_weekly_customer_brief(db_path=db_path, branch_id=args.branch, as_of=as_of)
     print(text)
-    print("[weekly-brief] sent" if ok else "[weekly-brief] send skipped/failed")
-    return 0 if ok else 1
+
+    if not args.dry_run:
+        ok = send_weekly_customer_brief(db_path=db_path, branch_id=args.branch, as_of=as_of)
+        print("[weekly-brief] sent:", ok)
+    return 0
 
 
 if __name__ == "__main__":

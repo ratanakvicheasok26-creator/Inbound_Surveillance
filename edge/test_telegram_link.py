@@ -205,14 +205,16 @@ class TelegramLinkTests(unittest.TestCase):
 
 class TelegramOutNormalizeTests(unittest.TestCase):
     def test_normalize_keeps_latest_chat_id(self) -> None:
+        import os
         self.assertEqual(normalize_chat_id("222"), "222")
         self.assertEqual(normalize_chat_id("111,222"), "222")
         self.assertEqual(normalize_chat_id(["111", "222"]), "222")
         self.assertEqual(normalize_chat_id('["111","222"]'), "222")
-        bot = TelegramOut("token", ["111", "222"])
-        self.assertEqual(bot.chat_id, "222")
-        bot.set_chat("111,333")
-        self.assertEqual(bot.chat_id, "333")
+        with patch.dict(os.environ, {}, clear=True):
+            bot = TelegramOut("token", ["111", "222"])
+            self.assertEqual(bot.chat_id, "222")
+            bot.set_chat("111,333")
+            self.assertEqual(bot.chat_id, "333")
 
     def test_resolve_prefers_environment(self) -> None:
         import os

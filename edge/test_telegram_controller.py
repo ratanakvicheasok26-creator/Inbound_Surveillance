@@ -82,7 +82,7 @@ class TelegramControllerRbacTests(unittest.TestCase):
         reply = self.ctrl.handle_message("222", "/weekly")
         self.assertIsNotNone(reply)
         assert reply is not None
-        self.assertIn("WEEKLY CUSTOMER ACTIVITY BRIEF", reply)
+        self.assertIn("WEEKLY EXECUTIVE BUSINESS REPORT", reply)
         self.assertIn("champei-pp-01", reply)
 
     def test_staff_name_upsert(self) -> None:

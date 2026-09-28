@@ -14,6 +14,7 @@ from typing import Any
 import requests
 
 from analytics.churn import compute_churn_risks, format_churn_watchlist
+from analytics.monthly_customer_brief import build_monthly_strategic_brief
 from analytics.scorecard import build_daily_scorecard
 from analytics.weekly_customer_brief import build_weekly_customer_brief
 from telegram_out import normalize_chat_id
@@ -155,6 +156,13 @@ class TelegramController:
                 db_path=self.db_path,
                 branch_id=self.branch_id,
             )
+        if cmd == "/monthly":
+            if role != "owner":
+                return DENIED
+            return build_monthly_strategic_brief(
+                db_path=self.db_path,
+                branch_id=self.branch_id,
+            )
         return (
             f"Unknown command. Try /help.\n\n{self._help_text(role)}"
             if cmd.startswith("/")
@@ -169,7 +177,7 @@ class TelegramController:
             "/help",
         ]
         if role == "owner":
-            lines.extend(["/scorecard", "/churn", "/weekly"])
+            lines.extend(["/scorecard", "/churn", "/weekly", "/monthly"])
         return "\n".join(lines)
 
     def _cmd_name(self, payload: str) -> str:

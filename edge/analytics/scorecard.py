@@ -127,12 +127,14 @@ def build_daily_scorecard(
     db_path: Path | str | None = None,
     branch_id: str = "champei-pp-01",
     day: str | date | None = None,
+    as_of: str | date | None = None,
 ) -> str:
     """Format the owner-facing daily operations scorecard text."""
+    target_day = as_of if as_of is not None else day
     day_str = (
-        day.isoformat()
-        if isinstance(day, date)
-        else (str(day).strip() if day else date.today().isoformat())
+        target_day.isoformat()
+        if isinstance(target_day, date)
+        else (str(target_day).strip() if target_day else date.today().isoformat())
     )
     branch = str(branch_id or "champei-pp-01").strip() or "champei-pp-01"
     path = Path(db_path) if db_path is not None else None
@@ -144,14 +146,15 @@ def build_daily_scorecard(
 
     avg_mins = float(counts["avg_duration_minutes"] or 0.0)
     return (
-        f"📊 [{branch}] DAILY OPERATIONS SCORECARD\n"
-        f"Date: {day_str}\n"
-        f"• Total Visits: {counts['total_visits']}\n"
-        f"• Completed Sessions: {counts['completed_sessions']}\n"
+        f"[{branch}] 📊 DAILY OPERATIONS SCORECARD\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Date: {day_str}\n"
+        f"• Total Customer Visits: {counts['total_visits']}\n"
+        f"• Completed Treatments: {counts['completed_sessions']}\n"
         f"• Unique Guests: {counts['unique_guests']}\n"
         f"• Avg Session Duration: {avg_mins:.0f} mins\n"
-        f"• Lobby Bounces / Walk-Aways: {counts['walk_aways']}\n"
-        f"• Front-Desk Bottlenecks (>3m): {counts['bottlenecks']}"
+        f"• Reception Bottlenecks (>3m): {counts['bottlenecks']}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 
@@ -159,6 +162,7 @@ def send_daily_scorecard(
     db_path: Path | str | None = None,
     branch_id: str = "champei-pp-01",
     day: str | date | None = None,
+    as_of: str | date | None = None,
     *,
     telegram: TelegramOut | None = None,
 ) -> bool:
