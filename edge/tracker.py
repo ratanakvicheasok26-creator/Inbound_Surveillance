@@ -663,15 +663,26 @@ def run_identity_pipeline(
     face_rec=None,
     reid: BodyReIDExtractor | None = None,
     probe: LivenessProbe | None = None,
+    role_cls=None,
     low_detections: list | None = None,
     reid_interval: int = 30,
     return_unconfirmed: bool = True,
 ) -> list:
-    """Measure liveness, run face ID, throttled Re-ID extraction, then lock names on."""
+    """Measure liveness, classify role/uniform, run face ID, throttled Re-ID extraction, then lock names on."""
     if probe is not None:
         probe.annotate(frame, detections)
         if low_detections:
             probe.annotate(frame, low_detections)
+    if role_cls is not None and frame is not None:
+        for det in detections:
+            track_id = int(getattr(det, "track_id", 0) or 0)
+            verdict = role_cls.evaluate(frame, det.box(), track_id=track_id)
+            det.role = verdict.role
+            if verdict.is_staff:
+                det.is_staff = True
+                det.is_customer = False
+                if not getattr(det, "identity", None) or det.identity == UNKNOWN_LABEL:
+                    det.identity = f"guard_{track_id}" if verdict.is_guard else "Staff"
     if face_rec is not None and frame is not None:
         face_rec.annotate_detections(frame, detections)
     if reid is not None and frame is not None:

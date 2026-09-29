@@ -658,12 +658,18 @@ class FaceRecognizer:
 
             # 3. Run facial recognition
             crop_box = (x1, y1, x2, y2)
-            match = self.recognize_in_crop(frame, crop_box, camera_id=camera_id)
-            det.identity = match.name
+            already_staff = getattr(det, "is_staff", False) or getattr(det, "role", None) in ("security_guard", "spa_staff")
+            match = self.recognize_in_crop(
+                frame,
+                crop_box,
+                camera_id=camera_id,
+                auto_enroll_customer=not already_staff,
+            )
+            det.identity = match.name if (match.name != UNKNOWN_LABEL or not already_staff) else getattr(det, "identity", UNKNOWN_LABEL)
             det.identity_conf = match.confidence
-            det.is_staff = match.is_staff
-            det.is_customer = getattr(match, "is_customer", False)
-            det.customer_id = getattr(match, "customer_id", None)
+            det.is_staff = match.is_staff or already_staff
+            det.is_customer = getattr(match, "is_customer", False) and not det.is_staff
+            det.customer_id = getattr(match, "customer_id", None) if not det.is_staff else None
             det.face_embedding = getattr(match, "embedding", None)
 
             if track_id > 0:

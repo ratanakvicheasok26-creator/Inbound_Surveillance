@@ -1,0 +1,57 @@
+venue: Champei Spa
+workplace_type: spa
+branch_id: champei-pp-01
+source: videos/document_6161011834561243252 (1).mp4
+
+cameras:
+  - id: champei-entrance-01
+    name: Entrance & Guard Post
+    camera_role: entrance
+    source: videos/document_6161011834561243252 (1).mp4
+    protocol: file
+    vendor: generic
+    rotate: 0
+    flip: none
+    roi: [0.05, 0.06, 0.88, 0.94]
+    bays:
+      - id: guard_station
+        name: Security Guard Post
+        roi: [0.30, 0.36, 0.39, 0.64]
+        type: staff_zone
+      - id: customer_walkway
+        name: Customer Entrance Walkway
+        roi: [0.05, 0.35, 0.35, 0.60]
+        type: entrance
+    enabled: true
+    ml_enabled: true
+
+active_camera_id: champei-entrance-01
+runtime: cpu
+pose_engine: yolo
+weights: yolo11n-pose.pt
+imgsz: 960
+person_conf: 0.25
+kpt_conf: 0.35
+
+# Role & Guard Classifier Settings
+role_classifier:
+  enabled: true
+  guard_dwell_seconds: 15.0
+  guard_zone_roi: [0.30, 0.36, 0.39, 0.64]
+  auto_suppress_guard_visits: true
+
+# Customer Shoe-Change / Flip-Flop Station Monitor
+shoe_change_zone:
+  enabled: true
+  zone: [0.05, 0.40, 0.45, 0.95]
+  wrist_ankle_dist: 0.08
+  confirm_seconds: 1.2
+  cooldown_seconds: 30.0
+  proofs: true
+
+# Customer Visit Analytics
+enable_face_id: true
+face_match_threshold: 0.38
+door_monitor:
+  enabled: true
+  enter_direction: right_to_left
