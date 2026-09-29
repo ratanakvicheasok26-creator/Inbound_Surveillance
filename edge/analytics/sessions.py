@@ -89,6 +89,18 @@ def ensure_session_columns(conn: sqlite3.Connection) -> None:
             )
         except Exception:
             pass
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_customer_visits_started_at ON customer_visits(started_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_customer_visits_subject_id ON customer_visits(subject_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_customer_visits_status ON customer_visits(status)"
+        )
+    except Exception:
+        pass
     conn.commit()
 
 

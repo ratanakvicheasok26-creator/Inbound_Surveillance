@@ -132,9 +132,10 @@ def _weekly_brief_loop(
                         f"{'sent' if ok else 'skipped/failed'} week={week_key}",
                         flush=True,
                     )
+                    if ok:
+                        last_week_key = week_key
                 except Exception as exc:
                     print(f"[run_champei] weekly customer brief error: {exc}", flush=True)
-                last_week_key = week_key
         stop_event.wait(poll_seconds)
 
 
@@ -179,9 +180,10 @@ def _monthly_brief_loop(
                         f"{'sent' if ok else 'skipped/failed'} month={month_key}",
                         flush=True,
                     )
+                    if ok:
+                        last_month_key = month_key
                 except Exception as exc:
                     print(f"[run_champei] monthly customer brief error: {exc}", flush=True)
-                last_month_key = month_key
         stop_event.wait(poll_seconds)
 
 
