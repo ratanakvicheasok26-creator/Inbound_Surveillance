@@ -138,6 +138,20 @@ complaint_monitoring:
   video_loop: true
   dedup_window_seconds: 60
 
+# Massage-only: auto-send a 7-day visitor summary to the linked owner Telegram chat.
+# Epoch 2026-09-25 → first window is 2026-09-25..2026-10-01, then every 7 days.
+# Fires once at fire_at on the last day of each window (catch-up if the hub was offline).
+weekly_customer_brief:
+  enabled: true
+  epoch: "2026-09-25"
+  period_days: 7
+  fire_at: "21:00"
+  lookback_days: 90
+  ai_summary: true
+  ollama_model: qwen2.5:3b
+  ollama_host: http://localhost:11434
+  tz: Asia/Phnom_Penh
+
 # Tier 2 AI Auditor (Fireworks VLM)
 fireworks_api_key: ""
 fireworks_model: "accounts/fireworks/models/deepseek-v4-flash-vision-exp"

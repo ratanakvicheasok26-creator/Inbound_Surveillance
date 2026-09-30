@@ -214,6 +214,8 @@ REQUIRED_PYZ_MODULES = (
     "audio_source",
     "speech_pipeline",
     "vad",
+    "weekly_customer_brief",
+    "weekly_brief_scheduler",
 )
 
 

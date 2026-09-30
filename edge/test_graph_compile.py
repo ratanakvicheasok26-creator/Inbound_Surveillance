@@ -232,7 +232,16 @@ class GraphCompileTests(unittest.TestCase):
     def test_sidecar_build_requires_graph_and_workplace_modules(self) -> None:
         from build_sidecar import REQUIRED_PYZ_MODULES
 
-        for name in ("graph", "graph.compile", "workplaces", "workplaces.customer_visits", "workplaces.staff_memory", "complaint_service"):
+        for name in (
+            "graph",
+            "graph.compile",
+            "workplaces",
+            "workplaces.customer_visits",
+            "workplaces.staff_memory",
+            "complaint_service",
+            "weekly_customer_brief",
+            "weekly_brief_scheduler",
+        ):
             self.assertIn(name, REQUIRED_PYZ_MODULES)
 
     def test_pipeline_graph_asset_is_bundled(self) -> None:

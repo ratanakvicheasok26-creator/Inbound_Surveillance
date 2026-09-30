@@ -326,6 +326,7 @@ try:
     from telegram_out import TelegramOut, normalize_chat_id
     from tracker import PersonTracker, run_identity_pipeline
     from vehicle import VehicleDetection, extract_vehicle_detections
+    from weekly_brief_scheduler import WeeklyCustomerBriefScheduler
 except Exception as _boot_err:
     if __name__ == "__main__":
         fatal_boot(_boot_err)
@@ -1284,6 +1285,15 @@ class LiveStreamEngine:
                 print(f"[complaint_service] init failed: {exc}", flush=True)
                 self.complaint_service = None
 
+        # Massage-only 7-day owner Telegram brief (background; never on the frame thread).
+        self.weekly_brief_scheduler = WeeklyCustomerBriefScheduler(
+            get_cfg=lambda: self.cfg,
+            get_bot=lambda: self.bot,
+            db_path=DATA_DIR / "events.db",
+            state_file=DATA_DIR / "weekly_customer_brief_state.json",
+            workplace_fn=lambda: parse_workplace_id(self.cfg.get("workplace_type")),
+        )
+
 
     @property
     def grabber(self) -> AsyncFrameGrabber:
@@ -1392,6 +1402,10 @@ class LiveStreamEngine:
                     self.complaint_service.start()
                 except Exception as exc:
                     print(f"[complaint_service] start failed: {exc}", flush=True)
+            try:
+                self.weekly_brief_scheduler.start()
+            except Exception as exc:
+                print(f"[weekly-brief] start failed: {exc}", flush=True)
             self.thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.thread.start()
 
@@ -1421,6 +1435,10 @@ class LiveStreamEngine:
                 self.complaint_service.stop()
             except Exception:
                 pass
+        try:
+            self.weekly_brief_scheduler.stop()
+        except Exception:
+            pass
         try:
             self.wifi.stop()
         except Exception:
