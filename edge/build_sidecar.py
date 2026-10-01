@@ -214,6 +214,16 @@ REQUIRED_PYZ_MODULES = (
     "audio_source",
     "speech_pipeline",
     "vad",
+    "analytics",
+    "analytics.sessions",
+    "analytics.scorecard",
+    "analytics.weekly_customer_brief",
+    "analytics.monthly_customer_brief",
+    "analytics.fsm",
+    "analytics.churn",
+    "visitor_registry",
+    "telegram_controller",
+    "run_champei",
 )
 
 

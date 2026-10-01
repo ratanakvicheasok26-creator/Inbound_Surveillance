@@ -232,8 +232,56 @@ class GraphCompileTests(unittest.TestCase):
     def test_sidecar_build_requires_graph_and_workplace_modules(self) -> None:
         from build_sidecar import REQUIRED_PYZ_MODULES
 
-        for name in ("graph", "graph.compile", "workplaces", "workplaces.customer_visits", "workplaces.staff_memory", "complaint_service"):
+        for name in (
+            "graph",
+            "graph.compile",
+            "workplaces",
+            "workplaces.customer_visits",
+            "workplaces.staff_memory",
+            "complaint_service",
+            "analytics",
+            "analytics.sessions",
+            "analytics.scorecard",
+            "analytics.weekly_customer_brief",
+            "analytics.monthly_customer_brief",
+            "analytics.fsm",
+            "analytics.churn",
+            "visitor_registry",
+            "telegram_controller",
+            "run_champei",
+        ):
             self.assertIn(name, REQUIRED_PYZ_MODULES)
+
+    def test_windows_spec_stays_under_archive_limit_without_dropping_champei(self) -> None:
+        """The compiled sidecar must not pack the files that blew the 4 GiB
+        CArchive, and must still ship the weights this branch actually runs.
+        """
+        from pathlib import Path
+
+        spec = (Path(__file__).resolve().parent / "inbound-engine.spec").read_text(encoding="utf-8")
+        self.assertNotIn('datas.append((str(env_candidate), "."))', spec)
+        self.assertNotIn('datas.append((str(faces), "faces"))', spec)
+        self.assertNotIn('datas.append((str(videos), "videos"))', spec)
+        self.assertNotIn('"torchvision",', spec.split("pkgs_to_collect = ", 1)[1].split("]", 1)[0])
+        for banned in (
+            "torchvision",
+            "openvino_tensorflow_frontend",
+            "openvino_paddle_frontend",
+            "openvino_pytorch_frontend",
+            "openvino_jax_frontend",
+            "nvidia",
+            "libtorch_cuda",
+        ):
+            self.assertIn(f'"{banned}"', spec)
+        self.assertNotIn('"openvino_onnx_frontend"', spec)
+        for model in (
+            "rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx",
+            "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
+            "yolo11n-pose.onnx",
+            "tinypose_256_192.onnx",
+            "picodet_s_320_lcnet_pedestrian.onnx",
+        ):
+            self.assertIn(model, spec)
 
     def test_pipeline_graph_asset_is_bundled(self) -> None:
         from pathlib import Path
