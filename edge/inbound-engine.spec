@@ -23,7 +23,6 @@ binaries: list = []
 hiddenimports = [
     "ultralytics",
     "torch",
-    "torchvision",
     "cv2",
     "onnxruntime",
     "yaml",
@@ -131,25 +130,37 @@ for ov_dir in list(EDGE.glob("*_openvino_model")) + list(EDGE.parent.glob("*_ope
     if ov_dir.is_dir():
         datas.append((str(ov_dir), ov_dir.name))
 
-REPO = EDGE.parent
-for env_candidate in (EDGE / ".env", REPO / ".env"):
-    if env_candidate.is_file():
-        datas.append((str(env_candidate), "."))
-        break
+# Privacy and archive guardrails. The frozen app reads secrets, enrolled
+# faces, and clip files from the writable data dir (AppData on Windows).
+# Packing them into the one-file sidecar both leaks customer data and can
+# push the CArchive past PyInstaller's 4 GiB limit.
+# 1. NEVER package .env (Telegram tokens, Supabase secrets, API keys).
+# 2. NEVER package edge/faces (enrolled photos; runtime seeds AppData).
+# 3. NEVER package edge/videos (test clips; runtime loads AppData / camera).
 
-faces = EDGE / "faces"
-if faces.is_dir():
-    datas.append((str(faces), "faces"))
 static_dir = EDGE / "static"
 if static_dir.is_dir():
     datas.append((str(static_dir), "static"))
+
+# Active weights only. RTMPose is the default pose path; TinyPose and YOLO11
+# ONNX stay because this branch still selects them via pose_engine / runtime.
+PRODUCTION_MODELS = (
+    "face_detection_yunet_2023mar.onnx",
+    "face_recognition_sface_2021dec.onnx",
+    "osnet_x0_25_market1501.onnx",
+    "rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx",
+    "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
+    "yolo11n.onnx",
+    "yolo11n-pose.onnx",
+    "tinypose_256_192.onnx",
+    "picodet_s_320_lcnet_pedestrian.onnx",
+)
 models = EDGE / "models"
 if models.is_dir():
-    for onnx in models.glob("*.onnx"):
-        datas.append((str(onnx), "models"))
-videos = EDGE / "videos"
-if videos.is_dir():
-    datas.append((str(videos), "videos"))
+    for m in PRODUCTION_MODELS:
+        onnx = models / m
+        if onnx.is_file():
+            datas.append((str(onnx), "models"))
 
 go2rtc_name = "go2rtc.exe" if sys.platform == "win32" else "go2rtc"
 go2rtc_bin = EDGE / "bin" / go2rtc_name
@@ -190,9 +201,13 @@ def _msvc_runtime_binaries() -> list[tuple[str, str]]:
 
 binaries += _msvc_runtime_binaries()
 
-pkgs_to_collect = ["ultralytics", "torch", "torchvision", "cv2", "PIL", "yaml", "requests", "onnxruntime", "rtmlib"]
+# torchvision is unused. Blind collect_all("openvino") is not: rtmpose's
+# Intel path calls core.read_model() on ONNX, which needs the ONNX frontend
+# and the CPU plugin. Unused framework frontends and the GPU plugin are
+# stripped below so they cannot blow the 4 GiB one-file CArchive.
+pkgs_to_collect = ["ultralytics", "torch", "cv2", "PIL", "yaml", "requests", "onnxruntime", "rtmlib"]
 try:
-    import openvino
+    import openvino  # noqa: F401
     pkgs_to_collect.append("openvino")
 except Exception:
     pass
@@ -230,11 +245,19 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "tkinter",
+        "matplotlib",
         "matplotlib.tests",
         "pytest",
         "IPython",
         "torchaudio",
+        "torchvision",
         "triton",
+        "polars",
+        "_polars_runtime_32",
+        "_polars_runtime_64",
+        "_polars_runtime_compat",
+        "scipy.spatial.tests",
+        "scipy.sparse.tests",
     ],
     noarchive=False,
 )
@@ -242,6 +265,7 @@ a = Analysis(
 _BUNDLE_BLOAT = (
     "nvidia",
     "torchaudio",
+    "torchvision",
     "triton",
     "libtorch_cuda",
     "cudnn",
@@ -259,6 +283,18 @@ _BUNDLE_BLOAT = (
     "cufile",
     "cuda_runtime",
     "cuda-cupti",
+    "polars",
+    "_polars_runtime",
+    # Keep openvino_onnx_frontend and the CPU plugin. RTMPose reads ONNX
+    # through OpenVINO on Intel; TinyPose weights stay in PRODUCTION_MODELS.
+    "openvino_tensorflow_frontend",
+    "openvino_paddle_frontend",
+    "openvino_pytorch_frontend",
+    "openvino_jax_frontend",
+    "openvino_intel_gpu_plugin",
+    "torch/bin/test",
+    "torch/include",
+    "torch/share",
 )
 
 
