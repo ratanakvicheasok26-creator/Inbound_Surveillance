@@ -56,8 +56,9 @@ class GuardDwellTracker:
 
     def __init__(self, guard_dwell_s: float = DEFAULT_GUARD_DWELL_SECONDS) -> None:
         self.guard_dwell_s = guard_dwell_s
-        # track_id -> {'first_seen': float, 'last_seen': float, 'positions': list, 'is_guard': bool}
+        # track_id -> {'first_seen': float, 'last_seen': float, 'positions': list, 'is_guard': bool, 'bounds': [min_x, max_x, min_y, max_y]}
         self._tracks: Dict[int, Dict[str, Any]] = {}
+        self._update_counter = 0
 
     def update(
         self,
@@ -71,38 +72,47 @@ class GuardDwellTracker:
         if track_id <= 0:
             return False
 
+        self._update_counter += 1
+        if self._update_counter % 200 == 0 and len(self._tracks) > 50:
+            self.prune(t, max_age=180.0)
+
         x1, y1, x2, y2 = bbox
-        cx = (x1 + x2) / 2.0
-        cy = (y1 + y2) / 2.0
+        cx = (x1 + x2) * 0.5
+        cy = (y1 + y2) * 0.5
 
         if track_id not in self._tracks:
             self._tracks[track_id] = {
                 "first_seen": t,
                 "last_seen": t,
                 "positions": [(cx, cy, t)],
+                "bounds": [cx, cx, cy, cy],
                 "is_guard": False,
             }
             return False
 
         data = self._tracks[track_id]
         data["last_seen"] = t
-        data["positions"].append((cx, cy, t))
+        positions = data["positions"]
+        positions.append((cx, cy, t))
 
-        # Keep position history reasonable
-        if len(data["positions"]) > 100:
-            data["positions"] = data["positions"][-100:]
+        bounds = data.setdefault("bounds", [cx, cx, cy, cy])
+        bounds[0] = min(bounds[0], cx)
+        bounds[1] = max(bounds[1], cx)
+        bounds[2] = min(bounds[2], cy)
+        bounds[3] = max(bounds[3], cy)
+
+        # Keep position history bounded to prevent memory leaks
+        if len(positions) > 60:
+            del positions[0 : len(positions) - 60]
 
         if data["is_guard"]:
             return True
 
         dwell = t - data["first_seen"]
         if dwell >= self.guard_dwell_s and in_guard_zone:
-            # Check if person has stayed within local perimeter (not traversing through)
-            xs = [p[0] for p in data["positions"]]
-            ys = [p[1] for p in data["positions"]]
-            spread_x = max(xs) - min(xs)
-            spread_y = max(ys) - min(ys)
-            total_spread = math.sqrt(spread_x ** 2 + spread_y ** 2)
+            spread_x = bounds[1] - bounds[0]
+            spread_y = bounds[3] - bounds[2]
+            total_spread = math.sqrt(spread_x * spread_x + spread_y * spread_y)
 
             # Stationary or localized pacing at the entrance/guard post
             if total_spread < 350.0:  # within ~350px radius over extended time
@@ -120,6 +130,7 @@ class GuardDwellTracker:
         ]
         for tid in stale:
             del self._tracks[tid]
+
 
 
 class RoleClassifier:

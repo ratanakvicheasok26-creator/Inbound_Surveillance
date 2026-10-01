@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -198,7 +199,7 @@ class ShoeChangeMonitor:
         self.require_person = bool(cfg.get("require_person", True))
         self.save_proofs = bool(cfg.get("proofs", True))
         self.conn = conn
-        self.proofs_root = proofs_root
+        self.proofs_root = Path(proofs_root) if proofs_root is not None else (Path(__file__).resolve().parent / "media" / "proofs")
 
         self.tracks: dict[int, _Track] = {}
         self.events: deque[ShoeChangeEvent] = deque(maxlen=64)

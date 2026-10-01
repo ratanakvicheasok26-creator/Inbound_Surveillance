@@ -228,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def _stop_background(*_args: object) -> None:
         stop_event.set()
+        sys.exit(0)
 
     if args.mock:
         signal.signal(signal.SIGINT, _stop_background)
@@ -296,14 +297,14 @@ def main(argv: list[str] | None = None) -> int:
                 open_browser=False,
                 telegram_link_poll=False,
             )
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         stop_event.set()
     finally:
         stop_event.set()
-        tg_thread.join(timeout=2.0)
-        score_thread.join(timeout=2.0)
-        weekly_thread.join(timeout=2.0)
-        monthly_thread.join(timeout=2.0)
+        tg_thread.join(timeout=0.5)
+        score_thread.join(timeout=0.5)
+        weekly_thread.join(timeout=0.5)
+        monthly_thread.join(timeout=0.5)
         print("[run_champei] shutdown complete", flush=True)
 
     return 0

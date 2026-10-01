@@ -144,6 +144,7 @@ class PersistentReIDGallery:
         self.max_per_name = max_per_name
         self.exclusivity_timeout = exclusivity_timeout
         self.embeddings: dict[str, list[np.ndarray]] = {}
+        self._prototypes: dict[str, np.ndarray] = {}
         # staff_name -> StaffActiveLocation
         self.active_locations: dict[str, StaffActiveLocation] = {}
 
@@ -231,6 +232,9 @@ class PersistentReIDGallery:
         if len(bucket) > self.max_per_name:
             del bucket[0 : len(bucket) - self.max_per_name]
 
+        # Fast cached prototype update
+        self._prototypes[name] = _l2_normalize(np.mean(np.stack(bucket, axis=0), axis=0))
+
         if camera_id:
             self.claim_technician(name, camera_id, track_id=track_id, now=now)
         return True
@@ -255,7 +259,10 @@ class PersistentReIDGallery:
             # Spatial exclusivity: If active on another camera, do not steal identity
             if camera_id and self.is_active_on_other_camera(name, camera_id, now=now):
                 continue
-            proto = _l2_normalize(np.mean(np.stack(emb_list, axis=0), axis=0))
+            proto = self._prototypes.get(name)
+            if proto is None:
+                proto = _l2_normalize(np.mean(np.stack(emb_list, axis=0), axis=0))
+                self._prototypes[name] = proto
             score = float(np.dot(proto, vec))
             if score > best_score:
                 best_score = score
@@ -266,7 +273,9 @@ class PersistentReIDGallery:
 
     def clear(self) -> None:
         self.embeddings.clear()
+        self._prototypes.clear()
         self.active_locations.clear()
+
 
 
 ReIDGallery = PersistentReIDGallery

@@ -76,24 +76,25 @@ def greedy_match(iou_mat: np.ndarray, threshold: float) -> list[tuple[int, int]]
     """Unique greedy assignment, highest IoU first."""
     if iou_mat.size == 0:
         return []
-    pairs: list[tuple[float, int, int]] = []
-    rows, cols = iou_mat.shape
-    for r in range(rows):
-        for c in range(cols):
-            score = float(iou_mat[r, c])
-            if score >= threshold:
-                pairs.append((score, r, c))
-    pairs.sort(reverse=True)
+    mask = iou_mat >= threshold
+    if not np.any(mask):
+        return []
+    rows, cols = np.nonzero(mask)
+    scores = iou_mat[rows, cols]
+    order = np.argsort(-scores)
+
     used_r: set[int] = set()
     used_c: set[int] = set()
     matches: list[tuple[int, int]] = []
-    for _score, r, c in pairs:
-        if r in used_r or c in used_c:
-            continue
-        used_r.add(r)
-        used_c.add(c)
-        matches.append((r, c))
+    for idx in order:
+        r = int(rows[idx])
+        c = int(cols[idx])
+        if r not in used_r and c not in used_c:
+            used_r.add(r)
+            used_c.add(c)
+            matches.append((r, c))
     return matches
+
 
 
 class _KalmanBox:

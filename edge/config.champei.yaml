@@ -55,3 +55,5 @@ face_match_threshold: 0.38
 door_monitor:
   enabled: true
   enter_direction: right_to_left
+
+
