@@ -153,16 +153,6 @@ if ($ConfigFile -and (Test-Path $ConfigFile)) {
     $wp = $null
     if ($rawCfg -match '(?m)^\s*workplace_type:\s*(\S+)') { $wp = $Matches[1].Trim().Trim('"').Trim("'").ToLower() }
     Assert-That "config workplace_type is a valid id (garage|massage)" ($wp -in @("garage","massage")) "workplace_type='$wp'"
-
-    # /api/config is behind _authorized(), which reads the bearer token from
-    # session.json and caches it on first use. Seed it before boot so the
-    # endpoint is reachable for the effective-config assertions below.
-    $script:SessionToken = "smoke-test-" + [guid]::NewGuid().ToString("N")
-    $session = @{ session = @{ access_token = $script:SessionToken; user = @{ id = "smoke-test" } } } |
-               ConvertTo-Json -Depth 5
-    Set-Content -Path (Join-Path $dataDir "session.json") -Value $session -Encoding UTF8
-    Assert-That "session token seeded for authenticated endpoints" `
-        (Test-Path (Join-Path $dataDir "session.json")) (Join-Path $dataDir "session.json")
 } else {
     Write-Step "Deploy customer config"
     Write-Host "  no -ConfigFile supplied; testing the bundled default config"
@@ -253,6 +243,56 @@ if ($pub) {
         Assert-That "public-config is valid JSON" $false $_.Exception.Message
     }
 }
+
+# ------------------------------------------------ webview <-> engine auth bridge
+# The dashboard logs in against Supabase inside the webview, then POSTs the
+# resulting session to /api/auth-session; the engine persists it and uses its
+# access_token as the bearer for every other /api route. Exercise that real
+# bridge rather than fabricating session.json, so a break in it is caught.
+Write-Step "Auth session bridge (POST /api/auth-session)"
+$script:SessionToken = "smoke-test-" + [guid]::NewGuid().ToString("N")
+$fakeSession = @{
+    session = @{
+        access_token  = $script:SessionToken
+        refresh_token = "smoke-refresh-" + $script:SessionToken
+        token_type    = "bearer"
+        expires_at    = ([int][double]::Parse((Get-Date -UFormat %s)) + 3600)
+        expires_in    = 3600
+        user          = @{ id = "smoke-user"; email = "smoke@example.invalid" }
+    }
+} | ConvertTo-Json -Depth 6
+
+$postSess = $null
+try {
+    $postSess = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/auth-session" -Method POST `
+        -Body $fakeSession -ContentType "application/json" -UseBasicParsing -TimeoutSec 30 `
+        -Headers @{ Origin = "http://127.0.0.1:8765" }
+} catch {
+    $code = ""; if ($_.Exception.Response) { $code = " http=$([int]$_.Exception.Response.StatusCode)" }
+    Write-Host "  POST /api/auth-session error:$code $($_.Exception.Message)"
+}
+Assert-That "POST /api/auth-session accepted the webview session" `
+    ($null -ne $postSess -and $postSess.StatusCode -eq 200) `
+    $(if ($postSess) { "status=$($postSess.StatusCode) body=$($postSess.Content)" } else { "no response" })
+
+$sessFile = Join-Path $dataDir "session.json"
+Assert-That "engine persisted the session to disk" (Test-Path $sessFile) $sessFile
+
+$getSess = Invoke-Check "http://127.0.0.1:8765/api/auth-session"
+if ($getSess) {
+    $back = $getSess.Content | ConvertFrom-Json
+    $rt = $back.session.access_token
+    if (-not $rt) { $rt = $back.access_token }
+    Assert-That "GET /api/auth-session returns the same token" ("$rt" -eq $script:SessionToken) "got='$rt'"
+}
+
+# Unauthorized access must be refused, or the token gate is decorative.
+$noAuth = $null
+try { $noAuth = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/config" -UseBasicParsing -TimeoutSec 20 }
+catch { $noAuth = $_.Exception.Response }
+$refused = $false
+if ($noAuth -and $noAuth -is [System.Net.HttpWebResponse]) { $refused = ([int]$noAuth.StatusCode -eq 401) }
+Assert-That "API refuses requests with no bearer token" $refused "expected 401 without a token"
 
 # The deployed customer config must actually be in force on the live engine.
 if ($ConfigFile -and (Test-Path $ConfigFile)) {
