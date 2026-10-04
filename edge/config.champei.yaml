@@ -1,7 +1,7 @@
 venue: Champei Spa
 # Must be "garage" or "massage" (WORKPLACE_IDS in edge/workplaces/__init__.py).
 # Any other value silently falls back to "garage" and yields garage zones/UI.
-workplace_type: massage
+workplace_type: spa
 branch_id: champei-pp-01
 source: videos/document_6161011834561243252 (1).mp4
 
