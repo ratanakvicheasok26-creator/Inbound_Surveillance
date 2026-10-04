@@ -262,30 +262,39 @@ if ($appProc) {
         $(if ($mine.Count -gt 0) { "child pid=" + (($mine.ProcessId) -join ",") + " parent=" + $appProc.Id } else { "found $($kids.Count) engine(s) but none parented by pid $($appProc.Id)" })
 
     # Walk the parent chain so a PyInstaller bootloader->child pair still counts.
+    # NOTE: do not name the parameter $Pid - that is a read-only automatic
+    # variable in PowerShell and shadowing it breaks the walk.
     function Test-DescendantOf {
-        param([int] $Pid, [int] $AncestorPid)
+        param([int] $ProcessIdToCheck, [int] $AncestorPid)
         $seen = 0
-        $cur = $Pid
-        while ($cur -gt 0 -and $seen -lt 8) {
-            if ($cur -eq $AncestorPid) { return $true }
-            $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction SilentlyContinue
-            if (-not $proc) { return $false }
-            $cur = [int]$proc.ParentProcessId
+        $current = $ProcessIdToCheck
+        $chain = @($ProcessIdToCheck)
+        while ($current -gt 0 -and $seen -lt 8) {
+            if ($current -eq $AncestorPid) {
+                Write-Host ("    ancestry {0}: {1} -> MATCH gui {2}" -f $ProcessIdToCheck, ($chain -join "->"), $AncestorPid)
+                return $true
+            }
+            $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction SilentlyContinue
+            if (-not $procInfo) { break }
+            $current = [int]$procInfo.ParentProcessId
+            $chain += $current
             $seen++
         }
+        Write-Host ("    ancestry {0}: {1} -> no match (gui {2})" -f $ProcessIdToCheck, ($chain -join "->"), $AncestorPid)
         return $false
     }
 
     # The port must be held by an engine that descends from the GUI process.
     $listen = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
+    $enginePids = @($kids | ForEach-Object { [int]$_.ProcessId })
     $attributed = @($listen | Where-Object {
         $owner = [int]$_.OwningProcess
-        ($kids.ProcessId -contains $owner) -and (Test-DescendantOf -Pid $owner -AncestorPid $appProc.Id)
+        ($enginePids -contains $owner) -and (Test-DescendantOf -ProcessIdToCheck $owner -AncestorPid $appProc.Id)
     })
     Assert-That "port 8765 held by an engine descended from the GUI" ($attributed.Count -gt 0) `
         $(if ($listen.Count -gt 0) {
             "listener pid=" + (($listen.OwningProcess) -join ",") +
-            "; engine pids=" + (($kids.ProcessId) -join ",") +
+            "; engine pids=" + ($enginePids -join ",") +
             "; gui pid=" + $appProc.Id
         } else { "no listener" })
 
