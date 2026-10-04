@@ -15,7 +15,11 @@ param(
     [int]    $GuiSoakSec = 60,
     # Optional customer config to deploy before boot. When supplied, the test
     # asserts the running engine actually honoured it (workplace_type, etc).
-    [string] $ConfigFile = ""
+    [string] $ConfigFile = "",
+    # Optional video file. Points the deployed config at it so the engine
+    # decodes real frames and runs ML inference, instead of only proving it
+    # can serve HTTP with no camera attached.
+    [string] $VideoFile = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -153,6 +157,23 @@ if ($ConfigFile -and (Test-Path $ConfigFile)) {
     $wp = $null
     if ($rawCfg -match '(?m)^\s*workplace_type:\s*(\S+)') { $wp = $Matches[1].Trim().Trim('"').Trim("'").ToLower() }
     Assert-That "config workplace_type is a valid id (garage|massage)" ($wp -in @("garage","massage")) "workplace_type='$wp'"
+
+    # Point every source at the bundled test clip so the engine decodes real
+    # frames and the ML pipeline actually executes on Windows, rather than
+    # only proving it serves HTTP with no camera attached.
+    if ($VideoFile -and (Test-Path $VideoFile)) {
+        $vidDest = Join-Path $dataDir "smoke-test-clip.mp4"
+        Copy-Item $VideoFile $vidDest -Force
+        $vidYaml = $vidDest -replace '\\', '/'
+        $cfgText = Get-Content $dest -Raw
+        $cfgText = [regex]::Replace($cfgText, '(?m)^(\s*)source:\s*.*$',   "`$1source: $vidYaml")
+        $cfgText = [regex]::Replace($cfgText, '(?m)^(\s*)protocol:\s*.*$', "`$1protocol: file")
+        $cfgText = [regex]::Replace($cfgText, '(?m)^(\s*)ml_enabled:\s*.*$', "`$1ml_enabled: true")
+        Set-Content -Path $dest -Value $cfgText -Encoding UTF8
+        Assert-That "test clip deployed and wired into config" `
+            ((Test-Path $vidDest) -and ((Get-Content $dest -Raw) -match "smoke-test-clip\.mp4")) `
+            "$([math]::Round((Get-Item $vidDest).Length/1KB,1)) KB -> $vidDest"
+    }
 } else {
     Write-Step "Deploy customer config"
     Write-Host "  no -ConfigFile supplied; testing the bundled default config"
@@ -298,6 +319,39 @@ try {
     else { Write-Host "  unexpected error: $($_.Exception.Message)" }
 }
 Assert-That "API refuses requests with no bearer token" ($unauthCode -eq 401) "http=$unauthCode"
+
+# ------------------------------------------------- live inference (ML on Windows)
+# This is the product: frames decoded, model executed, telemetry advancing.
+# "Serves HTTP with no camera" never proves any of that.
+if ($VideoFile -and (Test-Path $VideoFile)) {
+    Write-Step "Live inference (decoded frames + ML on Windows)"
+    $tel = $null
+    for ($i = 0; $i -lt 24; $i++) {
+        Start-Sleep -Seconds 5
+        $probe = Invoke-Check "http://127.0.0.1:8765/api/telemetry" $script:SessionToken
+        if ($null -ne $probe -and $probe.StatusCode -eq 200) {
+            $t = $probe.Content | ConvertFrom-Json
+            if ([double]$t.ingest_fps -gt 0 -and [double]$t.infer_ms -gt 0) { $tel = $t; break }
+            if (-not $tel) { $tel = $t }
+        }
+    }
+
+    if ($null -eq $tel) {
+        Assert-That "GET /api/telemetry returns 200 with the session token" $false "no telemetry"
+    } else {
+        Write-Host ("  protocol={0} connection={1} ingest_fps={2} fps={3} infer_ms={4} res={5}" -f `
+            $tel.protocol, $tel.connection, $tel.ingest_fps, $tel.fps, $tel.infer_ms, $tel.resolution)
+
+        Assert-That "engine opened the test clip as a file source" ("$($tel.protocol)" -eq "file") "protocol=$($tel.protocol)"
+        Assert-That "frames are being decoded (ingest_fps > 0)" ([double]$tel.ingest_fps -gt 0) "ingest_fps=$($tel.ingest_fps)"
+        Assert-That "stream reports a real resolution" `
+            ("$($tel.resolution)" -match "\d+x\d+") "resolution=$($tel.resolution)"
+        Assert-That "ML inference executed on Windows (infer_ms > 0)" ([double]$tel.infer_ms -gt 0) `
+            "infer_ms=$($tel.infer_ms) fps=$($tel.fps)"
+        $errText = "$($tel.error)"
+        Assert-That "no capture/inference error reported" ($errText -eq "" -or $null -eq $tel.error) "error='$errText'"
+    }
+}
 
 # The deployed customer config must actually be in force on the live engine.
 if ($ConfigFile -and (Test-Path $ConfigFile)) {

@@ -18,6 +18,8 @@ on:
       - ".github/workflows/windows-smoke-test.yml"
       # The test deploys and asserts this file, so config edits must re-run it.
       - "edge/config.champei.yaml"
+      # The test feeds this clip through the engine to exercise ML on Windows.
+      - "scripts/fixtures/sample_test_clip.mp4"
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -134,7 +136,8 @@ jobs:
           ./scripts/windows-smoke-test.ps1 `
             -Installer $env:INSTALLER `
             -ExpectedVersion $env:VERSION `
-            -ConfigFile "edge/config.champei.yaml"
+            -ConfigFile "edge/config.champei.yaml" `
+            -VideoFile "scripts/fixtures/sample_test_clip.mp4"
 
       - name: Upload smoke test diagnostics
         if: always()
