@@ -1,5 +1,7 @@
 venue: Champei Spa
-workplace_type: spa
+# Must be "garage" or "massage" (WORKPLACE_IDS in edge/workplaces/__init__.py).
+# Any other value silently falls back to "garage" and yields garage zones/UI.
+workplace_type: massage
 branch_id: champei-pp-01
 source: videos/document_6161011834561243252 (1).mp4
 
@@ -50,7 +52,11 @@ shoe_change_zone:
   proofs: true
 
 # Customer Visit Analytics
-enable_face_id: true
+# Massage/spa deployments must not retain customer biometrics.
+# try_create_face_recognizer() honours enable_face_id independently of
+# workplace_type, so leaving this true does run face recognition.
+enable_face_id: false
+store_customer_avatars: false
 face_match_threshold: 0.38
 door_monitor:
   enabled: true

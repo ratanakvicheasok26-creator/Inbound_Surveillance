@@ -12,7 +12,10 @@ param(
     [Parameter(Mandatory = $true)][string] $Installer,
     [string] $ExpectedVersion = "0.1.5",
     [int]    $EngineBootTimeoutSec = 240,
-    [int]    $GuiSoakSec = 60
+    [int]    $GuiSoakSec = 60,
+    # Optional customer config to deploy before boot. When supplied, the test
+    # asserts the running engine actually honoured it (workplace_type, etc).
+    [string] $ConfigFile = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -136,6 +139,25 @@ $vcInstalled = $false
 if (Test-Path $vcKey) { $vcInstalled = ((Get-ItemProperty $vcKey -ErrorAction SilentlyContinue).Installed -eq 1) }
 Write-Host "  host VC++ x64 installed = $vcInstalled (runner image ships it; customer gets it via installer hook)"
 
+# ------------------------------------------------------- customer config deploy
+$dataDir = Join-Path $env:APPDATA "Inbound Surveillance"
+if ($ConfigFile -and (Test-Path $ConfigFile)) {
+    Write-Step "Deploy customer config"
+    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+    $dest = Join-Path $dataDir "config.yaml"
+    Copy-Item $ConfigFile $dest -Force
+    Assert-That "customer config deployed to %APPDATA%" (Test-Path $dest) $dest
+
+    # Reject workplace_type values the app would silently coerce to "garage".
+    $rawCfg = Get-Content $dest -Raw
+    $wp = $null
+    if ($rawCfg -match '(?m)^\s*workplace_type:\s*(\S+)') { $wp = $Matches[1].Trim().Trim('"').Trim("'").ToLower() }
+    Assert-That "config workplace_type is a valid id (garage|massage)" ($wp -in @("garage","massage")) "workplace_type='$wp'"
+} else {
+    Write-Step "Deploy customer config"
+    Write-Host "  no -ConfigFile supplied; testing the bundled default config"
+}
+
 # ---------------------------------------------------------------- engine boot
 Write-Step "Engine boot (no camera attached - must still serve HTTP)"
 $engineOut = Join-Path $workDir "engine.out.log"
@@ -209,6 +231,44 @@ if ($pub) {
         Assert-That "public-config is valid JSON" $true ("keys=" + (($j.PSObject.Properties.Name) -join ","))
     } catch {
         Assert-That "public-config is valid JSON" $false $_.Exception.Message
+    }
+}
+
+# The deployed customer config must actually be in force on the live engine.
+if ($ConfigFile -and (Test-Path $ConfigFile)) {
+    $apiCfg = Invoke-Check "http://127.0.0.1:8765/api/config"
+    if ($null -ne $apiCfg -and $apiCfg.StatusCode -eq 200) {
+        $live = $apiCfg.Content | ConvertFrom-Json
+
+        Assert-That "engine honours configured workplace_type" `
+            ("$($live.workplace_type)" -eq $wp) `
+            ("live='$($live.workplace_type)' expected='$wp'")
+
+        # massage must yield massage zones, not the garage fallback set
+        $expectedZones = if ($wp -eq "massage") { @("treatment_room","reception") } else { @("parking","waiting") }
+        $liveKinds = @()
+        if ($live.PSObject.Properties.Name -contains "zone_kinds") { $liveKinds = @($live.zone_kinds) }
+        if ($liveKinds.Count -gt 0) {
+            $ok = $true
+            foreach ($z in $expectedZones) { if ($liveKinds -notcontains $z) { $ok = $false } }
+            Assert-That "workplace '$wp' produced the right zone kinds" $ok ("live=" + ($liveKinds -join ","))
+        }
+
+        Assert-That "engine honours pose_engine" ("$($live.pose_engine)" -eq "yolo") "live='$($live.pose_engine)'"
+
+        if ($live.PSObject.Properties.Name -contains "enable_face_id") {
+            Assert-That "engine honours enable_face_id=false" ($live.enable_face_id -eq $false) "live='$($live.enable_face_id)'"
+        }
+        if ($live.PSObject.Properties.Name -contains "store_customer_avatars") {
+            Assert-That "engine honours store_customer_avatars=false" ($live.store_customer_avatars -eq $false) "live='$($live.store_customer_avatars)'"
+        }
+
+        # Belt-and-braces: no customer face data may have been written.
+        $facesDir = Join-Path $dataDir "faces"
+        $faceFiles = @(Get-ChildItem $facesDir -Recurse -File -ErrorAction SilentlyContinue)
+        Assert-That "no customer face images written to disk" ($faceFiles.Count -eq 0) "$($faceFiles.Count) file(s) in $facesDir"
+    } else {
+        Assert-That "GET /api/config returns 200" $false $(if ($apiCfg) { "status=$($apiCfg.StatusCode)" } else { "no response" })
     }
 }
 

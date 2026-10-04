@@ -127,7 +127,12 @@ jobs:
           INSTALLER: ${{ steps.locate.outputs.path }}
           VERSION: ${{ steps.locate.outputs.version }}
         run: |
-          ./scripts/windows-smoke-test.ps1 -Installer $env:INSTALLER -ExpectedVersion $env:VERSION
+          # Deploy the real customer config so the test exercises the exact
+          # settings the customer ships with, not just the bundled default.
+          ./scripts/windows-smoke-test.ps1 `
+            -Installer $env:INSTALLER `
+            -ExpectedVersion $env:VERSION `
+            -ConfigFile "edge/config.champei.yaml"
 
       - name: Upload smoke test diagnostics
         if: always()
