@@ -370,8 +370,13 @@ if ($appProc) {
     # engine IT spawned has come up (src-tauri/src/lib.rs). That is a real
     # end-to-end desktop->engine handshake, not just a live process.
     $guiLog = Join-Path $env:APPDATA "Inbound Surveillance\logs\startup.log"
-    if (Test-Path $guiLog) {
-        $tail = (Get-Content $guiLog -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
+    $portableLog = Join-Path $installDir "inbound-surveillance.log"
+    $blobs = @()
+    foreach ($lp in @($guiLog, $portableLog)) {
+        if (Test-Path $lp) { $blobs += (Get-Content $lp -Raw -ErrorAction SilentlyContinue) }
+    }
+    if ($blobs.Count -gt 0) {
+        $tail = $blobs -join "`n"
         $ready  = $tail -match "Camera engine successfully reported ready on port"
         $failed = $tail -match "Camera engine failed:"
         Assert-That "GUI reported its engine ready (desktop handshake)" $ready `
@@ -379,11 +384,11 @@ if ($appProc) {
                 ([regex]::Match($tail, "Camera engine successfully reported ready on port \d+")).Value
             } elseif ($failed) {
                 "GUI logged an engine FAILURE: " + ([regex]::Match($tail, "Camera engine failed: [^\r\n]*")).Value
-            } else { "no BOOT ready/failed line from the shell" })
+            } else { "no BOOT ready/failed line in " + $blobs.Count + " log file(s), " + $tail.Length + " bytes" })
         Assert-That "GUI logged no engine failure" (-not $failed) `
             $(if ($failed) { ([regex]::Match($tail, "Camera engine failed: [^\r\n]*")).Value } else { "" })
     } else {
-        Assert-That "startup.log exists for GUI boot assertions" $false $guiLog
+        Assert-That "startup.log exists for GUI boot assertions" $false "no log at $guiLog or $portableLog"
     }
 
     # The shell must spawn the engine sidecar as its own child process.
@@ -441,6 +446,18 @@ if ($appProc) {
 
 # ---------------------------------------------------------------- collect logs
 Write-Step "Diagnostics"
+# Copy the shared diagnostics logs out so a failure can be investigated
+# without re-running. Rust writes them with .truncate(true) at startup and
+# the Python engine appends, so both halves live in the same file.
+foreach ($src in @(
+        (Join-Path $env:APPDATA "Inbound Surveillance\logs\startup.log"),
+        (Join-Path $installDir "inbound-surveillance.log"))) {
+    if (Test-Path $src) {
+        $tag = if ($src -like "*inbound-surveillance.log") { "portable-inbound-surveillance.log" } else { "appdata-startup.log" }
+        Copy-Item $src (Join-Path $workDir $tag) -Force -ErrorAction SilentlyContinue
+        Write-Host "  captured $tag ($((Get-Item $src).Length) bytes)"
+    }
+}
 $dataDir = Join-Path $env:APPDATA "Inbound Surveillance"
 if (Test-Path $dataDir) {
     Write-Host "  data dir contents:"
