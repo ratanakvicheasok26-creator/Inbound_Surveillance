@@ -19,13 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: "GitHub Actions run id of the Build Windows Desktop App run to test (blank = latest successful)"
+        description: "Run id of the Build Windows Desktop App run to test (blank = latest successful)"
         required: false
         default: ""
       expected_version:
-        description: "Version string expected in the installer filename and boot banner"
+        description: "Expected version (blank = read from the installer filename)"
         required: false
-        default: "0.1.5"
+        default: ""
 
 permissions:
   contents: read
@@ -40,79 +40,92 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Resolve build run to test
+      - name: Resolve which build to test
         id: resolve
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           INPUT_RUN_ID: ${{ inputs.build_run_id }}
-          INPUT_VERSION: ${{ inputs.expected_version }}
         run: |
+          $ErrorActionPreference = "Stop"
           $repo = "$env:GITHUB_REPOSITORY"
+
           if ([string]::IsNullOrWhiteSpace($env:INPUT_RUN_ID)) {
-            $run = gh run list -R $repo --workflow "build-windows.yml" --status success --limit 1 `
-                    --json databaseId,headSha,displayTitle | ConvertFrom-Json | Select-Object -First 1
+            $runs = gh run list -R $repo --workflow "build-windows.yml" --status success --limit 1 `
+                     --json databaseId,displayTitle,headBranch | ConvertFrom-Json
+            $run = $runs | Select-Object -First 1
             if (-not $run) { throw "No successful build-windows.yml run found." }
-            $runId = $run.databaseId
-            Write-Host "Using latest successful build run: $runId ($($run.displayTitle))"
+            $runId = "$($run.databaseId)"
+            Write-Host "Latest successful build run: $runId on '$($run.headBranch)' - $($run.displayTitle)"
           } else {
             $runId = $env:INPUT_RUN_ID
-            Write-Host "Using requested build run: $runId"
+            Write-Host "Requested build run: $runId"
           }
 
-          # Find the NSIS setup.exe artifact produced by that run.
           $json = gh api "repos/$repo/actions/runs/$runId/artifacts" | ConvertFrom-Json
-          $artifact = $json.artifacts | Where-Object { $_.name -eq "inbound-surveillance-windows-installer" } | Select-Object -First 1
-          if (-not $artifact) { throw "Artifact 'inbound-surveillance-windows-installer' not found on run $runId" }
+          $artifact = $json.artifacts |
+                      Where-Object { $_.name -eq "inbound-surveillance-windows-installer" } |
+                      Select-Object -First 1
+          if (-not $artifact) { throw "Artifact not found on run $runId" }
 
-          "run_id=$runId"        >> $env:GITHUB_OUTPUT
-          "artifact_id=$($artifact.id)" >> $env:GITHUB_OUTPUT
-          "size=$($artifact.size_in_bytes)" >> $env:GITHUB_OUTPUT
-          "version=$env:INPUT_VERSION"  >> $env:GITHUB_OUTPUT
-          Write-Host "Artifact id $($artifact.id), $([math]::Round($artifact.size_in_bytes/1MB,1)) MB"
+          "run_id=$runId"              >> $env:GITHUB_OUTPUT
+          "artifact_name=$($artifact.name)" >> $env:GITHUB_OUTPUT
+          Write-Host ("Artifact: {0} (id {1}, {2} MB)" -f $artifact.name, $artifact.id, [math]::Round($artifact.size_in_bytes/1MB,1))
 
-      - name: Download installer artifact
+      - name: Download installer bundle
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.resolve.outputs.run_id }}
-          ARTIFACT_ID: ${{ steps.resolve.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.resolve.outputs.artifact_name }}
         run: |
-          $zip = "$env:RUNNER_TEMP\installer.zip"
-          gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:ARTIFACT_ID/zip" > $zip
-          if (-not (Test-Path $zip)) { throw "artifact download produced no file" }
-          Write-Host "downloaded $((Get-Item $zip).Length) bytes"
-          $dest = "$env:RUNNER_TEMP\artifact"
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          Get-ChildItem -Recurse $dest | ForEach-Object { Write-Host "  $($_.FullName)" }
+          $ErrorActionPreference = "Stop"
+          $dest = Join-Path $env:RUNNER_TEMP "artifact"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # gh run download writes files itself - never pipe a binary zip
+          # through PowerShell redirection, which corrupts it.
+          gh run download $env:RUN_ID -R "$env:GITHUB_REPOSITORY" `
+             --name $env:ARTIFACT_NAME --dir $dest
+          Get-ChildItem -Recurse $dest -File | ForEach-Object {
+            Write-Host ("  {0}  ({1} MB)" -f $_.FullName.Replace($dest,"."), [math]::Round($_.Length/1MB,1))
+          }
 
-      - name: Locate NSIS setup executable
+      - name: Locate NSIS setup executable and read its version
         id: locate
         shell: pwsh
-        run: |
-          $setup = Get-ChildItem -Path "$env:RUNNER_TEMP\artifact" -Recurse -Filter "*_x64-setup.exe" |
-                  Select-Object -First 1
-          if (-not $setup) { throw "No *_x64-setup.exe inside the artifact bundle" }
-          Write-Host "Installer: $($setup.FullName) ($($setup.Length) bytes)"
-          "path=$($setup.FullName)" >> $env:GITHUB_OUTPUT
-          "name=$($setup.Name)"     >> $env:GITHUB_OUTPUT
-
-      - name: Assert installer filename matches expected version
-        shell: pwsh
         env:
-          NAME: ${{ steps.locate.outputs.name }}
-          VERSION: ${{ steps.resolve.outputs.version }}
+          INPUT_VERSION: ${{ inputs.expected_version }}
         run: |
-          if ($env:NAME -notlike "*_$($env:VERSION)_x64-setup.exe") {
-            Write-Host "::warning::Installer is '$($env:NAME)' but expected version '$($env:VERSION)'"
-            Write-Host "::warning::Continuing - the runtime build-banner check is the authoritative one."
-          } else {
-            Write-Host "Installer filename matches version $($env:VERSION)"
+          $ErrorActionPreference = "Stop"
+          $setup = Get-ChildItem -Path "$env:RUNNER_TEMP\artifact" -Recurse -Filter "*_x64-setup.exe" |
+                   Select-Object -First 1
+          if (-not $setup) { throw "No *_x64-setup.exe inside the downloaded artifact" }
+
+          Write-Host "Installer: $($setup.Name) ($([math]::Round($setup.Length/1MB,1)) MB)"
+
+          # "Inbound Surveillance_0.1.5_x64-setup.exe" -> 0.1.5
+          $parsed = ""
+          if ($setup.Name -match '_([0-9]+\.[0-9]+\.[0-9]+)_x64-setup\.exe$') { $parsed = $Matches[1] }
+
+          $expected = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($expected)) { $expected = $parsed }
+
+          if ([string]::IsNullOrWhiteSpace($expected)) {
+            throw "Could not determine expected version (input='$($env:INPUT_VERSION)', parsed='$parsed')"
           }
+          if ($parsed -and $parsed -ne $expected) {
+            Write-Host "::warning::Filename says $parsed but expecting $expected"
+          }
+
+          "path=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+          "version=$expected"     >> $env:GITHUB_OUTPUT
+          Write-Host "Expected build version: $expected"
 
       - name: Run install + launch smoke test
         shell: pwsh
         env:
           INSTALLER: ${{ steps.locate.outputs.path }}
-          VERSION: ${{ steps.resolve.outputs.version }}
+          VERSION: ${{ steps.locate.outputs.version }}
         run: |
           ./scripts/windows-smoke-test.ps1 -Installer $env:INSTALLER -ExpectedVersion $env:VERSION
 
