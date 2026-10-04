@@ -253,17 +253,41 @@ if ($appProc) {
     }
 
     # The shell must spawn the engine sidecar as its own child process.
-    # Assert the parent PID so a stray engine cannot make this pass.
+    # PyInstaller one-file binaries run as a bootloader that then execs the
+    # real interpreter as a second process of the same name, so the process
+    # holding the port is usually a grandchild of the GUI, not a direct child.
     $kids = @(Get-CimInstance Win32_Process -Filter "Name='inbound-engine.exe'" -ErrorAction SilentlyContinue)
     $mine = @($kids | Where-Object { $_.ParentProcessId -eq $appProc.Id })
     Assert-That "GUI spawned the engine as its child process" ($mine.Count -gt 0) `
         $(if ($mine.Count -gt 0) { "child pid=" + (($mine.ProcessId) -join ",") + " parent=" + $appProc.Id } else { "found $($kids.Count) engine(s) but none parented by pid $($appProc.Id)" })
 
-    # and the port must be held by that child
+    # Walk the parent chain so a PyInstaller bootloader->child pair still counts.
+    function Test-DescendantOf {
+        param([int] $Pid, [int] $AncestorPid)
+        $seen = 0
+        $cur = $Pid
+        while ($cur -gt 0 -and $seen -lt 8) {
+            if ($cur -eq $AncestorPid) { return $true }
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction SilentlyContinue
+            if (-not $proc) { return $false }
+            $cur = [int]$proc.ParentProcessId
+            $seen++
+        }
+        return $false
+    }
+
+    # The port must be held by an engine that descends from the GUI process.
     $listen = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
-    $listenOk = $listen.Count -gt 0 -and @($listen | Where-Object { $mine.ProcessId -contains $_.OwningProcess }).Count -gt 0
-    Assert-That "GUI-spawned engine listening on 127.0.0.1:8765" $listenOk `
-        $(if ($listen.Count -gt 0) { "listener pid=" + (($listen.OwningProcess) -join ",") + " child=" + (($mine.ProcessId) -join ",") } else { "no listener" })
+    $attributed = @($listen | Where-Object {
+        $owner = [int]$_.OwningProcess
+        ($kids.ProcessId -contains $owner) -and (Test-DescendantOf -Pid $owner -AncestorPid $appProc.Id)
+    })
+    Assert-That "port 8765 held by an engine descended from the GUI" ($attributed.Count -gt 0) `
+        $(if ($listen.Count -gt 0) {
+            "listener pid=" + (($listen.OwningProcess) -join ",") +
+            "; engine pids=" + (($kids.ProcessId) -join ",") +
+            "; gui pid=" + $appProc.Id
+        } else { "no listener" })
 
     # End-to-end: the engine the GUI started must actually answer HTTP.
     $guiRoot = Invoke-Check "http://127.0.0.1:8765/"
