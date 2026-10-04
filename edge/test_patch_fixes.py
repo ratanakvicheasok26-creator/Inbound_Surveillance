@@ -117,7 +117,7 @@ class TestFrozenPathSplit(unittest.TestCase):
         self.assertEqual(VIDEOS_DIR, DATA_DIR / "videos")
         self.assertEqual(DATA_DIR, data_dir())
         self.assertEqual(ROOT, resource_dir())
-        self.assertEqual(INBOUND_APP_VERSION, "0.1.3")
+        self.assertEqual(INBOUND_APP_VERSION, "0.1.5")
         engine = init_global_engine()
         self.assertEqual(engine.ai_auditor.save_crops_dir, DATA_DIR / "proofs" / "ai_audits")
 
