@@ -219,6 +219,18 @@ Assert-That "engine survived with no camera attached" $stillAlive ""
 
 # ---------------------------------------------------------------- GUI launch
 Write-Step "Tauri GUI launch + soak"
+
+# The manual engine from the previous step is still running. It would
+# satisfy the sidecar-spawn and port checks below on its own, so stop it
+# and confirm the port is genuinely free first.
+Get-Process -Name "inbound-engine" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 4
+$preListen = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
+Assert-That "port 8765 free before GUI launch" ($null -eq $preListen) ""
+$preKids = Get-CimInstance Win32_Process -Filter "Name='inbound-engine.exe'" -ErrorAction SilentlyContinue
+Assert-That "no engine running before GUI launch" ($null -eq $preKids) ""
+
 $appProc = $null
 try {
     $appProc = Start-Process -FilePath $appExe -PassThru -ErrorAction Stop
@@ -240,13 +252,24 @@ if ($appProc) {
         Assert-That "GUI created a top-level window" ($win.MainWindowHandle -ne 0) "title=$($win.MainWindowTitle)"
     }
 
-    # the shell must spawn the engine sidecar as a child process
-    $kids = Get-CimInstance Win32_Process -Filter "Name='inbound-engine.exe'" -ErrorAction SilentlyContinue
-    Assert-That "GUI spawned the engine sidecar" ($null -ne $kids -and @($kids).Count -gt 0) $(if ($kids) { "count=" + @($kids).Count } else { "none found" })
+    # The shell must spawn the engine sidecar as its own child process.
+    # Assert the parent PID so a stray engine cannot make this pass.
+    $kids = @(Get-CimInstance Win32_Process -Filter "Name='inbound-engine.exe'" -ErrorAction SilentlyContinue)
+    $mine = @($kids | Where-Object { $_.ParentProcessId -eq $appProc.Id })
+    Assert-That "GUI spawned the engine as its child process" ($mine.Count -gt 0) `
+        $(if ($mine.Count -gt 0) { "child pid=" + (($mine.ProcessId) -join ",") + " parent=" + $appProc.Id } else { "found $($kids.Count) engine(s) but none parented by pid $($appProc.Id)" })
 
-    # and something must be listening on 8765
-    $listen = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
-    Assert-That "engine listening on 127.0.0.1:8765" ($null -ne $listen) $(if ($listen) { "pid=" + ($listen.OwningProcess -join ",") } else { "no listener" })
+    # and the port must be held by that child
+    $listen = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
+    $listenOk = $listen.Count -gt 0 -and @($listen | Where-Object { $mine.ProcessId -contains $_.OwningProcess }).Count -gt 0
+    Assert-That "GUI-spawned engine listening on 127.0.0.1:8765" $listenOk `
+        $(if ($listen.Count -gt 0) { "listener pid=" + (($listen.OwningProcess) -join ",") + " child=" + (($mine.ProcessId) -join ",") } else { "no listener" })
+
+    # End-to-end: the engine the GUI started must actually answer HTTP.
+    $guiRoot = Invoke-Check "http://127.0.0.1:8765/"
+    Assert-That "GUI-spawned engine serves the dashboard" `
+        ($null -ne $guiRoot -and $guiRoot.StatusCode -eq 200 -and $guiRoot.Content -match "<title>Inbound Surveillance</title>") `
+        $(if ($guiRoot) { "status=" + $guiRoot.StatusCode + " bytes=" + $guiRoot.RawContentLength } else { "no response" })
 }
 
 # ---------------------------------------------------------------- collect logs
