@@ -16,6 +16,8 @@ on:
     paths:
       - "scripts/windows-smoke-test.ps1"
       - ".github/workflows/windows-smoke-test.yml"
+      # The test deploys and asserts this file, so config edits must re-run it.
+      - "edge/config.champei.yaml"
   workflow_dispatch:
     inputs:
       build_run_id:
