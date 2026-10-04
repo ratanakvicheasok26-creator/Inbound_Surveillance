@@ -332,6 +332,60 @@ if ($appProc) {
         Assert-That "GUI created a top-level window" ($win.MainWindowHandle -ne 0) "title=$($win.MainWindowTitle)"
     }
 
+    # A Tauri window can exist with a title while its WebView2 content failed
+    # to load (blank/error page). Assert the WebView2 browser processes were
+    # actually spawned under the GUI, which only happens once the webview
+    # initialises. Without this, "window exists" proves nothing about the UI.
+    $allProc = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $byParent = @{}
+    foreach ($p in $allProc) {
+        $pp = [int]$p.ParentProcessId
+        if (-not $byParent.ContainsKey($pp)) { $byParent[$pp] = @() }
+        $byParent[$pp] += $p
+    }
+    $descendantIds = New-Object System.Collections.Generic.HashSet[int]
+    $queue = New-Object System.Collections.Generic.Queue[int]
+    $queue.Enqueue($appProc.Id)
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        if ($byParent.ContainsKey($cur)) {
+            foreach ($c in $byParent[$cur]) {
+                $cid = [int]$c.ProcessId
+                if ($descendantIds.Add($cid)) { $queue.Enqueue($cid) }
+            }
+        }
+    }
+    $webview = @($allProc | Where-Object {
+        $descendantIds.Contains([int]$_.ProcessId) -and $_.Name -like "msedgewebview2*"
+    })
+    Assert-That "WebView2 initialized under the GUI (UI actually renders)" ($webview.Count -gt 0) `
+        $(if ($webview.Count -gt 0) {
+            "webview pids=" + (($webview.ProcessId) -join ",")
+        } else {
+            "no msedgewebview2.exe among " + $descendantIds.Count + " descendants - window exists but content may be blank"
+        })
+
+    # The Rust shell and the Python engine share startup.log. The shell logs
+    # "[BOOT] Camera engine successfully reported ready on port <p>" once the
+    # engine IT spawned has come up (src-tauri/src/lib.rs). That is a real
+    # end-to-end desktop->engine handshake, not just a live process.
+    $guiLog = Join-Path $env:APPDATA "Inbound Surveillance\logs\startup.log"
+    if (Test-Path $guiLog) {
+        $tail = (Get-Content $guiLog -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
+        $ready  = $tail -match "Camera engine successfully reported ready on port"
+        $failed = $tail -match "Camera engine failed:"
+        Assert-That "GUI reported its engine ready (desktop handshake)" $ready `
+            $(if ($ready) {
+                ([regex]::Match($tail, "Camera engine successfully reported ready on port \d+")).Value
+            } elseif ($failed) {
+                "GUI logged an engine FAILURE: " + ([regex]::Match($tail, "Camera engine failed: [^\r\n]*")).Value
+            } else { "no BOOT ready/failed line from the shell" })
+        Assert-That "GUI logged no engine failure" (-not $failed) `
+            $(if ($failed) { ([regex]::Match($tail, "Camera engine failed: [^\r\n]*")).Value } else { "" })
+    } else {
+        Assert-That "startup.log exists for GUI boot assertions" $false $guiLog
+    }
+
     # The shell must spawn the engine sidecar as its own child process.
     # PyInstaller one-file binaries run as a bootloader that then execs the
     # real interpreter as a second process of the same name, so the process
