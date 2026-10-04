@@ -287,12 +287,17 @@ if ($getSess) {
 }
 
 # Unauthorized access must be refused, or the token gate is decorative.
-$noAuth = $null
-try { $noAuth = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/config" -UseBasicParsing -TimeoutSec 20 }
-catch { $noAuth = $_.Exception.Response }
-$refused = $false
-if ($noAuth -and $noAuth -is [System.Net.HttpWebResponse]) { $refused = ([int]$noAuth.StatusCode -eq 401) }
-Assert-That "API refuses requests with no bearer token" $refused "expected 401 without a token"
+# PowerShell 7 surfaces the response as HttpResponseMessage, so read the
+# status code from the exception rather than type-testing the object.
+$unauthCode = 0
+try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/config" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+    $unauthCode = [int]$r.StatusCode
+} catch {
+    if ($_.Exception.Response) { $unauthCode = [int]$_.Exception.Response.StatusCode }
+    else { Write-Host "  unexpected error: $($_.Exception.Message)" }
+}
+Assert-That "API refuses requests with no bearer token" ($unauthCode -eq 401) "http=$unauthCode"
 
 # The deployed customer config must actually be in force on the live engine.
 if ($ConfigFile -and (Test-Path $ConfigFile)) {
