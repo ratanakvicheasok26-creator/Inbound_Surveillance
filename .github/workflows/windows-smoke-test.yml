@@ -1,0 +1,117 @@
+name: Windows Smoke Test
+
+# Installs the real shipped NSIS package on a genuine Windows host, boots the
+# Python engine, exercises the HTTP API, launches the Tauri GUI, then uninstalls.
+#
+# Deliberately NOT on camera-detection/main, so pushing this file does not
+# re-trigger the 15-minute production build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "GitHub Actions run id of the Build Windows Desktop App run to test (blank = latest successful)"
+        required: false
+        default: ""
+      expected_version:
+        description: "Version string expected in the installer filename and boot banner"
+        required: false
+        default: "0.1.5"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve build run to test
+        id: resolve
+        shell: pwsh
+        env:
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
+          INPUT_VERSION: ${{ inputs.expected_version }}
+        run: |
+          $repo = "$env:GITHUB_REPOSITORY"
+          if ([string]::IsNullOrWhiteSpace($env:INPUT_RUN_ID)) {
+            $run = gh run list -R $repo --workflow "build-windows.yml" --status success --limit 1 `
+                    --json databaseId,headSha,displayTitle | ConvertFrom-Json | Select-Object -First 1
+            if (-not $run) { throw "No successful build-windows.yml run found." }
+            $runId = $run.databaseId
+            Write-Host "Using latest successful build run: $runId ($($run.displayTitle))"
+          } else {
+            $runId = $env:INPUT_RUN_ID
+            Write-Host "Using requested build run: $runId"
+          }
+
+          # Find the NSIS setup.exe artifact produced by that run.
+          $json = gh api "repos/$repo/actions/runs/$runId/artifacts" | ConvertFrom-Json
+          $artifact = $json.artifacts | Where-Object { $_.name -eq "inbound-surveillance-windows-installer" } | Select-Object -First 1
+          if (-not $artifact) { throw "Artifact 'inbound-surveillance-windows-installer' not found on run $runId" }
+
+          "run_id=$runId"        >> $env:GITHUB_OUTPUT
+          "artifact_id=$($artifact.id)" >> $env:GITHUB_OUTPUT
+          "size=$($artifact.size_in_bytes)" >> $env:GITHUB_OUTPUT
+          "version=$env:INPUT_VERSION"  >> $env:GITHUB_OUTPUT
+          Write-Host "Artifact id $($artifact.id), $([math]::Round($artifact.size_in_bytes/1MB,1)) MB"
+
+      - name: Download installer artifact
+        shell: pwsh
+        env:
+          RUN_ID: ${{ steps.resolve.outputs.run_id }}
+          ARTIFACT_ID: ${{ steps.resolve.outputs.artifact_id }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\installer.zip"
+          gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:ARTIFACT_ID/zip" > $zip
+          if (-not (Test-Path $zip)) { throw "artifact download produced no file" }
+          Write-Host "downloaded $((Get-Item $zip).Length) bytes"
+          $dest = "$env:RUNNER_TEMP\artifact"
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          Get-ChildItem -Recurse $dest | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+      - name: Locate NSIS setup executable
+        id: locate
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem -Path "$env:RUNNER_TEMP\artifact" -Recurse -Filter "*_x64-setup.exe" |
+                  Select-Object -First 1
+          if (-not $setup) { throw "No *_x64-setup.exe inside the artifact bundle" }
+          Write-Host "Installer: $($setup.FullName) ($($setup.Length) bytes)"
+          "path=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($setup.Name)"     >> $env:GITHUB_OUTPUT
+
+      - name: Assert installer filename matches expected version
+        shell: pwsh
+        env:
+          NAME: ${{ steps.locate.outputs.name }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          if ($env:NAME -notlike "*_$($env:VERSION)_x64-setup.exe") {
+            Write-Host "::warning::Installer is '$($env:NAME)' but expected version '$($env:VERSION)'"
+            Write-Host "::warning::Continuing - the runtime build-banner check is the authoritative one."
+          } else {
+            Write-Host "Installer filename matches version $($env:VERSION)"
+          }
+
+      - name: Run install + launch smoke test
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.locate.outputs.path }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          ./scripts/windows-smoke-test.ps1 -Installer $env:INSTALLER -ExpectedVersion $env:VERSION
+
+      - name: Upload smoke test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-diagnostics
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn
+          retention-days: 14

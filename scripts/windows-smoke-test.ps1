@@ -1,0 +1,302 @@
+<#
+    Inbound Surveillance - Windows install + launch smoke test.
+
+    Runs on a real Windows host (GitHub Actions windows-latest).
+    Installs the shipped NSIS package silently, boots the Python engine,
+    exercises the HTTP API, launches the Tauri GUI, then uninstalls.
+
+    Every assertion emits a PASS/FAIL line. Exits 1 if any check fails.
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string] $Installer,
+    [string] $ExpectedVersion = "0.1.5",
+    [int]    $EngineBootTimeoutSec = 240,
+    [int]    $GuiSoakSec = 60
+)
+
+$ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
+
+$script:Results = New-Object System.Collections.Generic.List[object]
+$script:Failures = 0
+
+function Write-Step { param([string]$m) Write-Host "`n=== $m ===" -ForegroundColor Cyan }
+
+function Assert-That {
+    param(
+        [Parameter(Mandatory = $true)][string] $Name,
+        [Parameter(Mandatory = $true)][bool]   $Condition,
+        [string] $Detail = ""
+    )
+    if ($Condition) {
+        $script:Results.Add([pscustomobject]@{ Check = $Name; Result = "PASS"; Detail = $Detail })
+        Write-Host ("  [PASS] {0}{1}" -f $Name, $(if ($Detail) { " - $Detail" })) -ForegroundColor Green
+    }
+    else {
+        $script:Failures++
+        $script:Results.Add([pscustomobject]@{ Check = $Name; Result = "FAIL"; Detail = $Detail })
+        Write-Host ("  [FAIL] {0}{1}" -f $Name, $(if ($Detail) { " - $Detail" })) -ForegroundColor Red
+    }
+}
+
+function Get-PeMachine {
+    param([string] $Path)
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        $br = New-Object System.IO.BinaryReader($fs)
+        $fs.Position = 0x3C
+        $peOff = $br.ReadInt32()
+        $fs.Position = $peOff + 4
+        $machine = $br.ReadUInt16()
+        $br.Close(); $fs.Close()
+        switch ($machine) {
+            0x8664 { return "x64" }
+            0x014c { return "x86" }
+            0xAA64 { return "arm64" }
+            default  { return ("0x{0:X}" -f $machine) }
+        }
+    } catch { return "unreadable" }
+}
+
+$artifactDir = Split-Path -Parent $Installer
+$workDir = Join-Path $env:RUNNER_TEMP "smoke"
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+
+$installDir = Join-Path $env:LOCALAPPDATA "Inbound Surveillance"
+$engineExe  = Join-Path $installDir "inbound-engine.exe"
+$appExe     = Join-Path $installDir "inbound-surveillance.exe"
+
+Write-Host "Installer      : $Installer"
+Write-Host "Install target : $installDir"
+Write-Host "Expected ver   : $ExpectedVersion"
+
+# ---------------------------------------------------------------- pre-flight
+Write-Step "Pre-flight"
+Assert-That "installer file exists"        (Test-Path $Installer) $Installer
+Assert-That "installer is a PE executable" ((Get-PeMachine $Installer) -eq "x86" -or (Get-PeMachine $Installer) -eq "x64") ("machine=" + (Get-PeMachine $Installer))
+
+# ---------------------------------------------------------------- uninstall any prior copy
+Write-Step "Clean slate"
+if (Test-Path (Join-Path $installDir "uninstall.exe")) {
+    Write-Host "  running existing uninstaller"
+    Start-Process -FilePath (Join-Path $installDir "uninstall.exe") -ArgumentList "/S" -Wait
+    Start-Sleep -Seconds 8
+}
+if (Test-Path $installDir) {
+    Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+}
+Assert-That "install dir absent before install" (-not (Test-Path $installDir)) $installDir
+
+# ---------------------------------------------------------------- install
+Write-Step "Silent install (/S)"
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+try {
+    $p = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru -Wait -ErrorAction Stop
+    $installExit = $p.ExitCode
+} catch {
+    $installExit = -1
+    Write-Host "  installer threw: $($_.Exception.Message)"
+}
+$sw.Stop()
+Write-Host ("  installer exit={0} elapsed={1}s" -f $installExit, [int]$sw.Elapsed.TotalSeconds)
+Assert-That "installer exited 0" ($installExit -eq 0) "exit=$installExit"
+Assert-That "install dir created" (Test-Path $installDir) $installDir
+
+# NSIS may return before files settle.
+for ($i = 0; $i -lt 30 -and -not (Test-Path $appExe); $i++) { Start-Sleep -Seconds 2 }
+
+# ---------------------------------------------------------------- payload
+Write-Step "Installed payload"
+Assert-That "app shell present"      (Test-Path $appExe)    "inbound-surveillance.exe"
+Assert-That "engine sidecar present" (Test-Path $engineExe) "inbound-engine.exe"
+Assert-That "engine is x64 PE"       ((Get-PeMachine $engineExe) -eq "x64") ("machine=" + (Get-PeMachine $engineExe))
+Assert-That "app shell is x64 PE"    ((Get-PeMachine $appExe) -eq "x64") ("machine=" + (Get-PeMachine $appExe))
+
+$vcRedist = Join-Path $installDir "resources\vc_redist.x64.exe"
+$debugBat = Join-Path $installDir "resources\run-debug.bat"
+Assert-That "VC++ redist bundled" (Test-Path $vcRedist) $(if (Test-Path $vcRedist) { [math]::Round((Get-Item $vcRedist).Length / 1MB, 1).ToString() + " MB" } else { "missing" })
+Assert-That "run-debug.bat shipped" (Test-Path $debugBat) ""
+
+if (Test-Path $appExe) {
+    $vi = (Get-Item $appExe).VersionInfo
+    Write-Host "  app version info: file=$($vi.FileVersion) product=$($vi.ProductVersion)"
+    Assert-That "app shell reports $ExpectedVersion" ($vi.ProductVersion -like "*$ExpectedVersion*") "product=$($vi.ProductVersion)"
+}
+
+# sidecar must be a frozen one-file bundle, not a launcher script
+$engBytes = [System.IO.File]::ReadAllBytes($engineExe)[0..1]
+Assert-That "engine is a compiled binary (MZ header)" ($engBytes[0] -eq 0x4D -and $engBytes[1] -eq 0x5A) ""
+
+# ---------------------------------------------------------------- VC++ runtime
+Write-Step "Visual C++ runtime present on host"
+$vcKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+$vcInstalled = $false
+if (Test-Path $vcKey) { $vcInstalled = ((Get-ItemProperty $vcKey -ErrorAction SilentlyContinue).Installed -eq 1) }
+Write-Host "  host VC++ x64 installed = $vcInstalled (runner image ships it; customer gets it via installer hook)"
+
+# ---------------------------------------------------------------- engine boot
+Write-Step "Engine boot (no camera attached - must still serve HTTP)"
+$engineOut = Join-Path $workDir "engine.out.log"
+$engineErr = Join-Path $workDir "engine.err.log"
+$engineProc = $null
+try {
+    $engineProc = Start-Process -FilePath $engineExe `
+        -ArgumentList "--port", "8765", "--no-browser" `
+        -RedirectStandardOutput $engineOut -RedirectStandardError $engineErr `
+        -PassThru -WindowStyle Hidden -ErrorAction Stop
+} catch {
+    Write-Host "  failed to launch engine: $($_.Exception.Message)"
+}
+Assert-That "engine process launched" ($null -ne $engineProc) $(if ($engineProc) { "pid=$($engineProc.Id)" } else { "no process" })
+
+$readyLine = ""
+$deadline = (Get-Date).AddSeconds($EngineBootTimeoutSec)
+while ((Get-Date) -lt $deadline) {
+    if (Test-Path $engineOut) {
+        $txt = Get-Content $engineOut -Raw -ErrorAction SilentlyContinue
+        if ($txt -and $txt -match "\[INBOUND_SERVER_READY\][^\r\n]*") { $readyLine = $Matches[0]; break }
+    }
+    if ($engineProc -and $engineProc.HasExited) { break }
+    Start-Sleep -Seconds 3
+}
+
+Write-Host "  ---- engine stdout ----"
+if (Test-Path $engineOut) { Get-Content $engineOut | Select-Object -Last 25 | ForEach-Object { Write-Host "  | $_" } }
+Write-Host "  ---- engine stderr ----"
+if (Test-Path $engineErr) { Get-Content $engineErr | Select-Object -Last 25 | ForEach-Object { Write-Host "  ! $_" } }
+
+Assert-That "engine reached INBOUND_SERVER_READY" ([bool]$readyLine) $readyLine
+Assert-That "boot banner reports build $ExpectedVersion" ($readyLine -like "*build=$ExpectedVersion*") $readyLine
+
+$bootBanner = ""
+if (Test-Path (Join-Path $env:APPDATA "Inbound Surveillance\logs\startup.log")) {
+    $bootBanner = (Get-Content (Join-Path $env:APPDATA "Inbound Surveillance\logs\startup.log") -Raw)
+}
+if (-not $bootBanner -and (Test-Path (Join-Path $installDir "inbound-surveillance.log"))) {
+    $bootBanner = (Get-Content (Join-Path $installDir "inbound-surveillance.log") -Raw)
+}
+if ($bootBanner) {
+    $bb = ($bootBanner -split "`n" | Where-Object { $_ -match "INBOUND_BOOT" } | Select-Object -Last 1)
+    Write-Host "  boot banner: $bb"
+    Assert-That "INBOUND_BOOT banner present" ([bool]$bb) $bb
+    Assert-That "banner frozen=1 (running as bundled sidecar)" ($bb -match "frozen=1") ""
+} else {
+    Write-Host "  (no startup.log yet - engine may still be extracting)"
+}
+
+# ---------------------------------------------------------------- HTTP API
+Write-Step "HTTP API"
+function Invoke-Check {
+    param([string]$Url)
+    try { return Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30 }
+    catch { Write-Host "  request error: $($_.Exception.Message)"; return $null }
+}
+
+$root = Invoke-Check "http://127.0.0.1:8765/"
+Assert-That "GET / returns 200" ($null -ne $root -and $root.StatusCode -eq 200) $(if ($root) { "status=$($root.StatusCode)" } else { "no response" })
+if ($root) {
+    Assert-That "GET / serves the dashboard HTML" ($root.Content -match "<title>Inbound Surveillance</title>") ("bytes=" + $root.RawContentLength)
+}
+
+$pub = Invoke-Check "http://127.0.0.1:8765/api/public-config"
+Assert-That "GET /api/public-config returns 200" ($null -ne $pub -and $pub.StatusCode -eq 200) $(if ($pub) { "status=$($pub.StatusCode)" } else { "no response" })
+if ($pub) {
+    try {
+        $j = $pub.Content | ConvertFrom-Json
+        $hasUrl = [bool]($j.PSObject.Properties.Name -contains "supabase_url" -or $j.PSObject.Properties.Name -contains "url")
+        Assert-That "public-config is valid JSON" $true ("keys=" + (($j.PSObject.Properties.Name) -join ","))
+    } catch {
+        Assert-That "public-config is valid JSON" $false $_.Exception.Message
+    }
+}
+
+# no-camera must not be fatal
+$stillAlive = $false
+if ($engineProc) { $engineProc.Refresh(); $stillAlive = -not $engineProc.HasExited }
+Assert-That "engine survived with no camera attached" $stillAlive ""
+
+# ---------------------------------------------------------------- GUI launch
+Write-Step "Tauri GUI launch + soak"
+$appProc = $null
+try {
+    $appProc = Start-Process -FilePath $appExe -PassThru -ErrorAction Stop
+} catch {
+    Write-Host "  failed to launch GUI: $($_.Exception.Message)"
+}
+Assert-That "GUI process launched" ($null -ne $appProc) $(if ($appProc) { "pid=$($appProc.Id)" } else { "no process" })
+
+if ($appProc) {
+    Write-Host "  soaking ${GuiSoakSec}s (WebView2 init + sidecar spawn + window render)"
+    Start-Sleep -Seconds $GuiSoakSec
+    $appProc.Refresh()
+    Assert-That "GUI still alive after soak (no crash)" (-not $appProc.HasExited) ""
+    if ($appProc.HasExited) { Write-Host "  GUI exit code = $($appProc.ExitCode)" }
+
+    $win = Get-Process -Id $appProc.Id -ErrorAction SilentlyContinue
+    if ($win) {
+        Write-Host "  GUI MainWindowHandle=$($win.MainWindowHandle)  MainWindowTitle='$($win.MainWindowTitle)'"
+        Assert-That "GUI created a top-level window" ($win.MainWindowHandle -ne 0) "title=$($win.MainWindowTitle)"
+    }
+
+    # the shell must spawn the engine sidecar as a child process
+    $kids = Get-CimInstance Win32_Process -Filter "Name='inbound-engine.exe'" -ErrorAction SilentlyContinue
+    Assert-That "GUI spawned the engine sidecar" ($null -ne $kids -and @($kids).Count -gt 0) $(if ($kids) { "count=" + @($kids).Count } else { "none found" })
+
+    # and something must be listening on 8765
+    $listen = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
+    Assert-That "engine listening on 127.0.0.1:8765" ($null -ne $listen) $(if ($listen) { "pid=" + ($listen.OwningProcess -join ",") } else { "no listener" })
+}
+
+# ---------------------------------------------------------------- collect logs
+Write-Step "Diagnostics"
+$dataDir = Join-Path $env:APPDATA "Inbound Surveillance"
+if (Test-Path $dataDir) {
+    Write-Host "  data dir contents:"
+    Get-ChildItem $dataDir -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+        Select-Object -First 40 | ForEach-Object { Write-Host "    $($_.FullName.Replace($dataDir,'.')) ($($_.Length)b)" }
+    Assert-That "writable data dir created under %APPDATA%" (Test-Path $dataDir) $dataDir
+    $cfg = Join-Path $dataDir "config.yaml"
+    Write-Host "  config.yaml present = $(Test-Path $cfg)"
+} else {
+    Write-Host "  no data dir yet"
+}
+
+# ---------------------------------------------------------------- teardown
+Write-Step "Teardown"
+foreach ($proc in @($appProc, $engineProc)) {
+    if ($proc) { try { $proc.Refresh(); if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } } catch {} }
+}
+Get-Process -Name "inbound-engine", "inbound-surveillance" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
+Assert-That "all app processes stopped" ($null -eq (Get-Process -Name "inbound-engine", "inbound-surveillance" -ErrorAction SilentlyContinue)) ""
+
+# ---------------------------------------------------------------- uninstall
+Write-Step "Silent uninstall"
+$uninstaller = Join-Path $installDir "uninstall.exe"
+if (Test-Path $uninstaller) {
+    try { Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -ErrorAction Stop } catch { Write-Host "  uninstaller error: $($_.Exception.Message)" }
+    for ($i = 0; $i -lt 30 -and (Test-Path $appExe); $i++) { Start-Sleep -Seconds 2 }
+    Assert-That "uninstaller removed the app shell" (-not (Test-Path $appExe)) ""
+    Assert-That "uninstaller removed the engine"    (-not (Test-Path $engineExe)) ""
+} else {
+    Assert-That "uninstaller present" $false "uninstall.exe not found in $installDir"
+}
+
+# ---------------------------------------------------------------- summary
+Write-Step "SUMMARY"
+$script:Results | Format-Table -AutoSize | Out-String | Write-Host
+$pass = @($script:Results | Where-Object { $_.Result -eq "PASS" }).Count
+$fail = @($script:Results | Where-Object { $_.Result -eq "FAIL" }).Count
+Write-Host ("CHECKS: {0} passed, {1} failed, {2} total" -f $pass, $fail, $script:Results.Count)
+
+$script:Results | Export-Csv -NoTypeInformation -Path (Join-Path $workDir "smoke-results.csv")
+
+if ($fail -gt 0) {
+    Write-Host "SMOKE TEST FAILED" -ForegroundColor Red
+    exit 1
+}
+Write-Host "SMOKE TEST PASSED - $pass/$($script:Results.Count)" -ForegroundColor Green
+exit 0
