@@ -153,6 +153,16 @@ if ($ConfigFile -and (Test-Path $ConfigFile)) {
     $wp = $null
     if ($rawCfg -match '(?m)^\s*workplace_type:\s*(\S+)') { $wp = $Matches[1].Trim().Trim('"').Trim("'").ToLower() }
     Assert-That "config workplace_type is a valid id (garage|massage)" ($wp -in @("garage","massage")) "workplace_type='$wp'"
+
+    # /api/config is behind _authorized(), which reads the bearer token from
+    # session.json and caches it on first use. Seed it before boot so the
+    # endpoint is reachable for the effective-config assertions below.
+    $script:SessionToken = "smoke-test-" + [guid]::NewGuid().ToString("N")
+    $session = @{ session = @{ access_token = $script:SessionToken; user = @{ id = "smoke-test" } } } |
+               ConvertTo-Json -Depth 5
+    Set-Content -Path (Join-Path $dataDir "session.json") -Value $session -Encoding UTF8
+    Assert-That "session token seeded for authenticated endpoints" `
+        (Test-Path (Join-Path $dataDir "session.json")) (Join-Path $dataDir "session.json")
 } else {
     Write-Step "Deploy customer config"
     Write-Host "  no -ConfigFile supplied; testing the bundled default config"
@@ -211,9 +221,19 @@ if ($bootBanner) {
 # ---------------------------------------------------------------- HTTP API
 Write-Step "HTTP API"
 function Invoke-Check {
-    param([string]$Url)
-    try { return Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30 }
-    catch { Write-Host "  request error: $($_.Exception.Message)"; return $null }
+    param([string]$Url, [string]$Token = "")
+    try {
+        $h = @{}
+        if ($Token) { $h["Authorization"] = "Bearer $Token" }
+        if ($h.Count -gt 0) { return Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30 -Headers $h }
+        return Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30
+    }
+    catch {
+        $code = ""
+        if ($_.Exception.Response) { $code = " http=$([int]$_.Exception.Response.StatusCode)" }
+        Write-Host "  request error:$code $($_.Exception.Message)"
+        return $null
+    }
 }
 
 $root = Invoke-Check "http://127.0.0.1:8765/"
@@ -236,7 +256,7 @@ if ($pub) {
 
 # The deployed customer config must actually be in force on the live engine.
 if ($ConfigFile -and (Test-Path $ConfigFile)) {
-    $apiCfg = Invoke-Check "http://127.0.0.1:8765/api/config"
+    $apiCfg = Invoke-Check "http://127.0.0.1:8765/api/config" $script:SessionToken
     if ($null -ne $apiCfg -and $apiCfg.StatusCode -eq 200) {
         $live = $apiCfg.Content | ConvertFrom-Json
 
