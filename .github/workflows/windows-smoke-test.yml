@@ -7,6 +7,15 @@ name: Windows Smoke Test
 # re-trigger the 15-minute production build.
 
 on:
+  # A push trigger is read from the pushed commit, so this works while the
+  # workflow lives on a side branch. workflow_dispatch only becomes available
+  # once the file reaches the default branch (main).
+  push:
+    branches:
+      - windows-smoke-test
+    paths:
+      - "scripts/windows-smoke-test.ps1"
+      - ".github/workflows/windows-smoke-test.yml"
   workflow_dispatch:
     inputs:
       build_run_id:
