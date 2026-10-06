@@ -1277,40 +1277,7 @@ class LiveStreamEngine:
 
         flags = pipeline_runtime_flags(self.cfg)
         if complaint_monitoring_wanted(self.cfg):
-            active_source = str(self.cfg.get("source") or "")
-            active_proto = str(self.cfg.get("protocol") or "")
-            is_video_source = (
-                active_proto == "video"
-                or ingest_kind(active_source, active_proto) == "video"
-                or str(cmp_cfg.get("audio_source_type", "")).lower() == "video"
-            )
-            audio_src_type = "video" if is_video_source and active_source else str(cmp_cfg.get("audio_source_type", "laptop"))
-            try:
-                self.complaint_service = ComplaintMonitoringService(
-                    db_conn=connect(DATA_DIR / "events.db", check_same_thread=False),
-                    telegram_out=self.bot,
-                    get_camera_frame_fn=lambda: self.current_frame_bgr,
-                    audio_source_type=audio_src_type,
-                    video_path=active_source if is_video_source else None,
-                    video_loop=bool(cmp_cfg.get("video_loop", False)),
-                    device_index=cmp_cfg.get("device_index"),
-                    whisper_model=resolve_khmer_stt_model(
-                        str(cmp_cfg.get("stt_model_size") or self.cfg.get("whisper_model") or "sengtha/whisper-base-khmer")
-                    ),
-                    ollama_model=str(cmp_cfg.get("ollama_model") or self.cfg.get("ollama_model") or "qwen2.5:3b"),
-                    ollama_host=str(cmp_cfg.get("ollama_host") or "http://localhost:11434"),
-                    vad_threshold=float(cmp_cfg.get("vad_threshold", 0.35)),
-                    vad_min_speech_duration_ms=int(cmp_cfg.get("vad_min_speech_duration_ms", 400)),
-                    vad_max_speech_duration_s=float(cmp_cfg.get("vad_max_speech_duration_s", 30.0)),
-                    dedup_window_seconds=float(cmp_cfg.get("dedup_window_seconds", 60.0)),
-                    telegram_min_severity=str(cmp_cfg.get("telegram_min_severity", "low")).lower(),
-                    telegram_alert_enabled=bool(cmp_cfg.get("telegram_alert_enabled", True)) and bool(flags.get("telegram", True)),
-                    enabled=True,
-                    data_root=DATA_DIR,
-                )
-            except Exception as exc:
-                print(f"[complaint_service] init failed: {exc}", flush=True)
-                self.complaint_service = None
+            self._init_complaint_service()
 
 
     @property
@@ -2925,8 +2892,47 @@ class LiveStreamEngine:
             path = DATA_DIR / "yolo11n.pt"
         return path
 
-    def _sync_pipeline_models(self) -> None:
+    def _init_complaint_service(self) -> None:
+        cmp_cfg = self.cfg.get("complaint_monitoring") if isinstance(self.cfg.get("complaint_monitoring"), dict) else {}
         from graph.compile import pipeline_runtime_flags
+        flags = pipeline_runtime_flags(self.cfg)
+        active_source = str(self.cfg.get("source") or "")
+        active_proto = str(self.cfg.get("protocol") or "")
+        is_video_source = (
+            active_proto == "video"
+            or ingest_kind(active_source, active_proto) == "video"
+            or str(cmp_cfg.get("audio_source_type", "")).lower() == "video"
+        )
+        audio_src_type = "video" if is_video_source and active_source else str(cmp_cfg.get("audio_source_type", "laptop"))
+        try:
+            self.complaint_service = ComplaintMonitoringService(
+                db_conn=connect(DATA_DIR / "events.db", check_same_thread=False),
+                telegram_out=self.bot,
+                get_camera_frame_fn=lambda: self.current_frame_bgr,
+                audio_source_type=audio_src_type,
+                video_path=active_source if is_video_source else None,
+                video_loop=bool(cmp_cfg.get("video_loop", False)),
+                device_index=cmp_cfg.get("device_index"),
+                whisper_model=resolve_khmer_stt_model(
+                    str(cmp_cfg.get("stt_model_size") or self.cfg.get("whisper_model") or "sengtha/whisper-base-khmer")
+                ),
+                ollama_model=str(cmp_cfg.get("ollama_model") or self.cfg.get("ollama_model") or "qwen2.5:3b"),
+                ollama_host=str(cmp_cfg.get("ollama_host") or "http://localhost:11434"),
+                vad_threshold=float(cmp_cfg.get("vad_threshold", 0.35)),
+                vad_min_speech_duration_ms=int(cmp_cfg.get("vad_min_speech_duration_ms", 400)),
+                vad_max_speech_duration_s=float(cmp_cfg.get("vad_max_speech_duration_s", 30.0)),
+                dedup_window_seconds=float(cmp_cfg.get("dedup_window_seconds", 60.0)),
+                telegram_min_severity=str(cmp_cfg.get("telegram_min_severity", "low")).lower(),
+                telegram_alert_enabled=bool(cmp_cfg.get("telegram_alert_enabled", True)) and bool(flags.get("telegram", True)),
+                enabled=True,
+                data_root=DATA_DIR,
+            )
+        except Exception as exc:
+            print(f"[complaint_service] init failed: {exc}", flush=True)
+            self.complaint_service = None
+
+    def _sync_pipeline_models(self) -> None:
+        from graph.compile import pipeline_runtime_flags, complaint_monitoring_wanted
 
         flags = pipeline_runtime_flags(self.cfg)
         if flags["vehicle_detect"]:
@@ -2940,11 +2946,30 @@ class LiveStreamEngine:
                 except Exception as exc:
                     print(f"[Pipeline] Vehicle YOLO not loaded: {exc}", flush=True)
                     self.vehicle_model = None
-            return
-        if getattr(self, "vehicle_model", None) is not None:
-            print("[Pipeline] Vehicle YOLO unloaded (no VehicleDetect node)", flush=True)
-        self.vehicle_model = None
-        self.cached_vehicles = []
+        else:
+            if getattr(self, "vehicle_model", None) is not None:
+                print("[Pipeline] Vehicle YOLO unloaded (no VehicleDetect node)", flush=True)
+            self.vehicle_model = None
+            self.cached_vehicles = []
+
+        # Synchronize Audio Tracking / Complaint Monitoring Service with Graph
+        audio_wanted = complaint_monitoring_wanted(self.cfg)
+        if audio_wanted:
+            if self.complaint_service is None:
+                self._init_complaint_service()
+            if self.complaint_service is not None and self.is_streaming and not getattr(self.complaint_service, "_is_running", False):
+                try:
+                    self.complaint_service.start()
+                    print("[Pipeline] Audio Tracking / Complaint service started", flush=True)
+                except Exception as exc:
+                    print(f"[Pipeline] Audio Tracking start failed: {exc}", flush=True)
+        else:
+            if self.complaint_service is not None and getattr(self.complaint_service, "_is_running", False):
+                try:
+                    self.complaint_service.stop()
+                    print("[Pipeline] Audio Tracking stopped (no Complaint node in pipeline)", flush=True)
+                except Exception as exc:
+                    print(f"[Pipeline] Audio Tracking stop failed: {exc}", flush=True)
 
     def apply_pipeline(self, graph: Any) -> dict[str, Any]:
         from graph.compile import compile_to_config, validate_graph
